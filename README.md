@@ -1,124 +1,173 @@
-# DevHarbor
+<p align="center">
+  <img src="build/icon.png" width="128" height="128" alt="NeoHub Logo" />
+</p>
 
-[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
-[![Platform: macOS](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon%20%2B%20Intel)-black.svg)](#install)
-[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+<h1 align="center">NeoHub</h1>
 
-**A harbor for your local dev servers.** macOS-first desktop app for managing local Node.js projects. Register your apps once, then start/stop/restart them, switch Node versions per project, edit env vars, watch logs, organize them into folders, and see what's running, all without leaving one window.
+<p align="center"><strong>让本地项目，都有一个统一的入口。</strong></p>
+<p align="center">A home for your local projects.</p>
 
-Think of it like a "Postman for your local dev servers." Everything stays local: no accounts, no cloud, no telemetry.
+<p align="center">
+  在一个 macOS 桌面窗口中，启动应用、查看日志、管理端口，掌握每个项目的运行状态。
+</p>
 
-Website: [www.devharbor.app](https://www.devharbor.app)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue" alt="License: AGPL-3.0-only" /></a>
+  <img src="https://img.shields.io/badge/platform-macOS-black" alt="Platform: macOS" />
+  <img src="https://img.shields.io/badge/Apple_Silicon_%2B_Intel-supported-008f86" alt="Apple Silicon and Intel" />
+  <a href="https://github.com/jainath/devharbor"><img src="https://img.shields.io/badge/fork_of-DevHarbor-64748b" alt="Fork of DevHarbor" /></a>
+</p>
 
-## Highlights
+<p align="center">
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#功能一览">功能一览</a> ·
+  <a href="#从源码运行">从源码运行</a> ·
+  <a href="https://github.com/neotu23/NeoHub/issues">反馈问题</a> ·
+  <a href="#上游与致谢">上游与致谢</a>
+</p>
 
-- **Register once, run forever** - point DevHarbor at a project (or **import a whole folder
-  of repos** at once); it detects the package manager, Node version, scripts, and `.env`
-  files. Monorepos get an offer to create a task per workspace package.
-- **Multi-task apps** - services start in dependency order with readiness signals (port,
-  log regex, exit, delay) and stop gracefully in reverse - whole process tree, no orphans.
-- **The right Node, every time** - per-app version resolution across nvm / fnm / Volta /
-  asdf / system, honoring `.nvmrc` / `engines.node`.
-- **Live in the menubar** - see what's running, start/stop apps, and check ports without
-  opening the window; desktop notifications when something crashes.
-- **Logs that work like a terminal** - xterm rendering with search, a regex filter view,
-  and **⌘⇧F to search across every running app at once**. Crash banners pin the last
-  output and call out port conflicts by name.
-- **Layered env vars** - global → app → task, with `.env` watching and secret values
-  **encrypted at rest** (macOS Keychain). Your settings always win over a repo's `.env`.
-- **Keyboard-first** - ⌘K palette, folders/tags, dashboard with live CPU/memory, per-app
-  auto-start + launch at login, signed/notarized builds with auto-update.
-- **MCP server for coding agents** - opt-in, loopback-only HTTP server that lets an AI coding
-  assistant list, add, start, stop, and inspect your apps *through DevHarbor* instead of
-  spawning `npm run dev` in a shell it then loses track of. See [MCP server](#mcp-server).
+> **Fork 声明**：NeoHub 基于 [Jainath Ponnala](https://github.com/jainath) 的 [DevHarbor](https://github.com/jainath/devharbor) Fork 并进行定制开发，由本仓库独立维护，并非 DevHarbor 官方发行版。感谢上游提供的项目基础。
 
-## MCP server
+![NeoHub 仪表盘：统一查看本地应用的运行状态、CPU、内存、端口与日志入口](docs/images/dashboard.png)
 
-DevHarbor doubles as an MCP server, so a coding agent (Claude Code, Cursor, or anything
-else that speaks MCP) manages your dev servers through DevHarbor instead of running them
-in its own shell. Servers an agent starts this way outlive the agent's session, show up in
-the app like everything else, and get logs, port tracking, readiness checks, and clean
-shutdown for free. The desktop updates live as the agent works.
+## 为什么使用 NeoHub？
 
-22 tools cover the full surface: list, add, update, and remove apps; add and remove tasks;
-start, stop, and restart apps or individual tasks; read and search logs; inspect ports,
-run history, and Node versions; read and set env vars; scan a folder for projects to
-register; and configure readiness probes so the agent can tell "port is open" apart from
-"actually ready to serve".
+当你同时维护几个 Next.js、React 或 Node.js 项目，终端窗口很快就会堆满：哪个服务还在运行？哪个项目占用了端口？报错日志又在哪个窗口？
 
-Monorepos are first-class: `add_app` with `workspaceTasks: true` registers the repo once
-and creates one task per workspace package (pnpm, yarn, or npm workspaces), each running
-its own dev script from its own directory. The agent can then start or stop individual
-services, wire "API before web" ordering with `add_task` dependencies, give each service
-its own health probe, and see which detected port belongs to which service.
+NeoHub 把这些日常操作集中到一个桌面应用中。导入项目后，可以直接启动、停止和重启服务，点击端口打开页面，也可以随时查看日志、资源占用与任务状态。
 
-It is off by default. Turn it on under Settings → MCP server, copy the client config it
-shows, and drop that into your agent's MCP settings:
+项目仍在各自的目录中运行，使用各自的依赖和 Node.js 环境。NeoHub 负责统一管理进程；各个服务的内存占用仍取决于项目本身与启动方式。
+
+## 功能一览
+
+### 一个窗口，看清所有应用
+
+仪表盘汇总运行中的应用数量、CPU、内存和占用端口。每张应用卡片显示任务状态、资源用量和访问地址，支持直接停止服务或进入日志。
+
+### 导入一次，随时启动
+
+选择项目目录，自动识别包管理器、Node.js 版本要求、`package.json` 脚本与 `.env` 文件。支持扫描文件夹批量导入项目，也支持为 Monorepo 的工作区创建多个任务。
+
+### 多个任务，按顺序运行
+
+一个应用可以包含前端、API 等多个任务。配置任务依赖和就绪检查后，按依赖顺序启动，停止时按反向顺序清理进程。既可以控制整个应用，也可以单独操作某个任务。
+
+### 日志、端口和运行环境，就在手边
+
+- **实时日志**：终端式输出、搜索、正则筛选，以及跨应用日志搜索；任务崩溃时保留末尾输出，方便排查。
+- **端口检测**：显示服务监听的端口，点击即可在浏览器打开。
+- **Node.js 版本**：按项目选择版本，识别 nvm、fnm、Volta、asdf 和系统安装，读取 `.nvmrc`、`.node-version` 与 `engines.node`。
+- **环境变量**：支持全局、应用和任务三层配置，以及 `.env` 文件变更提示；敏感值通过 Electron `safeStorage` 加密存储（可用时）。
+- **项目组织**：使用文件夹、标签和筛选管理应用，通过命令面板快速切换和执行操作。
+- **界面偏好**：支持简体中文与英文，以及浅色、深色和跟随系统主题。
+
+### 也可以交给 AI 编程助手
+
+内置可选的 MCP 服务，让支持 MCP 的编程助手通过 NeoHub 管理项目、启动任务、读取日志和检查端口。服务默认关闭，在设置中启用；仅监听本机回环地址，默认需要 Bearer Token。
+
+## 快速开始
+
+**1. 获取应用**
+
+前往本仓库的 [Releases](https://github.com/neotu23/NeoHub/releases) 查看已发布构建。若提供安装包，Apple Silicon 选择 `arm64`，Intel 选择 `x64`；若暂无构建，可按下方说明从源码运行。
+
+**2. 添加项目**
+
+打开 NeoHub，点击侧边栏的 **＋**，选择包含 `package.json` 的项目目录，确认识别出的 Node.js、包管理器与运行脚本。运行前，请先在项目目录安装好该项目的依赖。
+
+**3. 启动并访问**
+
+点击启动，在仪表盘或项目详情中查看状态。服务开始监听后，点击端口即可打开页面；遇到启动失败时，进入日志查看具体原因。
+
+如需运行生产服务，请先按项目自身要求完成构建，再选择相应的 `start` 脚本。
+
+## 从源码运行
+
+需要 **macOS、Node.js 22+、pnpm 和 Xcode Command Line Tools**。仓库的 `.nvmrc` 使用 Node.js 22。
+
+```bash
+git clone https://github.com/neotu23/NeoHub.git
+cd NeoHub
+pnpm install
+pnpm dev
+```
+
+`pnpm install` 会为 Electron 重建 SQLite、PTY 等原生依赖。若遇到原生模块 ABI 不匹配，可执行 `pnpm rebuild`。更多环境说明见 [开发指南](CONTRIBUTING.md)。
+
+### 构建 macOS 应用
+
+```bash
+# Apple Silicon
+pnpm pack:mac
+
+# Apple Silicon 与 Intel，分别生成构建
+pnpm pack:mac:release
+
+# 通用构建
+pnpm pack:mac:universal
+```
+
+构建产物输出到 `dist/`。签名和公证需要另行配置 Apple 开发者凭据，具体见 [发布说明](specs/06-release.md)。
+
+### 开发检查
+
+```bash
+pnpm typecheck
+pnpm lint
+pnpm test
+pnpm build
+```
+
+## 连接 MCP
+
+在 **设置 → MCP 服务** 中启用服务，复制界面生成的客户端配置。默认 HTTP 配置示例如下；端口和 Token 以设置页为准：
 
 ```json
 {
   "mcpServers": {
-    "devharbor": {
+    "neohub": {
       "type": "http",
       "url": "http://127.0.0.1:6872/mcp",
-      "headers": { "Authorization": "Bearer <token from Settings>" }
+      "headers": {
+        "Authorization": "Bearer <从 NeoHub 设置中复制的 Token>"
+      }
     }
   }
 }
 ```
 
-Security posture: binds `127.0.0.1` only (not configurable), requires a bearer token by
-default, validates `Host`/`Origin` on every request, masks secret env values in responses,
-and redacts them from log output. Optional HTTPS with a locally generated certificate for
-clients that want it. Design and full tool list in
-[`specs/07-mcp-server.md`](specs/07-mcp-server.md).
+接入后，编程助手可以查询应用、启动或停止任务、读取日志、检查端口和配置就绪检查。完整设计与工具说明见 [MCP 文档](specs/07-mcp-server.md)。
 
-## Install
+## 常用快捷键
 
-macOS (Apple Silicon or Intel). From [**Releases**](https://github.com/jainath/devharbor/releases),
-download `DevHarbor-<version>-arm64.dmg` for Apple Silicon (M-series) or `…-x64.dmg` for Intel,
-open it, and drag DevHarbor to Applications. (Not sure? Apple menu →  About This Mac → "Chip" says
-"Apple" for arm64.)
+| 快捷键 | 操作 |
+| --- | --- |
+| `⌘ K` | 打开命令面板 |
+| `⌘ P` | 聚焦应用筛选 |
+| `⌘ N` | 添加应用 |
+| `⌘ ⇧ N` | 添加文件夹 |
+| `⌘ ,` | 打开设置 |
+| `⌘ Enter` | 在项目详情中启动尚未运行的应用 |
+| `⌘ ⇧ F` | 跨应用搜索日志 |
 
-> Releases are signed with a Developer ID and notarized by Apple, so they open normally - no right-click bypass needed.
+## 技术与文档
 
-## Contributing
+NeoHub 使用 **Electron + React + TypeScript + Vite + Tailwind CSS** 构建，使用 **SQLite** 保存项目配置，通过 **PTY** 管理任务进程，使用 **xterm.js** 展示日志。
 
-Contributions welcome! Start with [CONTRIBUTING.md](CONTRIBUTING.md) - it covers dev setup
-(`pnpm install && pnpm dev`), the spec-driven workflow, and the PR checklist. Please also
-read the [Code of Conduct](CODE_OF_CONDUCT.md). For security issues, see [SECURITY.md](SECURITY.md).
+开发前请阅读 [工作流程](specs/WORKFLOW.md) 与 [当前实现状态](specs/PROGRESS.md)。架构、数据模型和功能说明分别见 [架构设计](specs/01-architecture.md)、[数据模型](specs/02-data-model.md) 和 [功能规格](specs/03-features.md)。部分继承自上游的文档及内部标识仍保留 DevHarbor 名称。
 
-## Status
+欢迎通过 [Issues](https://github.com/neotu23/NeoHub/issues) 提交问题或建议；贡献说明见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题见 [SECURITY.md](SECURITY.md)。
 
-See [`specs/PROGRESS.md`](specs/PROGRESS.md) for the build-status matrix - that file is authoritative.
+## 上游与致谢
 
-The `specs/` folder is the source of truth for this project. See [`specs/WORKFLOW.md`](specs/WORKFLOW.md) for the rules of the road (read-before / update-before-code, step-back review after every change, etc.).
+**NeoHub 的上游项目是 [jainath/devharbor](https://github.com/jainath/devharbor)，原作者为 [Jainath Ponnala](https://github.com/jainath)。**
 
-## Where to start
+本项目继承了 DevHarbor 的本地项目管理、任务编排、日志、环境变量和 MCP 等能力，并在此基础上进行 NeoHub 品牌、中文界面及本地使用体验的定制与修复。上述核心能力来自上游及其贡献者的工作。
 
-1. [`specs/WORKFLOW.md`](specs/WORKFLOW.md) - how we work
-2. [`specs/PROGRESS.md`](specs/PROGRESS.md) - what's actually built right now
-3. [`specs/00-overview.md`](specs/00-overview.md) - problem, goals, non-goals
-4. [`specs/01-architecture.md`](specs/01-architecture.md) - tech stack, process model, IPC
-5. [`specs/02-data-model.md`](specs/02-data-model.md) - SQLite schema and core types (incl. multi-task model)
-6. [`specs/03-features.md`](specs/03-features.md) - every feature, with acceptance criteria
-7. [`specs/04-ui.md`](specs/04-ui.md) - screens, layout, key interactions
-8. [`specs/05-roadmap.md`](specs/05-roadmap.md) - phased delivery plan
-9. [`specs/07-mcp-server.md`](specs/07-mcp-server.md) - the MCP server: tools, transport, security
+NeoHub 使用独立的名称与应用图标，由 [neotu23/NeoHub](https://github.com/neotu23/NeoHub) 维护。DevHarbor 的名称和品牌归属见仓库保留的 [上游商标声明](TRADEMARK.md)。
 
-## Stack (as built)
+## 许可证
 
-Electron 33 + Vite + React 18 + TypeScript · Tailwind 3 (hand-rolled components; theme via semantic CSS variables driven by the **Radix Colors slate scale** - same palette family shadcn/ui, Linear, and Vercel use) · Zustand · better-sqlite3 · `@homebridge/node-pty-prebuilt-multiarch` · `@xterm/xterm` (+ fit, search, webgl) · chokidar · pidusage · `package-manager-detector` · cmdk · react-window + anser · electron-builder + electron-updater · Vitest.
+本项目沿用上游的 **[GNU AGPL-3.0-only](LICENSE)** 许可证，并保留原作者及贡献者的版权声明。
 
-See [`specs/01-architecture.md`](specs/01-architecture.md) for the full rationale and [`specs/PROGRESS.md`](specs/PROGRESS.md) for current build status.
-
-## License
-
-[GNU AGPL-3.0](LICENSE) © 2026 Jainath Ponnala
-
-DevHarbor is free and open source. You may use, study, modify, and share it - but if you
-distribute a modified version, or run a modified version as a network service, you must release
-your source under the same AGPL-3.0 license. See [`LICENSE`](LICENSE) for the full terms.
-
-The **name "DevHarbor" and its logo are trademarks** and are *not* covered by the AGPL - see
-[`TRADEMARK.md`](TRADEMARK.md). Forks are welcome, but please ship them under a different name.
+上游项目版权：© 2026 Jainath Ponnala。
