@@ -14,11 +14,12 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue" alt="License: AGPL-3.0-only" /></a>
   <img src="https://img.shields.io/badge/platform-macOS-black" alt="Platform: macOS" />
-  <img src="https://img.shields.io/badge/Apple_Silicon_%2B_Intel-supported-008f86" alt="Apple Silicon and Intel" />
+  <img src="https://img.shields.io/badge/Apple_Silicon-arm64-008f86" alt="Apple Silicon (arm64)" />
   <a href="https://github.com/jainath/devharbor"><img src="https://img.shields.io/badge/fork_of-DevHarbor-64748b" alt="Fork of DevHarbor" /></a>
 </p>
 
 <p align="center">
+  <a href="#安装macos">安装</a> ·
   <a href="#快速开始">快速开始</a> ·
   <a href="#功能一览">功能一览</a> ·
   <a href="#从源码运行">从源码运行</a> ·
@@ -29,6 +30,26 @@
 > **Fork 声明**：NeoHub 基于 [Jainath Ponnala](https://github.com/jainath) 的 [DevHarbor](https://github.com/jainath/devharbor) Fork 并进行定制开发，由本仓库独立维护，并非 DevHarbor 官方发行版。感谢上游提供的项目基础。
 
 ![NeoHub 仪表盘：统一查看本地应用的运行状态、CPU、内存、端口与日志入口](docs/images/dashboard.png)
+
+## 安装（macOS）
+
+> **当前发布包未经过 Apple Developer ID 签名与公证。** 功能与从源码构建的版本完全一致，只是首次打开时 macOS 会拦截一次，按下面的方式之一放行即可。
+
+1. 从 [Releases](https://github.com/neotu23/NeoHub/releases) 下载 `NeoHub-<版本>-arm64.dmg`。
+2. 打开 dmg，把 **NeoHub** 拖进「应用程序」。
+3. 首次启动若提示无法验证开发者，打开 **系统设置 → 隐私与安全性**，在底部点击 **仍要打开**，再确认一次。
+
+也可以先用命令行清除隔离标记，之后双击即可正常打开：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/NeoHub.app
+```
+
+几点说明：
+
+- 目前只提供 `arm64`（Apple Silicon）构建；Intel Mac 请按[从源码运行](#从源码运行)自行构建。
+- 未签名构建无法使用应用内自动更新（`squirrel.mac` 会校验 Developer ID 签名），升级时请回到 Releases 手动下载新版本。
+- 要做到「双击即开、无任何提示」，需要付费 Apple Developer 账号签发的 Developer ID 证书并通过 Apple 公证；本仓库暂未配置。
 
 ## 为什么使用 NeoHub？
 
@@ -69,7 +90,7 @@ NeoHub 把这些日常操作集中到一个桌面应用中。导入项目后，�
 
 **1. 获取应用**
 
-前往本仓库的 [Releases](https://github.com/neotu23/NeoHub/releases) 查看已发布构建。若提供安装包，Apple Silicon 选择 `arm64`，Intel 选择 `x64`；若暂无构建，可按下方说明从源码运行。
+前往本仓库的 [Releases](https://github.com/neotu23/NeoHub/releases) 下载安装包，安装与首次启动的放行步骤见[安装（macOS）](#安装macos)。也可以从源码运行（见下节）。
 
 **2. 添加项目**
 
