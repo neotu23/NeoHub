@@ -15,6 +15,11 @@ import { GlobalLogSearch } from './components/GlobalLogSearch';
 import { ToastHost } from './components/Toast';
 import { invokeOrToast } from './lib/invoke';
 import { useTheme } from './hooks/useTheme';
+import { useLanguage } from './hooks/useLanguage';
+// Read translations through the i18next singleton inside long-lived effects: the effect's
+// captured `t` would go stale after a language switch, and re-subscribing the whole event
+// wiring on every language change is not worth it.
+import i18n from './i18n';
 
 export function App(): JSX.Element {
   const apps = useStore((s) => s.apps);
@@ -48,6 +53,8 @@ export function App(): JSX.Element {
 
   // Apply persisted theme to <html>.
   useTheme();
+  // Keep i18next in sync with the persisted language setting.
+  useLanguage();
 
   // Re-sync the cached view (apps + running snapshot + tasks) from the main process. Used on
   // cold boot (resetView: land on Dashboard) and on `state:invalidate` from MCP mutations
@@ -125,11 +132,15 @@ export function App(): JSX.Element {
     const offDeepConfirmStart = window.api.on('deepLink:confirmStart', ({ appId, appName }) => {
       setSelected(appId);
       void openConfirm({
-        title: `Start “${appName}”?`,
-        description: 'A devharbor:// link asked to start this app, which runs its tasks (including any custom shell commands).',
-        confirmLabel: 'Start app'
+        title: i18n.t('appShell.deepLinkStartTitle', { name: appName }),
+        description: i18n.t('appShell.deepLinkStartDesc'),
+        confirmLabel: i18n.t('appShell.deepLinkStartConfirm')
       }).then((ok) => {
-        if (ok) void invokeOrToast('proc:start', { id: appId }, { context: 'Start failed' });
+        if (ok) {
+          void invokeOrToast('proc:start', { id: appId }, {
+            context: i18n.t('errors.startFailed')
+          });
+        }
       });
     });
     // macOS menu actions (Settings ⌘, / Add App ⌘N / Add Folder ⌘⇧N).

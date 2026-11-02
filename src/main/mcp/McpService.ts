@@ -19,10 +19,10 @@ const HEADERS_TIMEOUT_MS = 10_000;
 const MAX_CONNECTIONS = 32;
 
 const SERVER_INSTRUCTIONS = [
-  'DevHarbor manages the user\'s local dev servers. Do NOT start a project\'s dev server,',
+  'NeoHub manages the user\'s local dev servers. Do NOT start a project\'s dev server,',
   'watcher, or build daemon by running npm/yarn/pnpm in your own shell - register the',
   'project with add_app and run it with start_app instead. Processes started through',
-  'DevHarbor keep running after your session, stay visible to the user, and get logs, port',
+  'NeoHub keep running after your session, stay visible to the user, and get logs, port',
   'tracking, and clean shutdown for free.',
   '',
   'Typical loop: get_overview to orient, then instead of `npm run dev` in the project dir,',
@@ -284,7 +284,7 @@ export class McpService {
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
       if (this.disposed) {
-        this.send(res, 503, { error: 'DevHarbor is shutting down.' });
+        this.send(res, 503, { error: 'NeoHub is shutting down.' });
         return;
       }
 

@@ -1,5 +1,5 @@
-appId: app.devharbor.desktop
-productName: DevHarbor
+appId: app.neohub.desktop
+productName: NeoHub
 copyright: Copyright © 2026 Jainath Ponnala
 
 directories:
@@ -13,6 +13,7 @@ files:
   - "!**/.vscode/*"
   - "!src/*"
   - "!specs/*"
+  - "!generated_images/**"
   - "!.github/*"
   - "!electron.vite.config.{js,ts,mjs,cjs}"
   - "!postcss.config.{js,cjs}"
@@ -53,9 +54,9 @@ mac:
   extendInfo:
     NSHumanReadableCopyright: Copyright © 2026 Jainath Ponnala
     LSMinimumSystemVersion: "11.0"
-    NSAppleEventsUsageDescription: DevHarbor spawns local dev processes on your behalf.
+    NSAppleEventsUsageDescription: NeoHub spawns local dev processes on your behalf.
     CFBundleURLTypes:
-      - CFBundleURLName: DevHarbor Deep Link
+      - CFBundleURLName: NeoHub Deep Link
         CFBundleURLSchemes:
           - devharbor
 
@@ -70,7 +71,7 @@ afterPack: build/fuses.cjs
 afterSign: build/notarize.cjs
 
 dmg:
-  # ${productName} (DevHarbor) - matches the zip naming so the user-facing dmg isn't the odd
+  # ${productName} (NeoHub) - matches the zip naming so the user-facing dmg isn't the odd
   # lowercase one out (IMPROVEMENT-PLAN 13.5).
   artifactName: ${productName}-${version}-${arch}.dmg
   contents:
@@ -85,7 +86,7 @@ dmg:
 # build time from this block, so the packaged app already knows where to fetch updates.
 publish:
   provider: github
-  owner: jainath
-  repo: devharbor
+  owner: neotu23
+  repo: NeoHub
   # Releases are public so signed-out users can fetch updates.
   releaseType: release

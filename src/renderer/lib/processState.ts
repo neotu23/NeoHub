@@ -6,6 +6,19 @@ import type { ProcessState, Task } from '@shared/types';
  * new ProcessState only has to be classified once.
  */
 
+/**
+ * i18n key per process state. Typed as a literal union (rather than building the key with a
+ * template string) so i18next's typed `t()` still validates it.
+ */
+export const STATE_LABEL_KEY: Record<ProcessState, `state.${ProcessState}`> = {
+  idle: 'state.idle',
+  starting: 'state.starting',
+  running: 'state.running',
+  exiting: 'state.exiting',
+  exited: 'state.exited',
+  crashed: 'state.crashed'
+};
+
 /** "Live" = spawned or transitioning. Gates Stop/Restart affordances. */
 export function isLive(state: ProcessState | undefined | null): boolean {
   return state === 'running' || state === 'starting' || state === 'exiting';

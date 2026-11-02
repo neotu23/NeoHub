@@ -3,9 +3,9 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * Minimal local file logger. DevHarbor ships with no telemetry, so when a user reports "it
+ * Minimal local file logger. NeoHub ships with no telemetry, so when a user reports "it
  * crashed" or "updates don't work" there was previously nothing to attach (IMPROVEMENT-PLAN
- * 13.1). This writes plain-text diagnostics to the OS logs dir (~/Library/Logs/DevHarbor on
+ * 13.1). This writes plain-text diagnostics to the OS logs dir (~/Library/Logs/NeoHub on
  * macOS) - purely local, nothing leaves the machine. Deliberately dependency-free.
  */
 
@@ -60,5 +60,5 @@ export const logger = {
 export function installProcessLogging(): void {
   process.on('uncaughtException', (err) => write('UNCAUGHT', [err]));
   process.on('unhandledRejection', (reason) => write('UNHANDLED_REJECTION', [reason]));
-  write('INFO', [`DevHarbor ${app.getVersion()} starting`]);
+  write('INFO', [`NeoHub ${app.getVersion()} starting`]);
 }

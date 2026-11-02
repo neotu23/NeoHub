@@ -5,6 +5,8 @@ export type SettingsMap = {
   kill_grace_ms: number;
   auto_update: boolean;
   theme: 'light' | 'dark' | 'system';
+  /** UI language: `system` follows the OS locale, otherwise an explicit shipped language. */
+  language: 'system' | 'en' | 'zh-CN';
   dashboard_refresh_ms: number;
   notify_on_crash: boolean;
   notify_on_ready: boolean;
@@ -23,6 +25,7 @@ const DEFAULTS: SettingsMap = {
   kill_grace_ms: 5000,
   auto_update: true,
   theme: 'system',
+  language: 'system',
   dashboard_refresh_ms: 1000,
   notify_on_crash: true,
   notify_on_ready: false,
@@ -47,6 +50,7 @@ export class Settings {
       kill_grace_ms: parseNumber(map.get('kill_grace_ms'), DEFAULTS.kill_grace_ms),
       auto_update: parseBool(map.get('auto_update'), DEFAULTS.auto_update),
       theme: parseTheme(map.get('theme')),
+      language: parseLanguage(map.get('language')),
       dashboard_refresh_ms: parseNumber(map.get('dashboard_refresh_ms'), DEFAULTS.dashboard_refresh_ms),
       notify_on_crash: parseBool(map.get('notify_on_crash'), DEFAULTS.notify_on_crash),
       notify_on_ready: parseBool(map.get('notify_on_ready'), DEFAULTS.notify_on_ready),
@@ -83,6 +87,7 @@ export class Settings {
       'kill_grace_ms',
       'auto_update',
       'theme',
+      'language',
       'dashboard_refresh_ms',
       'notify_on_crash',
       'notify_on_ready',
@@ -121,6 +126,11 @@ function parseBool(v: string | undefined, fallback: boolean): boolean {
 
 function parseTheme(v: string | undefined): SettingsMap['theme'] {
   if (v === 'light' || v === 'dark' || v === 'system') return v;
+  return 'system';
+}
+
+function parseLanguage(v: string | undefined): SettingsMap['language'] {
+  if (v === 'en' || v === 'zh-CN' || v === 'system') return v;
   return 'system';
 }
 

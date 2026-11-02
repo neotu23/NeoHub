@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Boxes,
   Plus,
@@ -97,6 +98,7 @@ export function Sidebar({
       Optional so the sidebar degrades gracefully until App.tsx wires it. */
   onImportProjects?: () => void;
 }): JSX.Element {
+  const { t } = useTranslation();
   const apps = useStore((s) => s.apps);
   const view = useStore((s) => s.view);
   const selected = useStore((s) => s.selectedAppId);
@@ -314,12 +316,12 @@ export function Sidebar({
   /** Add a tag to an app (used when dropping an app onto a tag group). Idempotent. */
   const addTagToApp = useCallback(
     async (app: App, tag: string): Promise<void> => {
-      const t = tag.trim();
-      if (!t || app.tags.some((x) => x.toLowerCase() === t.toLowerCase())) return;
+      const value = tag.trim();
+      if (!value || app.tags.some((x) => x.toLowerCase() === value.toLowerCase())) return;
       try {
         const next = await window.api.invoke('apps:update', {
           id: app.id,
-          patch: { tags: [...app.tags, t] }
+          patch: { tags: [...app.tags, value] }
         });
         upsertApp(next);
       } catch (err) {
@@ -360,18 +362,20 @@ export function Sidebar({
       );
       for (const p of pinned) existing.add(p.toLowerCase());
       const name = await openPrompt({
-        title: 'New folder',
+        title: t('sidebar.prompt.newFolderTitle'),
         description: forApp
-          ? `Create a new folder and move "${forApp.name}" into it.`
-          : 'Empty folder shows immediately. Drag apps into it.',
-        placeholder: 'e.g. Work · Personal · Side projects',
-        confirmLabel: 'Create',
+          ? t('sidebar.prompt.newFolderDescForApp', { name: forApp.name })
+          : t('sidebar.prompt.newFolderDesc'),
+        placeholder: t('sidebar.prompt.newFolderPlaceholder'),
+        confirmLabel: t('sidebar.prompt.create'),
         validate: (v) => {
-          const t = v.trim();
-          if (!t) return 'Value cannot be empty.';
-          if (t.toLowerCase() === UNGROUPED.toLowerCase()) return '"(Ungrouped)" is reserved.';
-          if (existing.has(t.toLowerCase())) return `Folder "${t}" already exists.`;
-          if (t.length > 60) return 'Max 60 characters.';
+          const value = v.trim();
+          if (!value) return t('common.emptyValue');
+          if (value.toLowerCase() === UNGROUPED.toLowerCase()) return t('sidebar.validation.reserved');
+          if (existing.has(value.toLowerCase())) {
+            return t('sidebar.validation.folderExists', { name: value });
+          }
+          if (value.length > 60) return t('sidebar.validation.maxChars', { max: 60 });
           return null;
         }
       });
@@ -385,7 +389,7 @@ export function Sidebar({
       // result is visible instead of silently landing in a hidden grouping.
       setGroupModePersist('folder');
     },
-    [apps, pinned, addPinnedFolder, setAppFolder, setGroupModePersist]
+    [apps, pinned, addPinnedFolder, setAppFolder, setGroupModePersist, t]
   );
 
   /** Remove a tag from an app (tag-view counterpart of "Remove from folder"). */
@@ -394,7 +398,7 @@ export function Sidebar({
       try {
         const next = await window.api.invoke('apps:update', {
           id: app.id,
-          patch: { tags: app.tags.filter((t) => t.toLowerCase() !== tag.toLowerCase()) }
+          patch: { tags: app.tags.filter((x) => x.toLowerCase() !== tag.toLowerCase()) }
         });
         upsertApp(next);
       } catch (err) {
@@ -408,37 +412,38 @@ export function Sidebar({
   const promptForNewTag = useCallback(
     async (app: App): Promise<void> => {
       const name = await openPrompt({
-        title: 'New tag',
-        description: `Add a tag to "${app.name}".`,
-        placeholder: 'e.g. api · frontend · project-x',
-        confirmLabel: 'Add',
+        title: t('sidebar.prompt.newTagTitle'),
+        description: t('sidebar.prompt.newTagDesc', { name: app.name }),
+        placeholder: t('sidebar.prompt.newTagPlaceholder'),
+        confirmLabel: t('sidebar.prompt.add'),
         validate: (v) => {
-          const t = v.trim();
-          if (!t) return 'Value cannot be empty.';
-          if (app.tags.some((x) => x.toLowerCase() === t.toLowerCase()))
-            return `Already tagged "${t}".`;
-          if (t.length > 30) return 'Max 30 characters.';
+          const value = v.trim();
+          if (!value) return t('common.emptyValue');
+          if (app.tags.some((x) => x.toLowerCase() === value.toLowerCase())) {
+            return t('sidebar.validation.alreadyTagged', { name: value });
+          }
+          if (value.length > 30) return t('sidebar.validation.maxChars', { max: 30 });
           return null;
         }
       });
       if (name == null) return;
       await addTagToApp(app, name);
     },
-    [addTagToApp]
+    [addTagToApp, t]
   );
 
   const renameFolder = useCallback(
     async (from: string): Promise<void> => {
       const to = await openPrompt({
-        title: `Rename folder "${from}"`,
+        title: t('sidebar.prompt.renameFolderTitle', { name: from }),
         defaultValue: from,
-        placeholder: 'New folder name',
-        confirmLabel: 'Rename',
+        placeholder: t('sidebar.prompt.renameFolderPlaceholder'),
+        confirmLabel: t('sidebar.prompt.rename'),
         validate: (v) => {
-          const t = v.trim();
-          if (!t) return 'Value cannot be empty.';
-          if (t.toLowerCase() === UNGROUPED.toLowerCase()) return '"(Ungrouped)" is reserved.';
-          if (t.length > 60) return 'Max 60 characters.';
+          const value = v.trim();
+          if (!value) return t('common.emptyValue');
+          if (value.toLowerCase() === UNGROUPED.toLowerCase()) return t('sidebar.validation.reserved');
+          if (value.length > 60) return t('sidebar.validation.maxChars', { max: 60 });
           return null;
         }
       });
@@ -485,17 +490,21 @@ export function Sidebar({
         console.error('rename folder failed', err);
       }
     },
-    []
+    [t]
   );
 
   const deleteFolder = useCallback(
     async (name: string, appCount: number): Promise<void> => {
+      const moved =
+        appCount === 0
+          ? ''
+          : appCount === 1
+            ? `${t('sidebar.prompt.deleteFolderDescOne')} `
+            : `${t('sidebar.prompt.deleteFolderDesc', { count: appCount })} `;
       const ok = await openConfirm({
-        title: `Delete folder "${name}"?`,
-        description: `${
-          appCount ? `${appCount} app${appCount === 1 ? '' : 's'} will move to "(Ungrouped)". ` : ''
-        }Files on disk are not affected.`,
-        confirmLabel: 'Delete folder',
+        title: t('sidebar.prompt.deleteFolderTitle', { name }),
+        description: `${moved}${t('sidebar.prompt.deleteFolderFilesNote')}`,
+        confirmLabel: t('sidebar.prompt.deleteFolder'),
         danger: true
       });
       if (!ok) return;
@@ -508,7 +517,7 @@ export function Sidebar({
         console.error('delete folder failed', err);
       }
     },
-    [removePinnedFolder]
+    [removePinnedFolder, t]
   );
 
   // Cmd+P focuses the filter input.
@@ -533,7 +542,7 @@ export function Sidebar({
   }, [promptForNewFolder]);
 
   // Prune orphaned folder-name-keyed localStorage once the app list has loaded. A folder
-  // deleted while DevHarbor was closed (or via another window) leaves dangling collapse/order
+  // deleted while NeoHub was closed (or via another window) leaves dangling collapse/order
   // keys; sweep them against the live set of folder keys (app folders ∪ pinned) so stale
   // entries don't accumulate. Gated on the first non-empty load - pruning against the cold-boot
   // empty `apps` would wrongly wipe keys for folders that simply haven't streamed in yet. Pinned
@@ -584,23 +593,23 @@ export function Sidebar({
           ...new Set(apps.flatMap((a) => a.tags).filter((t) => !appTagsLower.has(t.toLowerCase())))
         ].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
         moveItems = [
-          ...otherTags.map<MenuItem>((t, idx) => ({
-            label: `Add tag: ${t}`,
+          ...otherTags.map<MenuItem>((tag, idx) => ({
+            label: t('sidebar.menu.addTag', { name: tag }),
             icon: <Tag className="h-3.5 w-3.5" />,
             separatorBefore: idx === 0,
-            onSelect: () => void addTagToApp(app, t)
+            onSelect: () => void addTagToApp(app, tag)
           })),
           {
-            label: 'New tag…',
+            label: t('sidebar.menu.newTag'),
             icon: <Tag className="h-3.5 w-3.5" />,
             separatorBefore: otherTags.length === 0,
             onSelect: () => void promptForNewTag(app)
           },
-          ...app.tags.map<MenuItem>((t, idx) => ({
-            label: `Remove tag: ${t}`,
+          ...app.tags.map<MenuItem>((tag, idx) => ({
+            label: t('sidebar.menu.removeTag', { name: tag }),
             icon: <FolderMinus className="h-3.5 w-3.5" />,
             separatorBefore: idx === 0,
-            onSelect: () => void removeTagFromApp(app, t)
+            onSelect: () => void removeTagFromApp(app, tag)
           }))
         ];
       } else {
@@ -614,13 +623,13 @@ export function Sidebar({
         ].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
         moveItems = [
           ...existingFolders.map<MenuItem>((f, idx) => ({
-            label: `→ ${f}`,
+            label: t('sidebar.menu.moveToFolder', { name: f }),
             icon: <Folder className="h-3.5 w-3.5" />,
             separatorBefore: idx === 0,
             onSelect: () => void setAppFolder(app, f)
           })),
           {
-            label: '→ New folder…',
+            label: t('sidebar.menu.newFolder'),
             icon: <FolderPlus className="h-3.5 w-3.5" />,
             separatorBefore: existingFolders.length === 0,
             onSelect: () => void promptForNewFolder(app)
@@ -628,7 +637,7 @@ export function Sidebar({
           ...(app.folder
             ? [
                 {
-                  label: '→ Remove from folder',
+                  label: t('sidebar.menu.removeFromFolder'),
                   icon: <FolderMinus className="h-3.5 w-3.5" />,
                   onSelect: () => void setAppFolder(app, null)
                 } as MenuItem
@@ -639,59 +648,63 @@ export function Sidebar({
 
       return [
         {
-          label: 'Open',
+          label: t('sidebar.menu.open'),
           icon: <Eye className="h-3.5 w-3.5" />,
           onSelect: () => setSelected(app.id as AppId)
         },
         {
-          label: live ? 'Stop' : 'Start',
+          label: live ? t('sidebar.menu.stop') : t('sidebar.menu.start'),
           icon: live ? <Square className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />,
           // Literal channels (not a union expression) so the generic `InvokeReq<C>` resolves
           // cleanly, matching every other invokeOrToast call site.
           onSelect: () =>
             void (live
-              ? invokeOrToast('proc:stop', { id: app.id }, { context: 'Stop failed' })
-              : invokeOrToast('proc:start', { id: app.id }, { context: 'Start failed' }))
+              ? invokeOrToast('proc:stop', { id: app.id }, { context: t('errors.stopFailed') })
+              : invokeOrToast('proc:start', { id: app.id }, { context: t('errors.startFailed') }))
         },
         {
-          label: 'Restart',
+          label: t('sidebar.menu.restart'),
           icon: <RotateCw className="h-3.5 w-3.5" />,
           disabled: !live,
           onSelect: () =>
-            void invokeOrToast('proc:restart', { id: app.id }, { context: 'Restart failed' })
+            void invokeOrToast('proc:restart', { id: app.id }, {
+              context: t('errors.restartFailed')
+            })
         },
         ...moveItems,
         {
-          label: 'Reveal in Finder',
+          label: t('sidebar.menu.revealInFinder'),
           icon: <Folder className="h-3.5 w-3.5" />,
           separatorBefore: true,
           onSelect: () =>
             void window.api.invoke('openIn:open', { target: 'finder', path: app.path })
         },
         {
-          label: 'Open in Terminal',
+          label: t('sidebar.menu.openInTerminal'),
           icon: <Cog className="h-3.5 w-3.5" />,
           onSelect: () =>
             void window.api.invoke('openIn:open', { target: 'terminal', path: app.path })
         },
         {
-          label: 'Remove from DevHarbor…',
+          label: t('sidebar.menu.removeApp'),
           icon: <Trash2 className="h-3.5 w-3.5" />,
           danger: true,
           separatorBefore: true,
           disabled: live,
           onSelect: async () => {
             const ok = await openConfirm({
-              title: `Remove "${app.name}" from DevHarbor?`,
-              description: 'This only removes it from DevHarbor. Files on disk are not deleted.',
-              confirmLabel: 'Remove',
+              title: t('sidebar.prompt.removeAppTitle', { name: app.name }),
+              description: t('sidebar.prompt.removeAppDesc'),
+              confirmLabel: t('sidebar.prompt.remove'),
               danger: true
             });
             if (!ok) return;
             // `apps:remove` resolves void (→ undefined) on success and invokeOrToast returns
             // null on failure, so only drop the app from local state when the IPC succeeded - 
             // otherwise the row would vanish even though the backend still has it.
-            const res = await invokeOrToast('apps:remove', { id: app.id }, { context: 'Remove failed' });
+            const res = await invokeOrToast('apps:remove', { id: app.id }, {
+              context: t('errors.removeFailed')
+            });
             if (res !== null) removeApp(app.id);
           }
         }
@@ -708,7 +721,8 @@ export function Sidebar({
       addTagToApp,
       removeTagFromApp,
       promptForNewTag,
-      removeApp
+      removeApp,
+      t
     ]
   );
 
@@ -724,21 +738,23 @@ export function Sidebar({
     async (folderKey: string, action: 'start' | 'stop'): Promise<void> => {
       const group = groups.find((g) => g.key === folderKey);
       if (!group) return;
-      const verb = action === 'start' ? 'Start all' : 'Stop all';
+      const contextKey =
+        action === 'start' ? ('sidebar.folderStartContext' as const) : ('sidebar.folderStopContext' as const);
       for (const app of group.apps) {
         const live = isLive(lastState[app.id]);
         if (action === 'start' && live) continue; // already running
         if (action === 'stop' && !live) continue; // already stopped
         // Literal channels (not a union expression) so the generic `InvokeReq<C>` resolves
         // cleanly, matching every other invokeOrToast call site.
+        const context = t(contextKey, { name: app.name });
         if (action === 'start') {
-          await invokeOrToast('proc:start', { id: app.id }, { context: `${verb} - ${app.name}` });
+          await invokeOrToast('proc:start', { id: app.id }, { context });
         } else {
-          await invokeOrToast('proc:stop', { id: app.id }, { context: `${verb} - ${app.name}` });
+          await invokeOrToast('proc:stop', { id: app.id }, { context });
         }
       }
     },
-    [groups, lastState]
+    [groups, lastState, t]
   );
 
   const onFolderContextMenu = (
@@ -758,26 +774,26 @@ export function Sidebar({
       pos !== -1 && pos < reorderKeys.length - 1 ? reorderKeys[pos + 1] : undefined;
     const items: MenuItem[] = [
       {
-        label: 'Start all',
+        label: t('sidebar.folderMenu.startAll'),
         icon: <Play className="h-3.5 w-3.5" />,
         disabled: isReserved,
         onSelect: () => void startStopFolder(folderKey, 'start')
       },
       {
-        label: 'Stop all',
+        label: t('sidebar.folderMenu.stopAll'),
         icon: <Square className="h-3.5 w-3.5" />,
         disabled: isReserved,
         onSelect: () => void startStopFolder(folderKey, 'stop')
       },
       {
-        label: 'Rename folder…',
+        label: t('sidebar.folderMenu.renameFolder'),
         icon: <Edit3 className="h-3.5 w-3.5" />,
         separatorBefore: true,
         disabled: isReserved,
         onSelect: () => void renameFolder(folderName)
       },
       {
-        label: 'Move up',
+        label: t('sidebar.folderMenu.moveUp'),
         icon: <ChevronUp className="h-3.5 w-3.5" />,
         separatorBefore: true,
         disabled: isReserved || prevKey === undefined,
@@ -786,7 +802,7 @@ export function Sidebar({
         }
       },
       {
-        label: 'Move down',
+        label: t('sidebar.folderMenu.moveDown'),
         icon: <ChevronDown className="h-3.5 w-3.5" />,
         disabled: isReserved || nextKey === undefined,
         onSelect: () => {
@@ -794,7 +810,7 @@ export function Sidebar({
         }
       },
       {
-        label: 'Delete folder',
+        label: t('sidebar.folderMenu.deleteFolder'),
         icon: <Trash2 className="h-3.5 w-3.5" />,
         danger: true,
         disabled: isReserved,
@@ -885,9 +901,17 @@ export function Sidebar({
   // Sort picker (radio-style menu): active option gets a check, others their own glyph.
   const openSortMenu = (e: React.MouseEvent): void => {
     const opts: { mode: AppSortMode; label: string; icon: JSX.Element }[] = [
-      { mode: 'name', label: 'Name (A-Z)', icon: <ArrowDownAZ className="h-3.5 w-3.5" /> },
-      { mode: 'recent', label: 'Recently used', icon: <Clock className="h-3.5 w-3.5" /> },
-      { mode: 'running', label: 'Running first', icon: <Play className="h-3.5 w-3.5" /> }
+      { mode: 'name', label: t('common.sortName'), icon: <ArrowDownAZ className="h-3.5 w-3.5" /> },
+      {
+        mode: 'recent',
+        label: t('common.sortRecent'),
+        icon: <Clock className="h-3.5 w-3.5" />
+      },
+      {
+        mode: 'running',
+        label: t('common.sortRunning'),
+        icon: <Play className="h-3.5 w-3.5" />
+      }
     ];
     const items: MenuItem[] = opts.map((o) => ({
       label: o.label,
@@ -901,11 +925,11 @@ export function Sidebar({
     <aside className="titlebar-drag flex w-60 shrink-0 flex-col border-r border-border bg-base">
       <div className="h-10" />
       <div className="titlebar-no-drag flex items-center justify-between gap-2 px-3 py-2">
-        <span className="text-xs uppercase tracking-wide text-fg-subtle">DevHarbor</span>
+        <span className="text-xs uppercase tracking-wide text-fg-subtle">NeoHub</span>
         <button
           onClick={onOpenPalette}
           className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-fg-muted hover:bg-surface hover:text-fg"
-          title="Command palette (⌘ K)"
+          title={t('sidebar.commandPalette')}
         >
           <span>⌘ K</span>
         </button>
@@ -921,7 +945,7 @@ export function Sidebar({
           )}
         >
           <Boxes className="h-[15px] w-[15px]" />
-          <span className="flex-1">Dashboard</span>
+          <span className="flex-1">{t('sidebar.dashboard')}</span>
           {runningCount > 0 && (
             // Reference .mk-badge-run: fixed 18px circle (pill only when ≥2 digits),
             // run-green bg at 90%, dark-green text #05140a (not white).
@@ -937,7 +961,7 @@ export function Sidebar({
             ref={filterRef}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter apps (⌘ P)"
+            placeholder={t('sidebar.filterApps')}
             className="w-full bg-transparent text-[11px] text-fg outline-none placeholder:text-fg-subtle"
           />
         </div>
@@ -945,14 +969,15 @@ export function Sidebar({
         {/* APPS header - label + group-by switcher + action icons. */}
         <div className="mb-1 flex items-center gap-1 px-2 text-[10px] uppercase tracking-wider text-fg-subtle">
           <span className="min-w-0 flex-1 truncate">
-            Apps {filter && `· ${filtered.length} of ${apps.length}`}
+            {t('sidebar.apps')}{' '}
+            {filter && t('sidebar.appsCount', { shown: filtered.length, total: apps.length })}
           </span>
           {/* Finder-style segmented control: organize the list by folder or by tag. */}
           <div className="inline-flex shrink-0 items-center overflow-hidden rounded border border-border">
             <button
               onClick={() => setGroupModePersist('folder')}
-              title="Group by folder"
-              aria-label="Group by folder"
+              title={t('sidebar.groupByFolder')}
+              aria-label={t('sidebar.groupByFolder')}
               aria-pressed={groupMode === 'folder'}
               className={cn(
                 'p-1 transition-colors',
@@ -963,8 +988,8 @@ export function Sidebar({
             </button>
             <button
               onClick={() => setGroupModePersist('tag')}
-              title="Group by tag"
-              aria-label="Group by tag"
+              title={t('sidebar.groupByTag')}
+              aria-label={t('sidebar.groupByTag')}
               aria-pressed={groupMode === 'tag'}
               className={cn(
                 'p-1 transition-colors',
@@ -976,14 +1001,15 @@ export function Sidebar({
           </div>
           <button
             onClick={openSortMenu}
-            title={`Sort apps - ${
-              sortMode === 'name'
-                ? 'Name (A-Z)'
-                : sortMode === 'recent'
-                  ? 'Recently used'
-                  : 'Running first'
-            }`}
-            aria-label="Sort apps"
+            title={t('common.sortTooltip', {
+              mode:
+                sortMode === 'name'
+                  ? t('common.sortName')
+                  : sortMode === 'recent'
+                    ? t('common.sortRecent')
+                    : t('common.sortRunning')
+            })}
+            aria-label={t('common.sortApps')}
             className={cn(
               'shrink-0 rounded p-1 hover:bg-surface hover:text-fg',
               sortMode === 'name' ? 'text-fg-subtle' : 'text-accent'
@@ -997,12 +1023,12 @@ export function Sidebar({
             onClick={(e) =>
               openMenu(e, [
                 {
-                  label: 'New app…',
+                  label: t('sidebar.newApp'),
                   icon: <Plus className="h-3.5 w-3.5" />,
                   onSelect: onAddApp
                 },
                 {
-                  label: 'New folder…',
+                  label: t('sidebar.newFolder'),
                   icon: <FolderPlus className="h-3.5 w-3.5" />,
                   onSelect: () => void promptForNewFolder()
                 },
@@ -1011,7 +1037,7 @@ export function Sidebar({
                 ...(onImportProjects
                   ? [
                       {
-                        label: 'Import projects…',
+                        label: t('sidebar.importProjects'),
                         icon: <Boxes className="h-3.5 w-3.5" />,
                         separatorBefore: true,
                         onSelect: onImportProjects
@@ -1020,23 +1046,23 @@ export function Sidebar({
                   : [])
               ])
             }
-            title="Add app or folder"
-            aria-label="Add app or folder"
+            title={t('sidebar.addAppOrFolder')}
+            aria-label={t('sidebar.addAppOrFolder')}
             className="shrink-0 rounded p-1 text-fg-subtle hover:bg-surface hover:text-fg"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
         </div>
         {apps.length === 0 && pinned.length === 0 ? (
-          <div className="px-2 py-1.5 text-sm text-fg-subtle">No apps yet</div>
+          <div className="px-2 py-1.5 text-sm text-fg-subtle">{t('sidebar.noApps')}</div>
         ) : filtered.length === 0 && !showGrouped ? (
-          <div className="px-2 py-1.5 text-xs text-fg-subtle">No matches</div>
+          <div className="px-2 py-1.5 text-xs text-fg-subtle">{t('sidebar.noMatches')}</div>
         ) : !showGrouped ? (
           // Flat list: folder mode with nothing foldered, or tag mode with no tags yet.
           <>
             {groupMode === 'tag' && (
               <div className="mb-1 px-2 py-1 text-[11px] leading-snug text-fg-subtle">
-                No tags yet. Add tags in an app&apos;s settings (⚙), or drag a tagged app here.
+                {t('sidebar.noTagsYet')}
               </div>
             )}
             {filtered.map((a) => (
@@ -1062,14 +1088,21 @@ export function Sidebar({
             // A collapsed group hides its rows - surface a glowing dot on the header when one
             // of its apps is live, so "Running first" / monitoring isn't defeated by collapse.
             const hasRunning = g.apps.some((a) => isLive(lastState[a.id]));
+            // The catch-all bucket's stored display name is the English sentinel used as its
+            // group key; only the *shown* label gets translated.
+            const groupLabel = g.catchAll
+              ? groupMode === 'tag'
+                ? t('sidebar.untagged')
+                : t('sidebar.ungrouped')
+              : g.displayName;
             const headerTitle =
               groupMode === 'tag'
                 ? g.catchAll
-                  ? 'Apps with no tags.'
-                  : `Tag: ${g.displayName}. Drop an app here to add this tag.`
+                  ? t('sidebar.headerTagNone')
+                  : t('sidebar.headerTag', { name: g.displayName })
                 : g.catchAll
-                  ? 'Apps without a folder. Drop apps here to remove their folder.'
-                  : `Folder: ${g.displayName}. Drag to reorder · right-click or ⋮ for actions.`;
+                  ? t('sidebar.headerFolderNone')
+                  : t('sidebar.headerFolder', { name: g.displayName });
             return (
               <div
                 key={g.key}
@@ -1115,14 +1148,14 @@ export function Sidebar({
                       <Tag className="h-2.5 w-2.5 shrink-0 text-accent" />
                     )}
                     <span className="flex-1 truncate normal-case tracking-normal text-fg-muted">
-                      {g.displayName}
+                      {groupLabel}
                     </span>
                   </button>
                   {isCollapsed && hasRunning && (
                     <span
                       className="status-dot status-dot-run shrink-0"
-                      title="An app in this group is running"
-                      aria-label="Group has a running app"
+                      title={t('sidebar.groupRunning')}
+                      aria-label={t('sidebar.groupRunningAria')}
                     />
                   )}
                   {canFolderActions && (
@@ -1132,8 +1165,8 @@ export function Sidebar({
                         onFolderContextMenu(e, g.displayName, g.totalCount, g.key);
                       }}
                       className="shrink-0 rounded p-0.5 text-fg-subtle opacity-0 transition-opacity hover:bg-elevated hover:text-fg group-hover:opacity-100"
-                      title="Folder actions"
-                      aria-label={`Actions for folder ${g.displayName}`}
+                      title={t('sidebar.folderActions')}
+                      aria-label={t('sidebar.folderActionsFor', { name: g.displayName })}
                     >
                       <MoreVertical className="h-3.5 w-3.5" />
                     </button>
@@ -1141,7 +1174,7 @@ export function Sidebar({
                 </div>
                 {groupMode === 'folder' && !isCollapsed && g.apps.length === 0 && (
                   <div className="pl-5 pr-2 py-1 text-[11px] italic text-fg-subtle">
-                    Empty - drop apps here.
+                    {t('sidebar.emptyDropHere')}
                   </div>
                 )}
                 {!isCollapsed &&
@@ -1170,11 +1203,11 @@ export function Sidebar({
         <button
           onClick={onOpenSettings}
           className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-fg-muted hover:bg-surface/60 hover:text-fg"
-          title="Settings (⌘ ,)"
-          aria-label="Settings"
+          title={t('sidebar.settingsTooltip')}
+          aria-label={t('sidebar.settings')}
         >
           <Settings className="h-[15px] w-[15px]" />
-          <span className="flex-1">Settings</span>
+          <span className="flex-1">{t('sidebar.settings')}</span>
         </button>
       </div>
       {menuNode}
@@ -1206,6 +1239,7 @@ function AppRow({
   onOpenMenu: (e: React.MouseEvent) => void;
   indent?: boolean;
 }): JSX.Element {
+  const { t } = useTranslation();
   return (
     <div
       // The row is a custom interactive control, not a native <button> (it has to be a drag
@@ -1245,8 +1279,8 @@ function AppRow({
           e.stopPropagation();
           onOpenMenu(e);
         }}
-        title="More actions"
-        aria-label={`More actions for ${app.name}`}
+        title={t('sidebar.moreActions')}
+        aria-label={t('sidebar.moreActionsFor', { name: app.name })}
         className={cn(
           'shrink-0 rounded p-0.5 text-fg-subtle opacity-0 transition-opacity hover:bg-elevated hover:text-fg',
           // Always show on the active row so the trigger is discoverable without hover.

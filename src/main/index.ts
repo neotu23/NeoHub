@@ -1,12 +1,19 @@
 import { app, BrowserWindow, dialog, screen, shell } from 'electron';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { db, closeDb } from './db/index.js';
 import { registerAllIpcHandlers, type IpcRuntime } from './ipc/index.js';
 import { installAppMenu } from './menu.js';
 import { installProcessLogging, logger } from './services/Logger.js';
+import { resolveUserDataDirectory } from './services/AppIdentity.js';
 
 const isDev = process.env.NODE_ENV === 'development' || !!process.env.ELECTRON_RENDERER_URL;
+
+// A product rename must not switch to an empty registry. Resolve before the lock or DB.
+const userDataDirectory = resolveUserDataDirectory(app.getPath('appData'));
+mkdirSync(userDataDirectory, { recursive: true });
+app.setPath('userData', userDataDirectory);
+app.setName('NeoHub');
 
 let mainWindow: BrowserWindow | null = null;
 let ipcRuntime: IpcRuntime | null = null;
@@ -76,6 +83,7 @@ function createWindow(): BrowserWindow {
     ...bounds,
     minWidth: 960,
     minHeight: 600,
+    title: 'NeoHub',
     show: false,
     backgroundColor: '#18181b', // matches the zinc-900 theme base - no launch color flash
     titleBarStyle: 'hiddenInset',
@@ -190,18 +198,21 @@ function getOrCreateWindow(): { win: BrowserWindow; created: boolean } {
 }
 
 app.whenReady().then(() => {
+  if (isDev && process.platform === 'darwin') {
+    app.dock?.setIcon(join(__dirname, '../../build/icon.png'));
+  }
   // Route uncaught exceptions / rejections to the local log file for support diagnostics.
   installProcessLogging();
 
-  // Configure the macOS About panel ( ⌘ → DevHarbor → About DevHarbor ).
+  // Configure the macOS About panel ( ⌘ → NeoHub → About NeoHub ).
   if (process.platform === 'darwin') {
     app.setAboutPanelOptions({
-      applicationName: 'DevHarbor',
+      applicationName: 'NeoHub',
       applicationVersion: app.getVersion(),
       version: app.getVersion(),
       copyright: 'Copyright © 2026 Jainath Ponnala',
-      credits: 'A harbor for your local dev servers. Licensed under GNU AGPL-3.0.',
-      website: 'https://www.devharbor.app'
+      credits: 'A home for your local projects. Based on DevHarbor. Licensed under GNU AGPL-3.0.',
+      website: 'https://github.com/neotu23/NeoHub'
     });
   }
 
@@ -214,8 +225,8 @@ app.whenReady().then(() => {
     logger.error('database open/migration failed', e);
     const choice = dialog.showMessageBoxSync({
       type: 'error',
-      title: 'DevHarbor - database error',
-      message: 'DevHarbor could not open its database.',
+      title: 'NeoHub - database error',
+      message: 'NeoHub could not open its database.',
       detail: `${(e as Error).message}\n\nThe database is at:\n${join(app.getPath('userData'), 'devharbor.db')}\n\nYou can move the corrupt database aside and start fresh, or quit.`,
       buttons: ['Move aside & restart', 'Quit'],
       defaultId: 0,
@@ -280,9 +291,9 @@ app.on('before-quit', (event) => {
   void (async () => {
     const { response } = await dialog.showMessageBox({
       type: 'warning',
-      title: 'Quit DevHarbor?',
+      title: 'Quit NeoHub?',
       message: `${running} running ${running === 1 ? 'task is' : 'tasks are'} still active.`,
-      detail: 'DevHarbor will stop your running dev servers before quitting.',
+      detail: 'NeoHub will stop your running dev servers before quitting.',
       buttons: ['Stop & Quit', 'Cancel'],
       defaultId: 0,
       cancelId: 1

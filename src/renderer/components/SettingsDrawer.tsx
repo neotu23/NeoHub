@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Download, AlertTriangle, Copy, RefreshCw, Check, Eye, EyeOff, Info } from 'lucide-react';
 import type { NodeInstallation } from '@shared/types';
 import type { McpStatus, SettingsState } from '@shared/ipc';
@@ -11,6 +12,7 @@ import { cn } from '../lib/cn';
 const SETTINGS_TITLE_ID = 'settings-drawer-title';
 
 export function SettingsDrawer({ onClose }: { onClose: () => void }): JSX.Element {
+  const { t } = useTranslation();
   // Focus trap / Escape-to-close / focus-restore + role=dialog/aria-modal/aria-labelledby.
   const { dialogProps } = useDialog(onClose, SETTINGS_TITLE_ID);
   const [settings, setSettings] = useState<SettingsState | null>(null);
@@ -45,13 +47,13 @@ export function SettingsDrawer({ onClose }: { onClose: () => void }): JSX.Elemen
       >
         <header className="flex items-center justify-between border-b border-border px-4 py-3">
           <h2 id={SETTINGS_TITLE_ID} className="text-sm font-medium text-fg">
-            Settings
+            {t('settings.title')}
           </h2>
           <button
             onClick={onClose}
             className="rounded-md p-1 text-fg-subtle hover:bg-surface hover:text-fg"
-            title="Close settings"
-            aria-label="Close"
+            title={t('settings.closeTooltip')}
+            aria-label={t('common.close')}
           >
             <X className="h-4 w-4" />
           </button>
@@ -67,11 +69,11 @@ export function SettingsDrawer({ onClose }: { onClose: () => void }): JSX.Elemen
 
         <div className="flex-1 overflow-y-auto p-5">
           {!settings ? (
-            <div className="text-sm text-fg-subtle">Loading…</div>
+            <div className="text-sm text-fg-subtle">{t('common.loading')}</div>
           ) : (
             <div className="space-y-6">
-              <Section title="General">
-                <Field label="Theme" description="Color scheme for the UI.">
+              <Section title={t('settings.general')}>
+                <Field label={t('settings.theme')} description={t('settings.themeDesc')}>
                   <select
                     data-autofocus
                     value={settings.theme}
@@ -80,55 +82,67 @@ export function SettingsDrawer({ onClose }: { onClose: () => void }): JSX.Elemen
                     }
                     className="rounded-md border border-border bg-surface px-2 py-1 text-sm text-fg"
                   >
-                    <option value="system">System</option>
-                    <option value="dark">Dark</option>
-                    <option value="light">Light</option>
+                    <option value="system">{t('settings.themeSystem')}</option>
+                    <option value="dark">{t('settings.themeDark')}</option>
+                    <option value="light">{t('settings.themeLight')}</option>
+                  </select>
+                </Field>
+                <Field label={t('settings.language')} description={t('settings.languageDesc')}>
+                  <select
+                    value={settings.language}
+                    onChange={(e) =>
+                      void update({ language: e.target.value as SettingsState['language'] })
+                    }
+                    className="rounded-md border border-border bg-surface px-2 py-1 text-sm text-fg"
+                  >
+                    <option value="system">{t('settings.languageSystem')}</option>
+                    {/* Language names stay in their own language - that is how users find
+                        the one they can read. */}
+                    <option value="en">English</option>
+                    <option value="zh-CN">简体中文</option>
                   </select>
                 </Field>
                 <Toggle
-                  label="Check for updates on launch"
-                  description="Automatically download and install new DevHarbor releases."
+                  label={t('settings.autoUpdate')}
+                  description={t('settings.autoUpdateDesc')}
                   checked={settings.auto_update}
                   onChange={(v) => void update({ auto_update: v })}
                 />
                 <Toggle
-                  label="Launch DevHarbor at login"
-                  description="Start DevHarbor automatically when you log in to your Mac."
+                  label={t('settings.launchAtLogin')}
+                  description={t('settings.launchAtLoginDesc')}
                   checked={settings.launch_at_login}
                   onChange={(v) => void update({ launch_at_login: v })}
                 />
                 <Toggle
-                  label="Show menubar icon"
-                  description="Keep a tray icon in the macOS menubar for quick access and background control."
+                  label={t('settings.trayEnabled')}
+                  description={t('settings.trayEnabledDesc')}
                   checked={settings.tray_enabled}
                   onChange={(v) => void update({ tray_enabled: v })}
                 />
               </Section>
 
-              <Section title="Notifications">
+              <Section title={t('settings.notifications')}>
                 <Toggle
-                  label="Notify when an app crashes"
-                  description="Show a desktop notification when a task exits unexpectedly while DevHarbor is backgrounded."
+                  label={t('settings.notifyCrash')}
+                  description={t('settings.notifyCrashDesc')}
                   checked={settings.notify_on_crash}
                   onChange={(v) => void update({ notify_on_crash: v })}
                 />
                 <Toggle
-                  label="Notify when an app is ready"
-                  description="Show a desktop notification when an app finishes starting (readiness reached)."
+                  label={t('settings.notifyReady')}
+                  description={t('settings.notifyReadyDesc')}
                   checked={settings.notify_on_ready}
                   onChange={(v) => void update({ notify_on_ready: v })}
                 />
               </Section>
 
-              <Section title="Dashboard">
-                <Field
-                  label="Stats refresh interval"
-                  description="How often CPU/memory are sampled per task (in ms). Lower = smoother sparklines, more CPU."
-                >
+              <Section title={t('settings.dashboard')}>
+                <Field label={t('settings.refreshLabel')} description={t('settings.refreshDesc')}>
                   <NumberInput
                     value={settings.dashboard_refresh_ms}
                     onCommit={(v) => void update({ dashboard_refresh_ms: clamp(v, 200, 10000) })}
-                    suffix="ms"
+                    suffix={t('settings.unitMs')}
                     step={100}
                     min={200}
                     max={10000}
@@ -136,28 +150,22 @@ export function SettingsDrawer({ onClose }: { onClose: () => void }): JSX.Elemen
                 </Field>
               </Section>
 
-              <Section title="Logs">
-                <Field
-                  label="Ring buffer size"
-                  description="Per-task in-memory log lines. Older lines drop off the front."
-                >
+              <Section title={t('settings.logs')}>
+                <Field label={t('settings.ringLabel')} description={t('settings.ringDesc')}>
                   <NumberInput
                     value={settings.log_ring_size}
                     onCommit={(v) => void update({ log_ring_size: clamp(v, 100, 100000) })}
-                    suffix="lines"
+                    suffix={t('settings.unitLines')}
                     step={1000}
                     min={100}
                     max={100000}
                   />
                 </Field>
-                <Field
-                  label="Keep run history per app"
-                  description="Maximum run_history rows retained per app. Older rows are pruned on boot."
-                >
+                <Field label={t('settings.historyLabel')} description={t('settings.historyDesc')}>
                   <NumberInput
                     value={settings.run_history_limit}
                     onCommit={(v) => void update({ run_history_limit: clamp(v, 10, 10000) })}
-                    suffix="runs"
+                    suffix={t('settings.unitRuns')}
                     step={50}
                     min={10}
                     max={10000}
@@ -165,28 +173,25 @@ export function SettingsDrawer({ onClose }: { onClose: () => void }): JSX.Elemen
                 </Field>
               </Section>
 
-              <Section title="Processes">
-                <Field
-                  label="Kill grace window"
-                  description="After Stop, how long to wait (ms) for SIGTERM to take effect before escalating to SIGKILL on the process group."
-                >
+              <Section title={t('settings.processes')}>
+                <Field label={t('settings.killGraceLabel')} description={t('settings.killGraceDesc')}>
                   <NumberInput
                     value={settings.kill_grace_ms}
                     onCommit={(v) => void update({ kill_grace_ms: clamp(v, 100, 30000) })}
-                    suffix="ms"
+                    suffix={t('settings.unitMs')}
                     step={500}
                     min={100}
                     max={30000}
                   />
                 </Field>
                 <Field
-                  label="Readiness timeout"
-                  description="Abort a task's start if its readiness signal hasn't fired within this many ms."
+                  label={t('settings.readinessLabel')}
+                  description={t('settings.readinessDesc')}
                 >
                   <NumberInput
                     value={settings.readiness_timeout_ms}
                     onCommit={(v) => void update({ readiness_timeout_ms: clamp(v, 1000, 600000) })}
-                    suffix="ms"
+                    suffix={t('settings.unitMs')}
                     step={1000}
                     min={1000}
                     max={600000}
@@ -194,15 +199,11 @@ export function SettingsDrawer({ onClose }: { onClose: () => void }): JSX.Elemen
                 </Field>
               </Section>
 
-              <Section title="Node detection">
-                <div className="text-[11px] text-fg-subtle">
-                  Installations discovered on this machine (read-only - the list is rescanned every
-                  time an app starts). To add a new version, install it via your usual manager
-                  (nvm / fnm / volta / asdf) and click an app's Start.
-                </div>
+              <Section title={t('settings.node')}>
+                <div className="text-[11px] text-fg-subtle">{t('settings.nodeDesc')}</div>
                 <div className="rounded-md border border-border bg-base/40 p-3">
                   {nodeInstalls.length === 0 ? (
-                    <div className="text-xs text-fg-subtle">None found.</div>
+                    <div className="text-xs text-fg-subtle">{t('settings.nodeNone')}</div>
                   ) : (
                     <ul className="space-y-0.5 font-mono text-[11px]">
                       {nodeInstalls.map((n) => (
@@ -219,19 +220,16 @@ export function SettingsDrawer({ onClose }: { onClose: () => void }): JSX.Elemen
 
               <McpSection settings={settings} update={update} />
 
-              <Section title="Danger zone">
+              <Section title={t('settings.danger')}>
                 <div className="text-[11px] text-fg-subtle">
-                  Database lives at <span className="font-mono">{dbPath}</span>
+                  {t('settings.dbPath')} <span className="font-mono">{dbPath}</span>
                 </div>
                 {exported && (
                   <div className="rounded-md border border-success-border bg-success-bg px-2 py-1 text-[11px] text-success-fg">
-                    Exported to <span className="font-mono">{exported}</span>
+                    {t('settings.exportedTo')} <span className="font-mono">{exported}</span>
                   </div>
                 )}
-                <Field
-                  label="Export database"
-                  description="Copy the current devharbor.db to a file. Includes app registry, tasks, env vars, run history, settings."
-                >
+                <Field label={t('settings.exportLabel')} description={t('settings.exportDesc')}>
                   <button
                     onClick={async () => {
                       setError(null);
@@ -244,20 +242,16 @@ export function SettingsDrawer({ onClose }: { onClose: () => void }): JSX.Elemen
                     }}
                     className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1 text-sm text-fg hover:bg-elevated"
                   >
-                    <Download className="h-3.5 w-3.5" /> Export…
+                    <Download className="h-3.5 w-3.5" /> {t('settings.exportButton')}
                   </button>
                 </Field>
-                <Field
-                  label="Reset database"
-                  description="Move the DB aside and restart with an empty one. Existing files on disk are untouched; you'll need to re-add your apps. A backup is created alongside."
-                >
+                <Field label={t('settings.resetLabel')} description={t('settings.resetDesc')}>
                   <button
                     onClick={async () => {
                       const ok = await openConfirm({
-                        title: 'Reset database?',
-                        description:
-                          'This will close DevHarbor, archive the current database, and restart with an empty one. A backup is created alongside. Files on disk are untouched, but you will need to re-add your apps.',
-                        confirmLabel: 'Reset database',
+                        title: t('settings.resetConfirmTitle'),
+                        description: t('settings.resetConfirmDesc'),
+                        confirmLabel: t('settings.resetConfirm'),
                         danger: true
                       });
                       if (!ok) return;
@@ -269,7 +263,7 @@ export function SettingsDrawer({ onClose }: { onClose: () => void }): JSX.Elemen
                     }}
                     className="inline-flex items-center gap-1.5 rounded-md border border-danger-border bg-danger-bg px-2 py-1 text-sm text-danger-fg hover:bg-danger-bg-hover"
                   >
-                    <AlertTriangle className="h-3.5 w-3.5" /> Reset…
+                    <AlertTriangle className="h-3.5 w-3.5" /> {t('settings.resetButton')}
                   </button>
                 </Field>
               </Section>
@@ -389,7 +383,8 @@ function clamp(v: number, lo: number, hi: number): number {
 }
 
 /** A small copy-to-clipboard button that flips to a check for a moment after copying. */
-function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }): JSX.Element {
+function CopyButton({ text, label }: { text: string; label?: string }): JSX.Element {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -402,7 +397,7 @@ function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }):
       className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1 text-sm text-fg hover:bg-elevated"
     >
       {copied ? <Check className="h-3.5 w-3.5 text-success-fg" /> : <Copy className="h-3.5 w-3.5" />}
-      {copied ? 'Copied' : label}
+      {copied ? t('common.copied') : (label ?? t('common.copy'))}
     </button>
   );
 }
@@ -419,6 +414,7 @@ function McpSection({
   settings: SettingsState;
   update: (patch: Partial<SettingsState>) => Promise<void>;
 }): JSX.Element {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<McpStatus | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [reveal, setReveal] = useState(false);
@@ -454,23 +450,19 @@ function McpSection({
   );
 
   return (
-    <Section title="MCP server">
-      <div className="text-[11px] text-fg-subtle">
-        Let coding agents manage your dev servers through DevHarbor over local HTTP. The server
-        listens on 127.0.0.1 only. Holding the token lets a client register a folder and run its
-        scripts, so treat it like a password.
-      </div>
+    <Section title={t('settings.mcp')}>
+      <div className="text-[11px] text-fg-subtle">{t('settings.mcpIntro')}</div>
 
       <Toggle
-        label="Enable MCP server"
-        description="Expose app management tools (list, add, start, stop, logs) to MCP clients."
+        label={t('settings.mcpEnable')}
+        description={t('settings.mcpEnableDesc')}
         checked={settings.mcp_enabled}
         onChange={(v) => void update({ mcp_enabled: v })}
       />
 
       {settings.mcp_enabled && (
         <>
-          <Field label="Status" description="Live state of the local server.">
+          <Field label={t('settings.mcpStatus')} description={t('settings.mcpStatusDesc')}>
             <div className="flex items-center gap-2 text-sm">
               <span
                 className={cn(
@@ -483,12 +475,12 @@ function McpSection({
               ) : status?.lastError ? (
                 <span className="text-[11px] text-danger-fg">{status.lastError}</span>
               ) : (
-                <span className="text-[11px] text-fg-subtle">Stopped</span>
+                <span className="text-[11px] text-fg-subtle">{t('settings.mcpStopped')}</span>
               )}
             </div>
           </Field>
 
-          <Field label="Port" description="Listen port (1024-65535). The server restarts when changed.">
+          <Field label={t('settings.mcpPort')} description={t('settings.mcpPortDesc')}>
             <NumberInput
               value={settings.mcp_port}
               onCommit={(v) => void update({ mcp_port: clamp(Math.round(v), 1024, 65535) })}
@@ -499,17 +491,14 @@ function McpSection({
           </Field>
 
           <Toggle
-            label="Use HTTPS"
-            description="Serve over TLS with a self-signed localhost certificate. Clients must trust the certificate."
+            label={t('settings.mcpHttps')}
+            description={t('settings.mcpHttpsDesc')}
             checked={settings.mcp_https}
             onChange={(v) => void update({ mcp_https: v })}
           />
 
           {settings.mcp_https && status?.certPath && (
-            <Field
-              label="Certificate"
-              description="Point your client at this file (e.g. NODE_EXTRA_CA_CERTS) or add it to your keychain."
-            >
+            <Field label={t('settings.mcpCert')} description={t('settings.mcpCertDesc')}>
               <div className="flex items-center gap-1.5">
                 <span
                   className="max-w-56 truncate font-mono text-[10.5px] text-fg-subtle"
@@ -517,14 +506,14 @@ function McpSection({
                 >
                   {status.certPath}
                 </span>
-                <CopyButton text={status.certPath} label="Copy path" />
+                <CopyButton text={status.certPath} label={t('settings.mcpCopyPath')} />
               </div>
             </Field>
           )}
 
           <Toggle
-            label="Require auth token"
-            description="Require a bearer token on every request. Recommended."
+            label={t('settings.mcpRequireAuth')}
+            description={t('settings.mcpRequireAuthDesc')}
             checked={settings.mcp_require_auth}
             onChange={(v) => void update({ mcp_require_auth: v })}
           />
@@ -532,16 +521,12 @@ function McpSection({
           {!settings.mcp_require_auth && (
             <div className="flex items-start gap-2 rounded-md border border-border bg-surface px-2 py-1.5 text-[11px] text-fg-subtle">
               <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-fg-subtle" />
-              <span>
-                Without a token, any program running on this Mac can control your apps through
-                DevHarbor. Fine on a personal machine; turn it back on if other people log in
-                here or you run software you do not trust.
-              </span>
+              <span>{t('settings.mcpNoAuthWarning')}</span>
             </div>
           )}
 
           {settings.mcp_require_auth && (
-            <Field label="Auth token" description="Send as an Authorization: Bearer header.">
+            <Field label={t('settings.mcpToken')} description={t('settings.mcpTokenDesc')}>
               <div className="flex items-center gap-1.5">
                 <input
                   readOnly
@@ -550,7 +535,7 @@ function McpSection({
                 />
                 <button
                   onClick={() => setReveal((r) => !r)}
-                  title={reveal ? 'Hide' : 'Reveal'}
+                  title={reveal ? t('settings.mcpTokenHide') : t('settings.mcpTokenReveal')}
                   className="rounded-md border border-border bg-surface p-1.5 text-fg hover:bg-elevated"
                 >
                   {reveal ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
@@ -559,17 +544,16 @@ function McpSection({
                 <button
                   onClick={async () => {
                     const ok = await openConfirm({
-                      title: 'Regenerate token?',
-                      description:
-                        'The current token stops working immediately. Any connected client must be updated with the new token.',
-                      confirmLabel: 'Regenerate',
+                      title: t('settings.mcpTokenRegenerateTitle'),
+                      description: t('settings.mcpTokenRegenerateDesc'),
+                      confirmLabel: t('settings.mcpTokenRegenerate'),
                       danger: true
                     });
                     if (!ok) return;
                     const next = await window.api.invoke('mcp:regenerateToken', undefined);
                     setToken(next);
                   }}
-                  title="Regenerate token"
+                  title={t('settings.mcpTokenRegenerateTooltip')}
                   className="rounded-md border border-border bg-surface p-1.5 text-fg hover:bg-elevated"
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
@@ -580,15 +564,14 @@ function McpSection({
 
           {status?.tokenStoredPlaintext && (
             <div className="rounded-md border border-danger-border bg-danger-bg px-2 py-1 text-[11px] text-danger-fg">
-              The macOS keychain was unavailable, so the token is stored unencrypted. File
-              permissions are its only protection.
+              {t('settings.mcpPlaintextWarning')}
             </div>
           )}
 
           <div>
             <div className="mb-1 flex items-center justify-between">
-              <span className="text-sm text-fg">Client config</span>
-              <CopyButton text={clientConfig} label="Copy config" />
+              <span className="text-sm text-fg">{t('settings.mcpClientConfig')}</span>
+              <CopyButton text={clientConfig} label={t('settings.mcpCopyConfig')} />
             </div>
             <pre className="max-h-40 overflow-auto rounded-md border border-border bg-base/60 p-2 font-mono text-[10.5px] leading-relaxed text-fg-subtle">
               {clientConfig}

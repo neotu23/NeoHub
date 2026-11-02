@@ -1,9 +1,13 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
-import { execSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import semver from 'semver';
 import type { NodeInstallation, NodeVersionPref } from '@shared/types';
+import { PathProbe } from './PathProbe';
+
+const execFileP = promisify(execFile);
 
 /**
  * Discover Node installations across nvm / fnm / volta / asdf / system,
@@ -14,8 +18,11 @@ import type { NodeInstallation, NodeVersionPref } from '@shared/types';
 export class NodeResolver {
   private cache: NodeInstallation[] | null = null;
 
-  list(force = false): NodeInstallation[] {
-    if (!force && this.cache) return this.cache;
+  constructor(private readonly pathProbe = new PathProbe()) {}
+
+  async list(force = false): Promise<NodeInstallation[]> {
+    // An empty scan must not hide a later installation or a recovered shell probe.
+    if (!force && this.cache?.length) return this.cache;
     const found: NodeInstallation[] = [];
 
     found.push(...this.scanNvm());
@@ -23,7 +30,7 @@ export class NodeResolver {
     found.push(...this.scanVolta());
     found.push(...this.scanAsdf());
 
-    const system = this.scanSystem();
+    const system = await this.scanSystem();
     if (system) found.push(system);
 
     // De-dupe by version+source, preferring earlier sources.
@@ -44,8 +51,9 @@ export class NodeResolver {
    * Resolve a project's preferred Node version to an installation.
    * Throws if the preferred version is not installed.
    */
-  resolve(pref: NodeVersionPref, projectDir: string): NodeInstallation {
-    const installs = this.list();
+  async resolve(pref: NodeVersionPref, projectDir: string): Promise<NodeInstallation> {
+    // Recheck at launch so Node upgrades/installations don't require an app restart.
+    const installs = await this.list(true);
 
     if (pref.kind === 'system') {
       const sys = installs.find((i) => i.source === 'system');
@@ -86,9 +94,9 @@ export class NodeResolver {
         .sort((a, b) => semver.rcompare(a.version, b.version))[0];
       if (cand) return cand;
       throw new Error(
-        `No installed Node version satisfies engines.node "${enginesRange}". Installed: ${installs
-          .map((i) => i.version)
-          .join(', ') || '(none)'}`
+        `No installed Node version satisfies engines.node "${enginesRange}". Installed: ${
+          installs.map((i) => i.version).join(', ') || '(none)'
+        }`
       );
     }
 
@@ -188,15 +196,19 @@ export class NodeResolver {
     return out;
   }
 
-  private scanSystem(): NodeInstallation | null {
+  private async scanSystem(): Promise<NodeInstallation | null> {
     try {
-      const nodePath = execSync('command -v node', { encoding: 'utf8', shell: '/bin/sh' }).trim();
+      // Finder's PATH omits user-installed Node. Use the same login-shell PATH
+      // as EnvBuilder, and pass executable paths literally rather than via a shell.
+      const env = { ...process.env, PATH: await this.pathProbe.get() };
+      const options = { encoding: 'utf8' as const, env, timeout: 3000, maxBuffer: 1 << 20 };
+      const { stdout: pathOutput } = await execFileP('/bin/sh', ['-c', 'command -v node'], options);
+      const nodePath = pathOutput.trim();
       if (!nodePath) return null;
-      const version = execSync(`"${nodePath}" --version`, { encoding: 'utf8' })
-        .trim()
-        .replace(/^v/, '');
+      const { stdout: versionOutput } = await execFileP(nodePath, ['--version'], options);
+      const version = versionOutput.trim().replace(/^v/, '');
       if (!semver.valid(version)) return null;
-      const binDir = nodePath.replace(/\/node$/, '');
+      const binDir = dirname(nodePath);
       // Skip if this matches an installation we already found via a manager.
       // (Caller dedupes by source+version, so a duplicate version with source=system is fine.)
       return { source: 'system', version, binDir };

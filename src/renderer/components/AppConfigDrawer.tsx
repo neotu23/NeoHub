@@ -154,7 +154,7 @@ export function AppConfigDrawer({
 
             <div className="border-t border-border pt-5">
               <Field
-                label="Start automatically when DevHarbor launches"
+                label="Start automatically when NeoHub launches"
                 description="When enabled, this app's default task starts on app launch (after a short stagger). Off by default."
               >
                 <button

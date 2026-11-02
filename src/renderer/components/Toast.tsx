@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 import { X, AlertCircle, Info, CheckCircle2 } from 'lucide-react';
 
 /**
@@ -29,6 +30,7 @@ export function pushToast(
 }
 
 export function ToastHost(): JSX.Element | null {
+  const { t } = useTranslation();
   const [toasts, setToasts] = useState<Toast[]>([]);
   const dismiss = useCallback((id: number) => setToasts((t) => t.filter((x) => x.id !== id)), []);
 
@@ -51,32 +53,32 @@ export function ToastHost(): JSX.Element | null {
     <div
       className="fixed bottom-4 right-4 z-[80] flex w-80 flex-col gap-2"
       role="region"
-      aria-label="Notifications"
+      aria-label={t('common.notifications')}
     >
-      {toasts.map((t) => (
+      {toasts.map((toast) => (
         <div
-          key={t.id}
-          role={t.kind === 'error' ? 'alert' : 'status'}
+          key={toast.id}
+          role={toast.kind === 'error' ? 'alert' : 'status'}
           className={`flex items-start gap-2 rounded-md border px-3 py-2 text-xs shadow-lg ${
-            t.kind === 'error'
+            toast.kind === 'error'
               ? 'border-danger-border bg-danger-bg text-danger-fg'
-              : t.kind === 'success'
+              : toast.kind === 'success'
                 ? 'border-border bg-surface text-fg'
                 : 'border-border bg-surface text-fg'
           }`}
         >
-          {t.kind === 'error' ? (
+          {toast.kind === 'error' ? (
             <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          ) : t.kind === 'success' ? (
+          ) : toast.kind === 'success' ? (
             <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />
           ) : (
             <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-fg-subtle" />
           )}
-          <span className="flex-1 whitespace-pre-line break-words">{t.message}</span>
+          <span className="flex-1 whitespace-pre-line break-words">{toast.message}</span>
           <button
-            onClick={() => dismiss(t.id)}
+            onClick={() => dismiss(toast.id)}
             className="shrink-0 rounded p-0.5 opacity-70 hover:bg-black/10 hover:opacity-100"
-            aria-label="Dismiss notification"
+            aria-label={t('common.dismissNotification')}
           >
             <X className="h-3 w-3" />
           </button>

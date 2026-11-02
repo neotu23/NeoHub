@@ -65,7 +65,7 @@ export function registerAllIpcHandlers(
   const pathProbe = new PathProbe();
   const detector = new DetectionService();
   const registry = new AppRegistry(detector);
-  const nodes = new NodeResolver();
+  const nodes = new NodeResolver(pathProbe);
   const taskRegistry = new TaskRegistry();
   const envStore = new EnvStore();
   const envBuilder = new EnvBuilder(envStore, pathProbe);
@@ -220,7 +220,7 @@ export function registerAllIpcHandlers(
   runner.on('ports', () => tray.refresh());
 
   // Reconcile launch-at-login with the OS - the OS wins. If the user removed (or added)
-  // DevHarbor under System Settings → Login Items, adopt that into our setting rather than
+  // NeoHub under System Settings → Login Items, adopt that into our setting rather than
   // re-asserting a stale stored value over their explicit choice; we only WRITE login-item
   // state from the settings:set handler, i.e. when toggled in-app.
   try {
@@ -490,7 +490,7 @@ export function registerAllIpcHandlers(
     const w = win();
     if (!w) return null;
     const result = await electronDialog.showSaveDialog(w, {
-      title: 'Export DevHarbor database',
+      title: 'Export NeoHub database',
       defaultPath: `devharbor-${Date.now()}.db`,
       filters: [{ name: 'SQLite DB', extensions: ['db'] }]
     });

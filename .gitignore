@@ -28,6 +28,10 @@ coverage
 
 # Local tool artifacts
 .understand-anything/
+.reasonix/
+
+# Icon / promotional source renders (the shipped assets are build/icon.{png,icns})
+generated_images/
 
 # Editor / OS
 .DS_Store

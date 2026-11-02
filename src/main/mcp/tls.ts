@@ -30,7 +30,7 @@ x509_extensions = v3_req
 prompt = no
 
 [dn]
-CN = DevHarbor MCP (localhost)
+CN = NeoHub MCP (localhost)
 
 [v3_req]
 basicConstraints = CA:FALSE

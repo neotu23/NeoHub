@@ -1,5 +1,7 @@
 import type { InvokeChannelName, InvokeReq, InvokeRes } from '@shared/ipc';
 import { pushToast } from '../components/Toast';
+// Non-React module: read translations from the i18next singleton.
+import i18n from '../i18n';
 
 /**
  * Electron serialises a thrown main-process Error as
@@ -12,7 +14,7 @@ export function cleanIpcError(e: unknown): string {
     .replace(/^Error invoking remote method '[^']*':\s*/i, '')
     .replace(/^(?:Uncaught )?Error:\s*/i, '')
     .trim();
-  return stripped || 'Something went wrong.';
+  return stripped || i18n.t('errors.unknown');
 }
 
 /**

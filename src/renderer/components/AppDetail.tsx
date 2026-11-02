@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Play, Square, RotateCw, Trash2, KeyRound, RefreshCw, Cog, Copy, Download, ClipboardCopy, Check } from 'lucide-react';
 import type { App, DetectionResult, Task, TaskId } from '@shared/types';
 import { useStore } from '../store/store';
@@ -15,12 +16,13 @@ import { AppConfigDrawer } from './AppConfigDrawer';
 import { LogSearchView } from './LogSearchView';
 import { OpenInMenu } from './OpenInMenu';
 import { cn } from '../lib/cn';
-import { isLive as isLiveState, isActive, basename } from '../lib/processState';
+import { isLive as isLiveState, isActive, basename, STATE_LABEL_KEY } from '../lib/processState';
 import { invokeOrToast } from '../lib/invoke';
 
 const EMPTY_TASKS: Task[] = [];
 
 export function AppDetail({ app }: { app: App }): JSX.Element {
+  const { t } = useTranslation();
   const tasks = useStore((s) => s.tasksByApp[app.id] ?? EMPTY_TASKS);
   const selectedTaskId = useStore((s) => s.selectedTaskByApp[app.id] ?? null);
   const setTasksForApp = useStore((s) => s.setTasksForApp);
@@ -123,11 +125,9 @@ export function AppDetail({ app }: { app: App }): JSX.Element {
     // If currently running: confirm a stop-then-remove flow in one click. Avoids the
     // old dead-end "stop the app before removing" error message.
     const ok = await openConfirm({
-      title: `Remove "${app.name}" from DevHarbor?`,
-      description: isLive
-        ? 'This app is currently running. Its tasks will be stopped first, then it will be removed. Files on disk are not deleted.'
-        : 'This only removes it from DevHarbor. Files on disk are not deleted.',
-      confirmLabel: isLive ? 'Stop & remove' : 'Remove',
+      title: t('appDetail.removeTitle', { name: app.name }),
+      description: isLive ? t('appDetail.removeDescRunning') : t('appDetail.removeDescIdle'),
+      confirmLabel: isLive ? t('appDetail.stopAndRemove') : t('sidebar.prompt.remove'),
       danger: true
     });
     if (!ok) return;
@@ -234,7 +234,7 @@ export function AppDetail({ app }: { app: App }): JSX.Element {
             {app.name}
           </h1>
           <span className="shrink-0 text-xs text-fg-subtle">
-            {labelForState(state)}
+            {t(STATE_LABEL_KEY[state])}
             {uptime ? ` · ${uptime}` : ''}
           </span>
           <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -248,14 +248,18 @@ export function AppDetail({ app }: { app: App }): JSX.Element {
                 setEnvInitial(null);
                 setEnvOpen(true);
               }}
-              title="Environment variables"
-              aria-label="Environment variables"
+              title={t('appDetail.envVars')}
+              aria-label={t('appDetail.envVars')}
             >
               <KeyRound className="h-4 w-4" />
             </IconButton>
             {/* "Tasks" header button removed Phase 7 - the always-on task strip below
                 carries a "Manage tasks" button, which avoids two doors to the same UI. */}
-            <IconButton onClick={() => setConfigOpen(true)} title="App settings" aria-label="App settings">
+            <IconButton
+              onClick={() => setConfigOpen(true)}
+              title={t('appDetail.appSettings')}
+              aria-label={t('appDetail.appSettings')}
+            >
               <Cog className="h-4 w-4" />
             </IconButton>
 
@@ -268,29 +272,29 @@ export function AppDetail({ app }: { app: App }): JSX.Element {
                 onClick={start}
                 disabled={busy != null}
                 variant="primary"
-                title="Start all tasks in this app (⌘ ↩)"
+                title={t('appDetail.startAppTooltip')}
                 className="min-w-[104px] justify-center"
               >
-                <Play className="h-3.5 w-3.5" /> Start app
+                <Play className="h-3.5 w-3.5" /> {t('appDetail.startApp')}
               </Button>
             ) : (
               <>
                 <Button
                   onClick={restart}
                   disabled={busy != null}
-                  title="Stop, then start this app again"
+                  title={t('appDetail.restartAppTooltip')}
                   className="min-w-[104px] justify-center"
                 >
-                  <RotateCw className="h-3.5 w-3.5" /> Restart app
+                  <RotateCw className="h-3.5 w-3.5" /> {t('appDetail.restartApp')}
                 </Button>
                 <Button
                   onClick={stop}
                   disabled={busy != null}
                   variant="danger"
-                  title="Stop all running tasks in this app"
+                  title={t('appDetail.stopAppTooltip')}
                   className="min-w-[104px] justify-center"
                 >
-                  <Square className="h-3.5 w-3.5" /> Stop app
+                  <Square className="h-3.5 w-3.5" /> {t('appDetail.stopApp')}
                 </Button>
               </>
             )}
@@ -301,8 +305,8 @@ export function AppDetail({ app }: { app: App }): JSX.Element {
             <IconButton
               onClick={onRemove}
               disabled={busy != null}
-              title="Remove from DevHarbor"
-              aria-label="Remove from DevHarbor"
+              title={t('appDetail.removeApp')}
+              aria-label={t('appDetail.removeApp')}
               danger
             >
               <Trash2 className="h-4 w-4" />
@@ -314,8 +318,8 @@ export function AppDetail({ app }: { app: App }): JSX.Element {
           <button
             onClick={() => void copyPath()}
             className="inline-flex shrink-0 items-center rounded p-0.5 text-fg-subtle hover:bg-surface hover:text-fg"
-            title={pathCopied ? 'Copied' : 'Copy path'}
-            aria-label="Copy app path to clipboard"
+            title={pathCopied ? t('common.copied') : t('appDetail.copyPath')}
+            aria-label={t('appDetail.copyPathAria')}
           >
             {pathCopied ? (
               <Check className="h-3 w-3 text-success-fg" />
@@ -342,7 +346,7 @@ export function AppDetail({ app }: { app: App }): JSX.Element {
             />
           ))}
           {taskPortEntries.length === 0 && tasks.length === 0 && (
-            <span className="text-[11px] text-fg-subtle">No tasks yet. Add one from the strip below.</span>
+            <span className="text-[11px] text-fg-subtle">{t('appDetail.noTasksHint')}</span>
           )}
         </div>
         {envFileChanges && envFileChanges.length > 0 && (
@@ -350,26 +354,28 @@ export function AppDetail({ app }: { app: App }): JSX.Element {
             <RefreshCw className="h-3 w-3" />
             <span className="flex-1 truncate">
               {envFileChanges.length === 1
-                ? `${basename(envFileChanges[0]!.path)} changed on disk.`
-                : `${envFileChanges.length} env files changed on disk.`}{' '}
-              Restart to apply.
+                ? t('appDetail.envFilesChanged_one', { file: basename(envFileChanges[0]!.path) })
+                : t('appDetail.envFilesChanged', { count: envFileChanges.length })}{' '}
+              {t('appDetail.envRestartToApply')}
             </span>
             <Button
               onClick={() => {
                 // Fire-and-forget: route through invokeOrToast so a restart failure
                 // surfaces as a toast instead of a silent unhandled rejection.
-                void invokeOrToast('proc:restart', { id: app.id }, { context: 'Restart failed' });
+                void invokeOrToast('proc:restart', { id: app.id }, {
+                  context: t('errors.restartFailed')
+                });
                 dismissEnvFileChanges(app.id);
               }}
-              title="Restart the app to load the changed env files"
+              title={t('appDetail.envRestartTooltip')}
             >
-              <RotateCw className="h-3 w-3" /> Restart
+              <RotateCw className="h-3 w-3" /> {t('common.restart')}
             </Button>
             <button
               onClick={() => dismissEnvFileChanges(app.id)}
               className="rounded p-0.5 text-warn-fg/70 hover:bg-warn-bg-hover hover:text-warn-strong"
-              title="Dismiss this notice"
-              aria-label="Dismiss"
+              title={t('appDetail.dismissNotice')}
+              aria-label={t('appDetail.dismissNotice')}
             >
               ×
             </button>
@@ -396,12 +402,12 @@ export function AppDetail({ app }: { app: App }): JSX.Element {
         />
       ) : (
         <div className="flex items-center justify-between border-b border-surface bg-base px-3 py-1.5">
-          <span className="text-[11px] text-fg-subtle">No tasks yet for this app.</span>
+          <span className="text-[11px] text-fg-subtle">{t('appDetail.noTasksForApp')}</span>
           <button
             onClick={() => setEditorOpen(true)}
             className="rounded-md border border-border px-2 py-1 text-[11px] text-fg-muted hover:bg-surface hover:text-fg"
           >
-            Add task
+            {t('appDetail.addTask')}
           </button>
         </div>
       )}
@@ -411,7 +417,7 @@ export function AppDetail({ app }: { app: App }): JSX.Element {
           <div className="flex items-center gap-3">
             <div className="flex items-baseline gap-1.5">
               <span className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted">
-                Logs
+                {t('appDetail.logs')}
               </span>
               {activeTask && (
                 <span className="text-[11px] text-fg-subtle">· {activeTask.name}</span>
@@ -420,10 +426,10 @@ export function AppDetail({ app }: { app: App }): JSX.Element {
             {activeTaskId && (
               <div className="inline-flex rounded-md border border-border bg-surface p-0.5 text-[11px]">
                 <ModePill active={logsMode === 'live'} onClick={() => setLogsMode('live')}>
-                  Live
+                  {t('appDetail.logsLive')}
                 </ModePill>
                 <ModePill active={logsMode === 'filter'} onClick={() => setLogsMode('filter')}>
-                  Filter
+                  {t('appDetail.logsFilter')}
                 </ModePill>
               </div>
             )}
@@ -433,22 +439,22 @@ export function AppDetail({ app }: { app: App }): JSX.Element {
               <button
                 onClick={() => void termRef.current?.copyAll()}
                 className="inline-flex items-center gap-1 text-[11px] text-fg-subtle hover:text-fg"
-                title="Copy all logs to clipboard"
+                title={t('appDetail.copyLogs')}
               >
-                <Copy className="h-3 w-3" /> Copy
+                <Copy className="h-3 w-3" /> {t('common.copy')}
               </button>
               <button
                 onClick={() => void termRef.current?.saveToFile()}
                 className="inline-flex items-center gap-1 text-[11px] text-fg-subtle hover:text-fg"
-                title="Save logs to file"
+                title={t('appDetail.saveLogs')}
               >
-                <Download className="h-3 w-3" /> Save
+                <Download className="h-3 w-3" /> {t('appDetail.logsSave')}
               </button>
               <button
                 onClick={() => void onClear()}
                 className="text-[11px] text-fg-subtle hover:text-fg"
               >
-                Clear
+                {t('appDetail.clearLogs')}
               </button>
             </div>
           )}
@@ -464,7 +470,7 @@ export function AppDetail({ app }: { app: App }): JSX.Element {
         <div className="flex-1 overflow-hidden p-2">
           {!activeTaskId ? (
             <div className="flex h-full items-center justify-center text-sm text-fg-subtle">
-              No tasks yet. Use "Add task" in the strip above.
+              {t('appDetail.noTasksUseAdd')}
             </div>
           ) : logsMode === 'filter' ? (
             <LogSearchView taskId={activeTaskId} />
@@ -575,10 +581,6 @@ function Button({
       {children}
     </button>
   );
-}
-
-function labelForState(state: string): string {
-  return state.charAt(0).toUpperCase() + state.slice(1);
 }
 
 function formatUptime(ms: number): string {

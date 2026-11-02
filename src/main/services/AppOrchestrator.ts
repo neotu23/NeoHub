@@ -286,7 +286,7 @@ export class AppOrchestrator extends EventEmitter {
   }
 
   async startTask(taskId: TaskId): Promise<RunningTask> {
-    if (this.shuttingDown) throw new Error('DevHarbor is shutting down.');
+    if (this.shuttingDown) throw new Error('NeoHub is shutting down.');
     const task = this.tasks.get(taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
     const { snapshot } = await this.runner.start(task);

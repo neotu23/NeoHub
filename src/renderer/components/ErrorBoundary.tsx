@@ -29,7 +29,7 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="flex h-full w-full items-center justify-center bg-base p-8">
           <div className="max-w-md text-center">
-            <h2 className="text-lg font-semibold text-fg">DevHarbor hit an error</h2>
+            <h2 className="text-lg font-semibold text-fg">NeoHub hit an error</h2>
             <p className="mt-2 text-sm text-fg-subtle">
               The interface crashed, but your running apps are unaffected - they run in the
               background process and keep going. Reloading rebuilds the window.

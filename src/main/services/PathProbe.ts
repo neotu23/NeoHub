@@ -38,16 +38,25 @@ function extractPath(stdout: string): string {
  * startup captures the *real* PATH the user sees in their terminal, which we then use
  * as the base for spawned children.
  *
- * Cached for the app's lifetime.
+ * Successful probes are cached for the app's lifetime. Concurrent callers share
+ * the pending probe; failures fall back for that call and can be retried later.
  */
 export class PathProbe {
   private cached: string | null = null;
-  private probed = false;
+  private pending: Promise<string> | null = null;
 
   /** Returns the probed PATH, or process.env.PATH if probing fails. */
   async get(): Promise<string> {
-    if (this.probed) return this.cached ?? process.env.PATH ?? '/usr/bin:/bin';
-    this.probed = true;
+    if (this.cached !== null) return this.cached;
+    if (!this.pending) {
+      this.pending = this.probe().finally(() => {
+        this.pending = null;
+      });
+    }
+    return this.pending;
+  }
+
+  private async probe(): Promise<string> {
     try {
       const shell = process.env.SHELL || '/bin/zsh';
       // `-l` login, `-i` interactive - read full user rc files. But `-i` runs the user's

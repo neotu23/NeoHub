@@ -207,7 +207,7 @@ export class TaskRunner extends EventEmitter {
     const pm: PackageManager = task.packageManagerOverride ?? app.packageManager ?? 'npm';
     const nodePref = task.nodeVersionPrefOverride ?? app.nodeVersionPref;
     const cwd = resolveWorkingDir(app, task);
-    const node = this.nodes.resolve(nodePref, cwd);
+    const node = await this.nodes.resolve(nodePref, cwd);
 
     const { file, args, commandStr } = buildCommand({
       pm,

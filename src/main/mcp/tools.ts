@@ -286,7 +286,7 @@ function startResultFor(ctx: McpToolContext, app: App, startError: string | null
     const anyListening = tasks.some((t) => (ctx.runner.get(t.id)?.ports.length ?? 0) > 0);
     notes.push(
       anyListening
-        ? 'No readiness probe is configured (readiness kind "none"). The task is listening on a port, which for many dev servers means ready - but DevHarbor has NOT verified it is serving (an API can open its port before its DB/cache connect). Judge from the log tail below, or call set_readiness (e.g. an http probe on a /health or /ready URL) so a future start returns readinessVerified: true and waits until it is actually serving.'
+        ? 'No readiness probe is configured (readiness kind "none"). The task is listening on a port, which for many dev servers means ready - but NeoHub has NOT verified it is serving (an API can open its port before its DB/cache connect). Judge from the log tail below, or call set_readiness (e.g. an http probe on a /health or /ready URL) so a future start returns readinessVerified: true and waits until it is actually serving.'
         : 'No readiness probe is configured (readiness kind "none"), so "running" means the processes are up, not that they are serving. Judge from the log tail below, or call set_readiness to configure a port/log/http probe for a verified answer.'
     );
   }
@@ -324,7 +324,7 @@ function nodeVersionPrefFrom(value: string): NodeVersionPref {
 const READ_ONLY: Record<string, unknown> = { readOnlyHint: true };
 
 /**
- * Register the full DevHarbor tool catalog on `server` (see specs/07-mcp-server.md). Each
+ * Register the full NeoHub tool catalog on `server` (see specs/07-mcp-server.md). Each
  * handler is wrapped so a thrown ResolutionError (or any error) becomes a clean isError
  * result rather than a transport fault.
  */
@@ -373,7 +373,7 @@ export function registerTools(server: McpServer, ctx: McpToolContext): void {
     {
       title: 'Overview',
       description:
-        'Snapshot of everything DevHarbor manages: app count, how many are running or crashed, and which ports are active. Call this first to orient yourself. DevHarbor runs local dev servers on the user\'s behalf - to run a project, register it with add_app and start it with start_app instead of running npm/yarn/pnpm in your own shell.',
+        'Snapshot of everything NeoHub manages: app count, how many are running or crashed, and which ports are active. Call this first to orient yourself. NeoHub runs local dev servers on the user\'s behalf - to run a project, register it with add_app and start it with start_app instead of running npm/yarn/pnpm in your own shell.',
       annotations: READ_ONLY
     },
     () => {
@@ -619,7 +619,7 @@ export function registerTools(server: McpServer, ctx: McpToolContext): void {
     {
       title: 'Get ports',
       description:
-        'Listening ports DevHarbor has detected, grouped by app and labeled with the owning process (so in a monorepo task that fans out into several servers you can tell which port is which service). Pass `port` to find who owns a specific port.',
+        'Listening ports NeoHub has detected, grouped by app and labeled with the owning process (so in a monorepo task that fans out into several servers you can tell which port is which service). Pass `port` to find who owns a specific port.',
       inputSchema: {
         port: z.number().int().min(1).max(65535).optional().describe('Look up the owner of just this port.')
       },
@@ -658,7 +658,7 @@ export function registerTools(server: McpServer, ctx: McpToolContext): void {
           process: best?.process ?? null,
           note:
             !byApp.length
-              ? 'No task tracked by DevHarbor is listening on that port.'
+              ? 'No task tracked by NeoHub is listening on that port.'
               : claimants.length > 1
                 ? 'Multiple tasks reference this port (one may be a transient log hint); the confirmed owner is reported.'
                 : undefined
@@ -693,7 +693,7 @@ export function registerTools(server: McpServer, ctx: McpToolContext): void {
         'Node.js versions installed on this machine and where they came from (nvm/fnm/volta/asdf/system). Set an app\'s version with update_app nodeVersion.',
       annotations: READ_ONLY
     },
-    () => jsonResult({ installations: ctx.nodes.list(true) })
+    async () => jsonResult({ installations: await ctx.nodes.list(true) })
   );
 
   // --- Mutating ------------------------------------------------------------------------------
@@ -704,14 +704,14 @@ export function registerTools(server: McpServer, ctx: McpToolContext): void {
       title: 'Add app',
       mutates: true,
       description:
-        'Register a local Node project so DevHarbor can run it - use this instead of running its dev server yourself. Give the project\'s absolute `path`. For a monorepo, pass `workspaceTasks: true` to create one task per workspace package (pnpm/yarn/npm workspaces), each running its own dev script from its own directory - start_app then runs them all, start_task runs one. Otherwise the default task is chosen in this order: the `script` you name, else a raw `command` you pass, else the project\'s detected default script. Returns the app, its tasks, the detected scripts, and any detected workspace packages.',
+        'Register a local Node project so NeoHub can run it - use this instead of running its dev server yourself. Give the project\'s absolute `path`. For a monorepo, pass `workspaceTasks: true` to create one task per workspace package (pnpm/yarn/npm workspaces), each running its own dev script from its own directory - start_app then runs them all, start_task runs one. Otherwise the default task is chosen in this order: the `script` you name, else a raw `command` you pass, else the project\'s detected default script. Returns the app, its tasks, the detected scripts, and any detected workspace packages.',
       inputSchema: {
         path: z.string().describe('Absolute path of the project directory.'),
         name: z.string().optional().describe('Display name (defaults to the folder name).'),
         script: z.string().optional().describe('package.json script for the default task (e.g. "dev"). Takes precedence over command and detection.'),
         command: z.string().optional().describe('Raw shell command for the default task. Used when you do not pass a script; wins over the auto-detected script.'),
         workspaceTasks: z.boolean().optional().describe('Monorepo: create one task per detected workspace package instead of a single root task. Ignores script/command when packages are found.'),
-        autoStart: z.boolean().optional().describe('Start this app automatically when DevHarbor launches.')
+        autoStart: z.boolean().optional().describe('Start this app automatically when NeoHub launches.')
       }
     },
     async (args) => {
@@ -875,7 +875,7 @@ export function registerTools(server: McpServer, ctx: McpToolContext): void {
       title: 'Remove app',
       mutates: true,
       description:
-        'Unregister an app from DevHarbor. Does NOT delete any files on disk - only the registration. Requires confirm: true and refuses while the app is running.',
+        'Unregister an app from NeoHub. Does NOT delete any files on disk - only the registration. Requires confirm: true and refuses while the app is running.',
       inputSchema: {
         app: z.string().describe('App id, exact name, or absolute path.'),
         confirm: z.boolean().describe('Must be true to actually remove.')
@@ -1023,7 +1023,7 @@ export function registerTools(server: McpServer, ctx: McpToolContext): void {
       title: 'Start app',
       mutates: true,
       description:
-        'Start an app - runs its tasks in dependency order, waits for readiness, then waits briefly for port detection so the response includes the ports. This is how you run a project\'s dev server through DevHarbor; do not run npm/yarn/pnpm yourself. `readinessVerified` is null when the app has no readiness probe - "running" then means the processes are up, not that they are serving, and the response includes recent output so you can judge. Ports listed are those detected by return time; without a readiness probe, a service that binds well after its siblings can land later - check get_ports/get_app, or configure set_readiness so the start waits for it. If a task crashed or never became ready, its log tail is included so you can diagnose in one call. Long starts return "still starting" after 45s - poll get_app.',
+        'Start an app - runs its tasks in dependency order, waits for readiness, then waits briefly for port detection so the response includes the ports. This is how you run a project\'s dev server through NeoHub; do not run npm/yarn/pnpm yourself. `readinessVerified` is null when the app has no readiness probe - "running" then means the processes are up, not that they are serving, and the response includes recent output so you can judge. Ports listed are those detected by return time; without a readiness probe, a service that binds well after its siblings can land later - check get_ports/get_app, or configure set_readiness so the start waits for it. If a task crashed or never became ready, its log tail is included so you can diagnose in one call. Long starts return "still starting" after 45s - poll get_app.',
       inputSchema: { app: z.string().describe('App id, exact name, or absolute path.') }
     },
     async (args) => {
@@ -1218,7 +1218,7 @@ export function registerTools(server: McpServer, ctx: McpToolContext): void {
       title: 'Set readiness probe',
       mutates: true,
       description:
-        'Configure how DevHarbor decides a task is READY (actually serving), so start/restart wait for it and report readinessVerified: true. This is the fix when a task reports ready: null / readinessVerified: null because it has no probe. kinds: "none" (no probe), "port" (a TCP port is listening - note a port can open before a service can serve), "log" (a log line matches regex), "http" (a GET to url returns success - best for a service that opens its port before its DB/cache connect; point it at /health or /ready), "delay" (fixed wait ms). Takes effect on the next start.',
+        'Configure how NeoHub decides a task is READY (actually serving), so start/restart wait for it and report readinessVerified: true. This is the fix when a task reports ready: null / readinessVerified: null because it has no probe. kinds: "none" (no probe), "port" (a TCP port is listening - note a port can open before a service can serve), "log" (a log line matches regex), "http" (a GET to url returns success - best for a service that opens its port before its DB/cache connect; point it at /health or /ready), "delay" (fixed wait ms). Takes effect on the next start.',
       inputSchema: {
         app: z.string().describe('App id, exact name, or absolute path.'),
         task: z.string().describe('Task id, or task name (scoped by app).'),
@@ -1268,7 +1268,7 @@ export function registerTools(server: McpServer, ctx: McpToolContext): void {
           if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
             return errorResult('url must be http:// or https://.');
           }
-          // Loopback only: DevHarbor's main process polls this URL, so a non-loopback host
+          // Loopback only: NeoHub's main process polls this URL, so a non-loopback host
           // would turn the readiness probe into an SSRF / egress primitive. A dev server's
           // health endpoint is always local.
           if (!isLoopbackHostname(parsed.hostname)) {

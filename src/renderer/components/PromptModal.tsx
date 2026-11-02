@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 import { X, AlertTriangle } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 
@@ -83,6 +84,7 @@ function DialogPanel({
   // shared hook. onClose here means "cancel" - same as the X / backdrop click.
   // useDialog focuses the [data-autofocus] element (the input here); we follow
   // up to select its contents so a prefilled defaultValue is overwrite-ready.
+  const { t } = useTranslation();
   const { dialogProps } = useDialog(onClose, TITLE_ID);
 
   useEffect(() => {
@@ -101,7 +103,7 @@ function DialogPanel({
       }
     }
     if (!trimmed) {
-      setError('Value cannot be empty.');
+      setError(t('common.emptyValue'));
       return;
     }
     state.resolve(trimmed);
@@ -146,8 +148,8 @@ function DialogPanel({
           <button
             onClick={onClose}
             className="rounded-md p-1 text-fg-subtle hover:bg-surface hover:text-fg"
-            title="Cancel"
-            aria-label="Cancel"
+            title={t('common.cancel')}
+            aria-label={t('common.cancel')}
           >
             <X className="h-4 w-4" />
           </button>
@@ -184,14 +186,14 @@ function DialogPanel({
             onClick={onClose}
             className="rounded-md px-2.5 py-1 text-sm text-fg-muted hover:bg-surface"
           >
-            {state.mode === 'confirm' ? state.cancelLabel ?? 'Cancel' : 'Cancel'}
+            {state.mode === 'confirm' ? state.cancelLabel ?? t('common.cancel') : t('common.cancel')}
           </button>
           <button
             data-autofocus={state.mode === 'confirm' ? true : undefined}
             onClick={state.mode === 'prompt' ? confirmPrompt : confirmConfirm}
             className={confirmBtnClass}
           >
-            {state.confirmLabel ?? 'Confirm'}
+            {state.confirmLabel ?? t('common.confirm')}
           </button>
         </footer>
       </div>

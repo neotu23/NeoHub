@@ -296,6 +296,8 @@ export interface SettingsState {
   kill_grace_ms: number;
   auto_update: boolean;
   theme: 'light' | 'dark' | 'system';
+  /** UI language: `system` follows the OS locale, otherwise an explicit shipped language. */
+  language: 'system' | 'en' | 'zh-CN';
   dashboard_refresh_ms: number;
   /** Show a desktop notification when a task crashes while DevHarbor is backgrounded. */
   notify_on_crash: boolean;

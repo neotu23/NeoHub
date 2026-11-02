@@ -37,7 +37,7 @@ export class TrayController {
     if (this.tray) return;
     try {
       this.tray = new Tray(this.makeIcon('idle'));
-      this.tray.setToolTip('DevHarbor');
+      this.tray.setToolTip('NeoHub');
       this.refresh();
     } catch {
       // Tray creation can fail in a display-less environment - never let it block boot.
@@ -63,7 +63,7 @@ export class TrayController {
 
     this.tray.setImage(this.makeIcon(anyCrashed ? 'crashed' : runningCount > 0 ? 'running' : 'idle'));
     this.tray.setToolTip(
-      runningCount > 0 ? `DevHarbor - ${runningCount} running` : 'DevHarbor - idle'
+      runningCount > 0 ? `NeoHub - ${runningCount} running` : 'NeoHub - idle'
     );
 
     const appItems: MenuItemConstructorOptions[] = apps
@@ -82,13 +82,13 @@ export class TrayController {
       });
 
     const template: MenuItemConstructorOptions[] = [
-      { label: 'Open DevHarbor', click: () => this.cb.open() },
+      { label: 'Open NeoHub', click: () => this.cb.open() },
       { type: 'separator' },
       ...(appItems.length ? appItems : [{ label: 'No apps registered', enabled: false }]),
       { type: 'separator' },
       { label: 'Stop all', enabled: runningCount > 0, click: () => this.cb.stopAll() },
       { type: 'separator' },
-      { label: 'Quit DevHarbor', click: () => this.cb.quit() }
+      { label: 'Quit NeoHub', click: () => this.cb.quit() }
     ];
     this.tray.setContextMenu(Menu.buildFromTemplate(template));
   }

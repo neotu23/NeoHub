@@ -1,4 +1,5 @@
 import { memo, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Play, Square, FileText, Filter, ArrowDownUp, ArrowDownAZ, Clock, Check } from 'lucide-react';
 import type { App, AppId, ProcessState, Task } from '@shared/types';
 import { useStore } from '../store/store';
@@ -6,11 +7,12 @@ import { PortChip } from './PortChip';
 import { StatusDot } from './StatusDot';
 import { useContextMenu, type MenuItem } from './ContextMenu';
 import { sortApps, type AppSortMode } from '../lib/sortApps';
-import { isLive, isActive } from '../lib/processState';
+import { isLive, isActive, STATE_LABEL_KEY } from '../lib/processState';
 import { invokeOrToast } from '../lib/invoke';
 import { cn } from '../lib/cn';
 
 export function Dashboard(): JSX.Element {
+  const { t } = useTranslation();
   const apps = useStore((s) => s.apps);
   const appState = useStore((s) => s.appState);
   const tasksByApp = useStore((s) => s.tasksByApp);
@@ -40,9 +42,17 @@ export function Dashboard(): JSX.Element {
 
   const openSortMenu = (e: React.MouseEvent): void => {
     const opts: { mode: AppSortMode; label: string; icon: JSX.Element }[] = [
-      { mode: 'name', label: 'Name (A-Z)', icon: <ArrowDownAZ className="h-3.5 w-3.5" /> },
-      { mode: 'recent', label: 'Recently used', icon: <Clock className="h-3.5 w-3.5" /> },
-      { mode: 'running', label: 'Running first', icon: <Play className="h-3.5 w-3.5" /> }
+      { mode: 'name', label: t('common.sortName'), icon: <ArrowDownAZ className="h-3.5 w-3.5" /> },
+      {
+        mode: 'recent',
+        label: t('common.sortRecent'),
+        icon: <Clock className="h-3.5 w-3.5" />
+      },
+      {
+        mode: 'running',
+        label: t('common.sortRunning'),
+        icon: <Play className="h-3.5 w-3.5" />
+      }
     ];
     openMenu(
       e,
@@ -98,7 +108,9 @@ export function Dashboard(): JSX.Element {
 
   const stopAll = async (): Promise<void> => {
     await Promise.all(
-      running.map((a) => invokeOrToast('proc:stop', { id: a.id }, { context: 'Stop failed' }))
+      running.map((a) =>
+        invokeOrToast('proc:stop', { id: a.id }, { context: t('errors.stopFailed') })
+      )
     );
   };
 
@@ -107,12 +119,12 @@ export function Dashboard(): JSX.Element {
       <div className="titlebar-drag h-10 shrink-0" />
       <header className="titlebar-no-drag flex items-center justify-between border-b border-border px-6 py-3">
         <div>
-          <h1 className="text-base font-medium text-fg">Dashboard</h1>
+          <h1 className="text-base font-medium text-fg">{t('dashboard.title')}</h1>
           <p className="mt-0.5 text-xs text-fg-subtle">
             {apps.length === 0
-              ? 'No apps registered yet'
-              : `${visibleApps.length} app${visibleApps.length === 1 ? '' : 's'}${
-                  tagFilter ? ` · tag: ${tagFilter}` : ''
+              ? t('dashboard.noAppsRegistered')
+              : `${t('dashboard.appCount', { count: visibleApps.length })}${
+                  tagFilter ? t('dashboard.tagSuffix', { tag: tagFilter }) : ''
                 }`}
           </p>
         </div>
@@ -125,7 +137,7 @@ export function Dashboard(): JSX.Element {
                 onChange={(e) => setTagFilter(e.target.value)}
                 className="bg-transparent py-0.5 text-fg outline-none"
               >
-                <option value="">All tags</option>
+                <option value="">{t('dashboard.allTags')}</option>
                 {allTags.map((t) => (
                   <option key={t} value={t}>
                     {t}
@@ -136,14 +148,15 @@ export function Dashboard(): JSX.Element {
           )}
           <button
             onClick={openSortMenu}
-            title={`Sort apps - ${
-              sortMode === 'name'
-                ? 'Name (A-Z)'
-                : sortMode === 'recent'
-                  ? 'Recently used'
-                  : 'Running first'
-            }`}
-            aria-label="Sort apps"
+            title={t('common.sortTooltip', {
+              mode:
+                sortMode === 'name'
+                  ? t('common.sortName')
+                  : sortMode === 'recent'
+                    ? t('common.sortRecent')
+                    : t('common.sortRunning')
+            })}
+            aria-label={t('common.sortApps')}
             className={cn(
               'inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1 text-sm hover:bg-elevated',
               sortMode === 'name' ? 'text-fg-muted' : 'text-accent'
@@ -154,10 +167,10 @@ export function Dashboard(): JSX.Element {
           <button
             onClick={() => void stopAll()}
             disabled={running.length === 0}
-            title="Stop every running app"
+            title={t('dashboard.stopAllTooltip')}
             className="inline-flex items-center gap-1.5 rounded-md border border-danger-border bg-danger-bg px-2.5 py-1 text-sm text-danger-fg hover:bg-danger-bg-hover disabled:opacity-40"
           >
-            <Square className="h-3.5 w-3.5" /> Stop all
+            <Square className="h-3.5 w-3.5" /> {t('dashboard.stopAll')}
           </button>
         </div>
       </header>
@@ -165,11 +178,11 @@ export function Dashboard(): JSX.Element {
       <div className="flex-1 overflow-y-auto p-6">
         {apps.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-fg-subtle">
-            No apps registered yet.
+            {t('dashboard.empty')}
           </div>
         ) : visibleApps.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-fg-subtle">
-            No apps match tag "{tagFilter}".
+            {t('dashboard.noTagMatch', { tag: tagFilter })}
           </div>
         ) : (
           <>
@@ -177,14 +190,14 @@ export function Dashboard(): JSX.Element {
                 at total machine load that the (navigation-only) sidebar can't provide. */}
             <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
               <StatTile
-                label="Running"
+                label={t('dashboard.statRunning')}
                 value={`${running.length} / ${visibleApps.length}`}
                 accent={running.length > 0}
               />
-              <StatTile label="CPU" value={`${aggregate.cpu.toFixed(1)}%`} />
-              <StatTile label="Memory" value={formatMem(aggregate.mem)} />
+              <StatTile label={t('dashboard.statCpu')} value={`${aggregate.cpu.toFixed(1)}%`} />
+              <StatTile label={t('dashboard.statMemory')} value={formatMem(aggregate.mem)} />
               <StatTile
-                label="Open ports"
+                label={t('dashboard.statOpenPorts')}
                 value={aggregate.ports === 0 ? '-' : String(aggregate.ports)}
               />
             </div>
@@ -240,10 +253,14 @@ export function Dashboard(): JSX.Element {
                   taskPortEntries={taskPortEntries}
                   onOpen={() => setSelected(app.id as AppId)}
                   onStart={() =>
-                    void invokeOrToast('proc:start', { id: app.id }, { context: 'Start failed' })
+                    void invokeOrToast('proc:start', { id: app.id }, {
+                      context: t('errors.startFailed')
+                    })
                   }
                   onStop={() =>
-                    void invokeOrToast('proc:stop', { id: app.id }, { context: 'Stop failed' })
+                    void invokeOrToast('proc:stop', { id: app.id }, {
+                      context: t('errors.stopFailed')
+                    })
                   }
                 />
               );
@@ -304,6 +321,9 @@ function AppCardImpl({
   onStart,
   onStop
 }: AppCardProps): JSX.Element {
+  // Subscribed locally so a language switch re-renders the card even though the memo
+  // comparison above (correctly) ignores the translation function.
+  const { t } = useTranslation();
   const live = isLive(state);
   return (
     // Card sizes to content. Port chips always render (one per registered task) so cards
@@ -335,12 +355,12 @@ function AppCardImpl({
             state === 'running' ? 'text-success-strong' : 'text-fg-subtle'
           )}
         >
-          {state}
+          {t(STATE_LABEL_KEY[state])}
         </span>
       </div>
       <div className="mt-1 truncate font-mono text-[11px] text-fg-subtle">
-        {tasksCount} task{tasksCount === 1 ? '' : 's'}
-        {runningCount > 0 ? ` · ${runningCount} running` : ''}
+        {t('dashboard.taskCount', { count: tasksCount })}
+        {runningCount > 0 ? t('dashboard.runningSuffix', { count: runningCount }) : ''}
       </div>
       {/* CPU / MEM line + thin teal CPU progress bar (reference's "cpu progress"). */}
       <div className="mt-3 flex items-center gap-4 font-mono text-[11px] text-fg-muted">
@@ -372,26 +392,26 @@ function AppCardImpl({
         {!live ? (
           <button
             onClick={onStart}
-            title="Start all tasks in this app"
+            title={t('dashboard.cardStartTooltip')}
             className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-0.5 text-[11px] text-fg hover:bg-elevated"
           >
-            <Play className="h-3 w-3" /> Start
+            <Play className="h-3 w-3" /> {t('dashboard.cardStart')}
           </button>
         ) : (
           <button
             onClick={onStop}
-            title="Stop all running tasks in this app"
+            title={t('dashboard.cardStopTooltip')}
             className="inline-flex items-center gap-1 rounded-md border border-danger-border bg-danger-bg px-2 py-0.5 text-[11px] text-danger-fg hover:bg-danger-bg-hover"
           >
-            <Square className="h-3 w-3" /> Stop
+            <Square className="h-3 w-3" /> {t('dashboard.cardStop')}
           </button>
         )}
         <button
           onClick={onOpen}
-          title="Open this app's detail & logs"
+          title={t('dashboard.cardLogsTooltip')}
           className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] text-fg-muted hover:bg-surface hover:text-fg"
         >
-          <FileText className="h-3 w-3" /> Logs
+          <FileText className="h-3 w-3" /> {t('dashboard.cardLogs')}
         </button>
       </div>
     </div>

@@ -109,7 +109,7 @@ export function ImportProjectsDrawer({
 
         <div className="flex-1 overflow-y-auto p-5">
           <p className="mb-3 text-[11px] leading-snug text-fg-subtle">
-            Point DevHarbor at a folder that contains several project folders. It scans one level
+            Point NeoHub at a folder that contains several project folders. It scans one level
             deep for <code className="text-fg-muted">package.json</code> projects and registers the
             ones you pick.
           </p>

@@ -1,17 +1,18 @@
 {
-  "name": "devharbor",
+  "name": "neohub",
+  "productName": "NeoHub",
   "version": "1.2.0",
   "private": true,
-  "description": "DevHarbor - a harbor for your local dev servers. Desktop app for managing local Node.js projects on macOS.",
+  "description": "NeoHub - a home for your local projects. Desktop app for managing local Node.js projects on macOS.",
   "author": "Jainath Ponnala",
   "license": "AGPL-3.0-only",
-  "homepage": "https://www.devharbor.app",
+  "homepage": "https://github.com/neotu23/NeoHub",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jainath/devharbor.git"
+    "url": "https://github.com/neotu23/NeoHub.git"
   },
   "bugs": {
-    "url": "https://github.com/jainath/devharbor/issues"
+    "url": "https://github.com/neotu23/NeoHub/issues"
   },
   "main": "./out/main/index.js",
   "scripts": {
@@ -78,11 +79,13 @@
     "electron-vite": "^2.3.0",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^5.2.0",
+    "i18next": "^26.5.12",
     "lucide-react": "^0.460.0",
     "postcss": "^8.4.49",
     "prettier": "^3.8.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-i18next": "^17.1.9",
     "react-window": "^2.2.7",
     "tailwind-merge": "^2.5.4",
     "tailwindcss": "^3.4.15",

@@ -41,7 +41,7 @@ export function AddAppDrawer({
    * Whether to immediately validate + detect `initialPath` on open. False for paths that
    * arrived from an untrusted source (a devharbor:// deep link) - we prefill but require an
    * explicit "Scan this folder" click before touching the filesystem, so a web page can't
-   * make DevHarbor probe arbitrary directories without a user gesture (IMPROVEMENT-PLAN 6.6).
+   * make NeoHub probe arbitrary directories without a user gesture (IMPROVEMENT-PLAN 6.6).
    */
   autoDetectInitial?: boolean;
   onCancel: () => void;
@@ -202,7 +202,7 @@ export function AddAppDrawer({
           <SectionHeader
             n={1}
             title="Project folder"
-            desc="Pick the root of a Node.js project - the folder with its package.json. DevHarbor reads it to fill in smart defaults below."
+            desc="Pick the root of a Node.js project - the folder with its package.json. NeoHub reads it to fill in smart defaults below."
           />
           <button
             onClick={() => void browse()}
@@ -287,7 +287,7 @@ export function AddAppDrawer({
                   hint={
                     detection.nodeVersionFromProject
                       ? `“Auto” follows your project's pin (${detection.nodeVersionFromProject} from .nvmrc / engines).`
-                      : '“Auto” falls back to your latest installed Node. DevHarbor reads nvm / fnm / volta / asdf.'
+                      : '“Auto” falls back to your latest installed Node. NeoHub reads nvm / fnm / volta / asdf.'
                   }
                 >
                   <NodeVersionPicker value={nodePref} onChange={(v) => setNodePref(v ?? { kind: 'auto' })} />
@@ -384,7 +384,7 @@ export function AddAppDrawer({
                 <SectionHeader
                   n={3}
                   title="Environment variables"
-                  desc="Optional. DevHarbor already watches .env files in your project - paste here only to seed app-level variables now."
+                  desc="Optional. NeoHub already watches .env files in your project - paste here only to seed app-level variables now."
                 />
                 <button
                   onClick={() => setEnvOpen((v) => !v)}

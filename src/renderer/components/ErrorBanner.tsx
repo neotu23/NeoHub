@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import { cn } from '../lib/cn';
 
@@ -10,6 +11,7 @@ export function ErrorBanner({
   onDismiss: () => void;
   className?: string;
 }): JSX.Element {
+  const { t } = useTranslation();
   return (
     <div
       className={cn(
@@ -21,8 +23,8 @@ export function ErrorBanner({
       <button
         onClick={onDismiss}
         className="-mr-1 rounded p-0.5 text-danger-fg/70 hover:bg-danger-bg-hover hover:text-danger-strong"
-        title="Dismiss this error"
-        aria-label="Dismiss"
+        title={t('common.dismissError')}
+        aria-label={t('common.dismiss')}
       >
         <X className="h-3 w-3" />
       </button>

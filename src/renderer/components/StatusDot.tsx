@@ -1,8 +1,10 @@
+import { useTranslation } from 'react-i18next';
 import type { ProcessState } from '@shared/types';
 import { cn } from '../lib/cn';
+import { STATE_LABEL_KEY } from '../lib/processState';
 
 /**
- * Single status dot (DevHarbor UI reference): one dot conveys run state.
+ * Single status dot (NeoHub UI reference): one dot conveys run state.
  *   running           → green + glow + pulse
  *   starting/exiting   → amber, static
  *   crashed            → red, static + ring (non-color cue)
@@ -23,6 +25,7 @@ export function StatusDot({
   state: ProcessState | undefined;
   className?: string;
 }): JSX.Element {
+  const { t } = useTranslation();
   const variant =
     state === 'running'
       ? 'status-dot-run'
@@ -36,7 +39,7 @@ export function StatusDot({
   // inline (rather than in styles.css) to keep the change scoped to this file.
   const crashedRing =
     state === 'crashed' ? 'ring-1 ring-danger-border ring-offset-1 ring-offset-base' : '';
-  const label = state ?? 'idle';
+  const label = t(STATE_LABEL_KEY[state ?? 'idle']);
   return (
     <span
       className={cn('status-dot', variant, crashedRing, className)}

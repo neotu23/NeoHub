@@ -130,6 +130,8 @@ All findings from the post-Phase-5 audit:
 
 ## Recently fixed (carry-list closures)
 
+- **2026-11-02** - NeoHub branding: selected blue connected-block Liquid Glass icon extracted to `build/icon.png` and macOS sizes in `build/icon.icns`; product/bundle/menu/window/UI names updated to NeoHub. Project links and update feed point to `neotu23/NeoHub`. Startup selects the existing database directory before acquiring the single-instance lock, so a name change does not hide imported projects. Typecheck, production build, targeted ESLint, and 12 identity/localisation tests pass. The arm64 `.app` and ZIP have verified NeoHub metadata, matching icon bytes, and a valid ZIP archive; promotional sources are excluded. DMG creation failed at `hdiutil create` in this execution environment; the ZIP remains available. This is a local build without Developer ID notarization.
+
 - **2026-05-22** - Phase 1.5 boot blank-screen / "Maximum update depth exceeded" - `useStore((s) => s.tasksByApp[id] ?? [])` returned a new `[]` per selector call, triggering a `useSyncExternalStore` re-render loop. Fixed with a module-level `EMPTY_TASKS` constant in AppDetail.tsx and TaskEditor.tsx.
 - **2026-05-22** - TaskEditor fired `tasks:update` IPC on every keystroke. Now coalesced via a `useDebouncedSave` hook (300ms) with optimistic local store updates so inputs stay snappy.
 - **2026-05-22** - Sticky error banners. Added a reusable `ErrorBanner` with a close-X; used in both AppDetail and TaskEditor.

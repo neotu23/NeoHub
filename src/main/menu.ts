@@ -1,8 +1,8 @@
 import { Menu, shell, type BrowserWindow, type MenuItemConstructorOptions } from 'electron';
 import type { EventChannelName } from '@shared/ipc';
 
-const APP_NAME = 'DevHarbor';
-const WEBSITE = 'https://www.devharbor.app';
+const APP_NAME = 'NeoHub';
+const WEBSITE = 'https://github.com/neotu23/NeoHub';
 
 /**
  * Install the application menu.

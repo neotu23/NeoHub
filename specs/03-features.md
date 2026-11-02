@@ -360,7 +360,7 @@ Each feature has: a one-line summary, behaviour, edge cases, and acceptance crit
 **Summary.** Per-app overrides live on the app; global settings live in their own pane.
 
 **Sections.**
-- General: theme, auto-update, dashboard refresh rate.
+- General: theme, language (follow system / English / 简体中文), auto-update, dashboard refresh rate.
 - Logs: ring size.
 - Processes: kill grace ms, default SIGTERM-then-SIGKILL.
 - Node detection: which directories to scan; manual add of a custom Node binary.
