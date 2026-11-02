@@ -25,11 +25,13 @@ function isLive(s: ProcessState): boolean {
  * Menubar (Tray) presence (IMPROVEMENT-PLAN 14.1). A supervisor for long-running background
  * processes is exactly the category that lives in the menubar - the app already keeps servers
  * running with its window closed, but had zero ambient surface to see/control them. The tray
- * icon reflects aggregate state and its menu lists every app with Start/Stop + detected ports.
- * Pure main-process: all state flows through the callbacks; no renderer dependency.
+ * icon reflects aggregate state; left-click reopens the window (the way back in once the window
+ * has been closed into the menubar) and right-click shows every app with Start/Stop + detected
+ * ports. Pure main-process: all state flows through the callbacks; no renderer dependency.
  */
 export class TrayController {
   private tray: Tray | null = null;
+  private contextMenu: Menu | null = null;
 
   constructor(private readonly cb: TrayCallbacks) {}
 
@@ -38,6 +40,11 @@ export class TrayController {
     try {
       this.tray = new Tray(this.makeIcon('idle'));
       this.tray.setToolTip('NeoHub');
+      // Left-click brings the window back - the way back in after the window was closed into
+      // the menubar. The full control menu (apps, stop all, quit) is on right-click; using
+      // setContextMenu would instead make every left-click open the menu.
+      this.tray.on('click', () => this.cb.open());
+      this.tray.on('right-click', () => this.popUpMenu());
       this.refresh();
     } catch {
       // Tray creation can fail in a display-less environment - never let it block boot.
@@ -48,6 +55,12 @@ export class TrayController {
   disable(): void {
     this.tray?.destroy();
     this.tray = null;
+    this.contextMenu = null;
+  }
+
+  private popUpMenu(): void {
+    if (!this.tray || !this.contextMenu) return;
+    this.tray.popUpContextMenu(this.contextMenu);
   }
 
   get enabled(): boolean {
@@ -90,7 +103,7 @@ export class TrayController {
       { type: 'separator' },
       { label: 'Quit NeoHub', click: () => this.cb.quit() }
     ];
-    this.tray.setContextMenu(Menu.buildFromTemplate(template));
+    this.contextMenu = Menu.buildFromTemplate(template);
   }
 
   /**

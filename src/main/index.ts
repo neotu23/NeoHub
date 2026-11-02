@@ -18,6 +18,9 @@ app.setName('NeoHub');
 let mainWindow: BrowserWindow | null = null;
 let ipcRuntime: IpcRuntime | null = null;
 let isQuitting = false;
+// Set the moment the quit teardown commits (before-quit), cleared if the user cancels there.
+// Closing the window must hide it only while we are NOT on our way out.
+let quitCommitted = false;
 
 interface WindowBounds {
   x?: number;
@@ -63,6 +66,62 @@ function saveBounds(win: BrowserWindow): void {
   }
 }
 
+/**
+ * Menubar-only residence. Closing the window hides it (taking the Dock icon with it) instead of
+ * destroying it: background tasks keep running, the renderer keeps its state (selection, log
+ * subscriptions) so reopening is instant, and the menubar icon is the way back in. Closing only
+ * means closing when there is no tray icon to get back in, or when we are actually quitting.
+ */
+function shouldStayInMenubar(): boolean {
+  return process.platform === 'darwin' && !quitCommitted && (ipcRuntime?.trayEnabled() ?? false);
+}
+
+/**
+ * Restore Dock presence - the icon is hidden while the app lives in the menubar. Resolves to
+ * true only when the Dock icon was actually hidden and macOS has now re-activated the app
+ * (dock.show() is async); never rejects.
+ */
+function restoreDock(): Promise<boolean> {
+  const dock = app.dock;
+  if (!dock || dock.isVisible()) return Promise.resolve(false);
+  return dock.show().then(
+    () => true,
+    () => false
+  );
+}
+
+/** Bring the window - and the Dock icon that belongs to it - back to the foreground. */
+function revealWindow(win: BrowserWindow): void {
+  if (win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  // Re-assert focus once the app is a Dock app again: a window shown while still in menubar-only
+  // (accessory) mode does not necessarily become the key window.
+  void restoreDock().then((wasHidden) => {
+    if (!wasHidden || win.isDestroyed()) return;
+    app.focus({ steal: true });
+    win.show();
+    win.focus();
+  });
+}
+
+/** Hide the window into the menubar, taking the Dock icon with it. */
+function hideToMenubar(win: BrowserWindow): void {
+  const hide = (): void => {
+    if (win.isDestroyed()) return;
+    win.hide();
+    app.dock?.hide();
+  };
+  // Hiding a fullscreen window strands macOS on an empty Space - leave fullscreen first.
+  if (win.isFullScreen()) {
+    win.once('leave-full-screen', hide);
+    win.setFullScreen(false);
+    return;
+  }
+  hide();
+}
+
 // Single-instance lock: a second launch (or a deep-link open) focuses the existing
 // window instead of spawning a second process with its own DB handle.
 const gotLock = app.requestSingleInstanceLock();
@@ -78,6 +137,9 @@ if (!gotLock) {
 }
 
 function createWindow(): BrowserWindow {
+  // The Dock icon goes away with the window in menubar-only residence - bring it back with the
+  // window (revealWindow does the same for an existing hidden window).
+  void restoreDock();
   const bounds = loadBounds();
   const win = new BrowserWindow({
     ...bounds,
@@ -99,8 +161,15 @@ function createWindow(): BrowserWindow {
 
   win.once('ready-to-show', () => win.show());
 
-  // Persist window size/position so the app reopens where the user left it.
-  win.on('close', () => saveBounds(win));
+  // Persist window size/position so the app reopens where the user left it. Closing then means
+  // "live in the menubar" for as long as a tray icon exists (see shouldStayInMenubar) - the
+  // window is hidden, not destroyed, so running dev servers and renderer state survive.
+  win.on('close', (event) => {
+    saveBounds(win);
+    if (!shouldStayInMenubar()) return;
+    event.preventDefault();
+    hideToMenubar(win);
+  });
 
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
@@ -185,13 +254,14 @@ function createWindow(): BrowserWindow {
 
 /**
  * Return the main window, creating it if there isn't one (the app keeps running on macOS
- * with all windows closed). `created` lets the caller wait for the renderer to load before
- * sending it a message. Used by the application menu so ⌘, / ⌘N / ⌘⇧N aren't dead keys.
+ * with all windows closed, and menubar-only residence hides rather than destroys it).
+ * `created` lets the caller wait for the renderer to load before sending it a message. Used
+ * by the application menu so ⌘, / ⌘N / ⌘⇧N aren't dead keys, by the tray icon, and by
+ * notifications/deep links.
  */
 function getOrCreateWindow(): { win: BrowserWindow; created: boolean } {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    revealWindow(mainWindow);
     return { win: mainWindow, created: false };
   }
   return { win: createWindow(), created: true };
@@ -253,7 +323,9 @@ app.whenReady().then(() => {
   createWindow();
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    // Dock click / reopening the app: reveal the window, whether it was destroyed (tray off)
+    // or hidden in the menubar (tray on).
+    getOrCreateWindow();
   });
 });
 
@@ -269,6 +341,11 @@ let teardownInFlight = false;
 
 app.on('before-quit', (event) => {
   if (isQuitting) return; // teardown finished - let the final quit proceed
+  // From here on, a window close is a real close (not "hide into the menubar").
+  quitCommitted = true;
+  // Quitting from menubar-only residence: bring the app back into the Dock first, so the
+  // teardown confirmation below can actually be seen.
+  void restoreDock();
   if (teardownInFlight) {
     // A second ⌘Q / dock-quit while we're still stopping tasks must NOT bypass the teardown
     // (it would abandon the SIGTERM→grace sequence mid-flight and skip the DB close).
@@ -300,6 +377,7 @@ app.on('before-quit', (event) => {
     });
     if (response !== 0) {
       teardownInFlight = false;
+      quitCommitted = false; // cancelled - stay open, and closing the window hides again
       return; // cancelled - stay open
     }
     // Close the MCP listener FIRST - before stopAllRunning - so no in-flight tool call can

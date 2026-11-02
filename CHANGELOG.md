@@ -4,6 +4,18 @@ All notable changes to DevHarbor are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.3.0] - 2026-11-02
+
+### Changed
+- **Close to the menubar** - closing the window (red button or ⌘W) now hides it and the Dock
+  icon instead of destroying the window: running dev servers, log subscriptions, and UI state
+  all survive, and a left-click on the menubar icon brings the window straight back (the
+  start/stop-control menu moved to right-click). With "Show menubar icon" turned off in
+  Settings there is no way back in, so closing still closes the window; the app and its running
+  tasks keep living in the background until you quit or reopen it from the Dock.
+
 ## [1.2.0] - 2026-07-11
 
 ### Added
@@ -157,6 +169,7 @@ First public preview. macOS-only (Apple Silicon).
 - Dashboard control room, folder organization, and a ⌘K command palette.
 - Local-only storage (SQLite). No accounts, no telemetry.
 
+[1.3.0]: https://github.com/neotu23/NeoHub/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/jainath/devharbor/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/jainath/devharbor/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/jainath/devharbor/compare/v1.0.0...v1.0.1

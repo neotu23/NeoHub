@@ -55,6 +55,11 @@ export interface IpcRuntime {
    * spawn a process that then outlives the app as an orphan.
    */
   disposeServices: () => Promise<void>;
+  /**
+   * Whether the menubar icon currently exists - the main process only turns a window close
+   * into "hide into the menubar" when there is an icon to get back in with.
+   */
+  trayEnabled: () => boolean;
 }
 
 export function registerAllIpcHandlers(
@@ -554,6 +559,9 @@ export function registerAllIpcHandlers(
     onRendererReload: () => logSubs.clear(),
     // Close the MCP listener BEFORE tasks are torn down so an in-flight tool call can't spawn
     // a process that outlives the quit as an orphan.
-    disposeServices: () => mcpService.dispose()
+    disposeServices: () => mcpService.dispose(),
+    // Read live: the setting can be toggled at any time, and a window close with no menubar
+    // icon must be a real close (there would be no way back into the UI).
+    trayEnabled: () => tray.enabled
   };
 }

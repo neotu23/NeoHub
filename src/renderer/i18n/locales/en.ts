@@ -248,7 +248,7 @@ export const en = {
     launchAtLoginDesc: 'Start NeoHub automatically when you log in to your Mac.',
     trayEnabled: 'Show menubar icon',
     trayEnabledDesc:
-      'Keep a tray icon in the macOS menubar for quick access and background control.',
+      'Keep an icon in the macOS menubar. Closing the window leaves NeoHub running in the background with your dev servers untouched; click the menubar icon to reopen the window.',
 
     notifications: 'Notifications',
     notifyCrash: 'Notify when an app crashes',
