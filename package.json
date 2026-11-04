@@ -1,7 +1,7 @@
 {
   "name": "neohub",
   "productName": "NeoHub",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "description": "NeoHub - a home for your local projects. Desktop app for managing local Node.js projects on macOS.",
   "author": "Jainath Ponnala",

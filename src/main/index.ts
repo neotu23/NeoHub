@@ -1,4 +1,5 @@
-import { app, BrowserWindow, dialog, screen, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron';
+import type { InvokeReq } from '@shared/ipc';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { db, closeDb } from './db/index.js';
@@ -6,6 +7,7 @@ import { registerAllIpcHandlers, type IpcRuntime } from './ipc/index.js';
 import { installAppMenu } from './menu.js';
 import { installProcessLogging, logger } from './services/Logger.js';
 import { resolveUserDataDirectory } from './services/AppIdentity.js';
+import type { PanelWindow } from './services/PanelWindow.js';
 
 const isDev = process.env.NODE_ENV === 'development' || !!process.env.ELECTRON_RENDERER_URL;
 
@@ -17,9 +19,10 @@ app.setName('NeoHub');
 
 let mainWindow: BrowserWindow | null = null;
 let ipcRuntime: IpcRuntime | null = null;
+const panelReadiness = new WeakMap<BrowserWindow, Promise<boolean>>();
 let isQuitting = false;
 // Set the moment the quit teardown commits (before-quit), cleared if the user cancels there.
-// Closing the window must hide it only while we are NOT on our way out.
+// Closing the last panel hides the Dock only while we are NOT on our way out.
 let quitCommitted = false;
 
 interface WindowBounds {
@@ -67,10 +70,8 @@ function saveBounds(win: BrowserWindow): void {
 }
 
 /**
- * Menubar-only residence. Closing the window hides it (taking the Dock icon with it) instead of
- * destroying it: background tasks keep running, the renderer keeps its state (selection, log
- * subscriptions) so reopening is instant, and the menubar icon is the way back in. Closing only
- * means closing when there is no tray icon to get back in, or when we are actually quitting.
+ * Menubar-only residence keeps the main process and project services alive, but releases the
+ * panel renderer. Only hide the Dock when the tray offers another way to reopen the panel.
  */
 function shouldStayInMenubar(): boolean {
   return process.platform === 'darwin' && !quitCommitted && (ipcRuntime?.trayEnabled() ?? false);
@@ -106,22 +107,6 @@ function revealWindow(win: BrowserWindow): void {
   });
 }
 
-/** Hide the window into the menubar, taking the Dock icon with it. */
-function hideToMenubar(win: BrowserWindow): void {
-  const hide = (): void => {
-    if (win.isDestroyed()) return;
-    win.hide();
-    app.dock?.hide();
-  };
-  // Hiding a fullscreen window strands macOS on an empty Space - leave fullscreen first.
-  if (win.isFullScreen()) {
-    win.once('leave-full-screen', hide);
-    win.setFullScreen(false);
-    return;
-  }
-  hide();
-}
-
 // Single-instance lock: a second launch (or a deep-link open) focuses the existing
 // window instead of spawning a second process with its own DB handle.
 const gotLock = app.requestSingleInstanceLock();
@@ -138,7 +123,7 @@ if (!gotLock) {
 
 function createWindow(): BrowserWindow {
   // The Dock icon goes away with the window in menubar-only residence - bring it back with the
-  // window (revealWindow does the same for an existing hidden window).
+  // window (revealWindow does the same for an existing window).
   void restoreDock();
   const bounds = loadBounds();
   const win = new BrowserWindow({
@@ -158,28 +143,79 @@ function createWindow(): BrowserWindow {
     }
   });
   mainWindow = win;
+  let rendererReady = false;
+  let rendererUnresponsive = false;
+  let resolveReady!: (ready: boolean) => void;
+  const resetReadiness = (): void => {
+    panelReadiness.set(win, new Promise<boolean>((resolve) => { resolveReady = resolve; }));
+  };
+  resetReadiness();
+  let closeApproved = false;
+  let nextCloseRequestId = 0;
+  let pendingCloseRequestId: number | null = null;
+
+  // The renderer acknowledges only after its pending saves have reached main. Register
+  // per window and remove on destruction so reopened panels never accumulate handlers.
+  ipcMain.handle('panel:ready', (event) => {
+    if (event.sender !== win.webContents || rendererReady) return;
+    rendererReady = true;
+    resolveReady(true);
+    ipcRuntime?.onRendererReady?.();
+  });
+  ipcMain.handle('panel:closeReady', (event, request: InvokeReq<'panel:closeReady'>) => {
+    if (event.sender !== win.webContents || pendingCloseRequestId == null ||
+        request?.requestId !== pendingCloseRequestId) return;
+    pendingCloseRequestId = null;
+    if (!request.saved) return;
+    closeApproved = true;
+    win.close();
+  });
 
   win.once('ready-to-show', () => win.show());
 
-  // Persist window size/position so the app reopens where the user left it. Closing then means
-  // "live in the menubar" for as long as a tray icon exists (see shouldStayInMenubar) - the
-  // window is hidden, not destroyed, so running dev servers and renderer state survive.
+  // Let Electron close normally, including from fullscreen, so the renderer and its terminal
+  // buffers/WebGL contexts are released. Project PTYs, logs and watchers belong to main.
   win.on('close', (event) => {
     saveBounds(win);
-    if (!shouldStayInMenubar()) return;
+    // Keep the existing quit teardown independent of the panel-only close handshake.
+    if (quitCommitted || closeApproved || !rendererReady || rendererUnresponsive) return;
     event.preventDefault();
-    hideToMenubar(win);
+    if (pendingCloseRequestId != null) return;
+    pendingCloseRequestId = ++nextCloseRequestId;
+    win.webContents.send('panel:prepareClose', { requestId: pendingCloseRequestId });
   });
 
   win.on('closed', () => {
-    if (mainWindow === win) mainWindow = null;
+    resolveReady(false);
+    panelReadiness.delete(win);
+    ipcMain.removeHandler('panel:ready');
+    ipcMain.removeHandler('panel:closeReady');
+    if (mainWindow !== win) return;
+    mainWindow = null;
+    ipcRuntime?.onRendererReload();
+    // Wait for actual destruction: a cancelled beforeunload must leave the Dock available.
+    if (shouldStayInMenubar()) app.dock?.hide();
   });
 
   // Reset per-renderer main-process state (log subscriptions) on reload/navigation, so a ⌘R
   // can't leave log forwarding gated to taskIds the new renderer never subscribed to.
   win.webContents.on('did-start-navigation', (_e, _url, _isInPlace, isMainFrame) => {
-    if (isMainFrame) ipcRuntime?.onRendererReload();
+    if (isMainFrame) {
+      if (rendererReady) resetReadiness();
+      rendererReady = false;
+      rendererUnresponsive = false;
+      closeApproved = false;
+      pendingCloseRequestId = null;
+      ipcRuntime?.onRendererReload();
+    }
   });
+
+  // An unresponsive renderer cannot acknowledge saves. A second close can still release it.
+  win.on('unresponsive', () => {
+    rendererUnresponsive = true;
+    if (pendingCloseRequestId != null) win.close();
+  });
+  win.on('responsive', () => { rendererUnresponsive = false; });
 
   // Renderer crash recovery: a GPU/OOM crash (xterm WebGL contexts are a realistic source)
   // would otherwise leave a blank window. Reload once so it self-heals - running PTYs live in
@@ -187,6 +223,12 @@ function createWindow(): BrowserWindow {
   let reloadAttempts = 0;
   win.webContents.on('render-process-gone', (_e, details) => {
     logger.error('render-process-gone', details.reason, details.exitCode);
+    if (rendererReady) resetReadiness();
+    rendererReady = false;
+    if (pendingCloseRequestId != null) {
+      win.close();
+      return;
+    }
     if (reloadAttempts < 2 && details.reason !== 'clean-exit' && !win.isDestroyed()) {
       reloadAttempts += 1;
       win.webContents.reload();
@@ -254,17 +296,18 @@ function createWindow(): BrowserWindow {
 
 /**
  * Return the main window, creating it if there isn't one (the app keeps running on macOS
- * with all windows closed, and menubar-only residence hides rather than destroys it).
+ * with all windows closed, and menubar-only residence releases the panel renderer).
  * `created` lets the caller wait for the renderer to load before sending it a message. Used
  * by the application menu so ⌘, / ⌘N / ⌘⇧N aren't dead keys, by the tray icon, and by
  * notifications/deep links.
  */
-function getOrCreateWindow(): { win: BrowserWindow; created: boolean } {
+function getOrCreateWindow(): PanelWindow {
   if (mainWindow && !mainWindow.isDestroyed()) {
     revealWindow(mainWindow);
-    return { win: mainWindow, created: false };
+    return { win: mainWindow, created: false, ready: panelReadiness.get(mainWindow)! };
   }
-  return { win: createWindow(), created: true };
+  const win = createWindow();
+  return { win, created: true, ready: panelReadiness.get(win)! };
 }
 
 app.whenReady().then(() => {
@@ -324,7 +367,7 @@ app.whenReady().then(() => {
 
   app.on('activate', () => {
     // Dock click / reopening the app: reveal the window, whether it was destroyed (tray off)
-    // or hidden in the menubar (tray on).
+    // or simply minimized.
     getOrCreateWindow();
   });
 });
@@ -341,7 +384,7 @@ let teardownInFlight = false;
 
 app.on('before-quit', (event) => {
   if (isQuitting) return; // teardown finished - let the final quit proceed
-  // From here on, a window close is a real close (not "hide into the menubar").
+  // From here on, closing the panel must not switch the Dock to menubar-only residence.
   quitCommitted = true;
   // Quitting from menubar-only residence: bring the app back into the Dock first, so the
   // teardown confirmation below can actually be seen.
@@ -377,7 +420,8 @@ app.on('before-quit', (event) => {
     });
     if (response !== 0) {
       teardownInFlight = false;
-      quitCommitted = false; // cancelled - stay open, and closing the window hides again
+      quitCommitted = false; // cancelled - closing the panel can enter menubar residence again
+      if (mainWindow === null && shouldStayInMenubar()) app.dock?.hide();
       return; // cancelled - stay open
     }
     // Close the MCP listener FIRST - before stopAllRunning - so no in-flight tool call can

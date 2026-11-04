@@ -234,7 +234,7 @@ export const zhCN: typeof en = {
     launchAtLoginDesc: '登录 Mac 时自动启动 NeoHub。',
     trayEnabled: '显示菜单栏图标',
     trayEnabledDesc:
-      '在 macOS 菜单栏保留图标。关闭窗口后应用继续在后台运行，所管理的服务不受影响，点击菜单栏图标即可重新打开窗口。',
+      '在 macOS 菜单栏保留图标。关闭窗口会释放界面内存并隐藏 Dock 图标，后台服务继续运行。点击菜单栏图标或重新打开应用，可恢复窗口和上次选中的项目。',
 
     notifications: '通知',
     notifyCrash: '应用崩溃时通知',

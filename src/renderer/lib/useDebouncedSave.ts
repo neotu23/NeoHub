@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
+import { registerPanelSave } from './panelSaves';
+import { DebouncedSaveQueue } from './DebouncedSaveQueue';
 
 /**
  * Coalesce a stream of partial saves into one debounced call.
@@ -14,40 +16,38 @@ export function useDebouncedSave<P extends object>(
   save: (patch: P) => Promise<void> | void,
   delay = 300,
   merge?: (pending: P, next: P) => P
-): { queue: (patch: P) => void; flush: () => void } {
-  const pendingRef = useRef<P>({} as P);
-  const timerRef = useRef<number | null>(null);
+): { queue: (patch: P) => void; flush: () => Promise<void> } {
   const saveRef = useRef(save);
+  const mergeRef = useRef(merge);
+  mergeRef.current = merge;
+  const queueRef = useRef<DebouncedSaveQueue<P> | null>(null);
+  if (queueRef.current === null) {
+    queueRef.current = new DebouncedSaveQueue(
+      (patch) => saveRef.current(patch),
+      (pending, next) => mergeRef.current
+        ? mergeRef.current(pending, next)
+        : { ...pending, ...next }
+    );
+  }
   useEffect(() => {
     saveRef.current = save;
   }, [save]);
 
-  const flush = useCallback((): void => {
-    if (timerRef.current != null) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    if (Object.keys(pendingRef.current as object).length === 0) return;
-    const p = pendingRef.current;
-    pendingRef.current = {} as P;
-    void saveRef.current(p);
-  }, []);
+  const flush = useCallback((): Promise<void> => queueRef.current!.flush(), []);
 
   const queue = useCallback(
     (patch: P): void => {
-      if (merge && Object.keys(pendingRef.current as object).length > 0) {
-        pendingRef.current = merge(pendingRef.current, patch);
-      } else {
-        Object.assign(pendingRef.current as object, patch);
-      }
-      if (timerRef.current != null) window.clearTimeout(timerRef.current);
-      timerRef.current = window.setTimeout(flush, delay);
+      queueRef.current!.queue(patch, delay);
     },
-    [flush, delay, merge]
+    [delay]
   );
 
   useEffect(() => {
-    return () => flush();
+    const unregister = registerPanelSave(flush);
+    return () => {
+      unregister();
+      void flush().catch(() => {});
+    };
   }, [flush]);
 
   return { queue, flush };

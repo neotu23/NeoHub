@@ -12,6 +12,35 @@ import { APP_SORT_KEY, type AppSortMode } from '../lib/sortApps';
 
 export type RendererView = 'dashboard' | 'app';
 
+const PANEL_SESSION_KEY = 'neohub:panel-session:v1';
+interface PanelSession {
+  view: RendererView;
+  selectedAppId: AppId | null;
+  selectedTaskByApp: Record<string, TaskId | null>;
+}
+
+function readPanelSession(): PanelSession {
+  const fallback: PanelSession = { view: 'dashboard', selectedAppId: null, selectedTaskByApp: {} };
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(PANEL_SESSION_KEY) ?? 'null');
+    if (!saved || typeof saved !== 'object') return fallback;
+    const session = saved as Partial<PanelSession>;
+    const selectedAppId = typeof session.selectedAppId === 'string' ? session.selectedAppId : null;
+    const tabs = session.selectedTaskByApp;
+    return {
+      view: session.view === 'app' && selectedAppId ? 'app' : 'dashboard',
+      selectedAppId,
+      selectedTaskByApp: tabs && typeof tabs === 'object' && !Array.isArray(tabs)
+        ? Object.fromEntries(Object.entries(tabs).filter(([, id]) => typeof id === 'string' || id === null))
+        : {}
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+const panelSession = readPanelSession();
+
 function readAppSort(): AppSortMode {
   try {
     const v = localStorage.getItem(APP_SORT_KEY);
@@ -101,13 +130,12 @@ interface State {
 export const useStore = create<State>((set) => ({
   apps: [],
   loaded: false,
-  // Default landing is the dashboard. Cmd+R / boot lands here; clicking an app
-  // in the sidebar takes you to the app detail (see setSelected).
-  view: 'dashboard',
-  selectedAppId: null,
+  // A new panel restores navigation; live process state is always fetched from main.
+  view: panelSession.view,
+  selectedAppId: panelSession.selectedAppId,
   appSort: readAppSort(),
   tasksByApp: {},
-  selectedTaskByApp: {},
+  selectedTaskByApp: panelSession.selectedTaskByApp,
 
   running: {},
   appState: {},
@@ -143,7 +171,8 @@ export const useStore = create<State>((set) => ({
       }
       // Drop per-app task state for apps that no longer exist. Only rebuild the maps when
       // something actually died, so the common no-change resync keeps stable references.
-      if (Object.keys(s.tasksByApp).some((id) => !alive.has(id))) {
+      if (Object.keys(s.tasksByApp).some((id) => !alive.has(id)) ||
+          Object.keys(s.selectedTaskByApp).some((id) => !alive.has(id))) {
         out.tasksByApp = Object.fromEntries(
           Object.entries(s.tasksByApp).filter(([id]) => alive.has(id))
         );
@@ -377,3 +406,18 @@ export const useStore = create<State>((set) => ({
       return { envFileChanges: rest };
     })
 }));
+
+// Do not serialize stats, logs or cached runtime data, or write storage on every stats tick.
+useStore.subscribe((state, previous) => {
+  if (state.view === previous.view && state.selectedAppId === previous.selectedAppId &&
+      state.selectedTaskByApp === previous.selectedTaskByApp) return;
+  try {
+    localStorage.setItem(PANEL_SESSION_KEY, JSON.stringify({
+      view: state.view,
+      selectedAppId: state.selectedAppId,
+      selectedTaskByApp: state.selectedTaskByApp
+    } satisfies PanelSession));
+  } catch {
+    // Navigation persistence is best-effort when storage is unavailable or full.
+  }
+});

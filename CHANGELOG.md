@@ -6,6 +6,34 @@ All notable changes to DevHarbor are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-04
+
+### Changed
+- **Closing the window releases the panel** - closing it (red button or ⌘W) now destroys the
+  window instead of hiding it, so the memory behind the terminals and the rest of the UI is
+  actually given back. Dev servers, log buffers and file watchers live in the main process and
+  keep running; the Dock icon hides, but only while a menubar icon offers a way back in.
+- **Reopening rebuilds it where you left off** - the menubar icon, or launching NeoHub again
+  from Finder, Launchpad or Spotlight, creates a fresh panel at its last window bounds with the
+  same view, project and selected task, then re-reads live status from the main process. Logs
+  scroll back from the in-memory buffer, running tasks are not restarted, and a project or task
+  deleted in the meantime is not restored as a dangling selection.
+- **Closing waits for unsaved edits** - the panel hands over pending task-editor and
+  environment-variable edits before it goes away, so closing or quitting no longer loses an
+  edit made a fraction of a second earlier. Unsaved env-var drafts keep their discard prompt,
+  and cancelling it keeps the panel open.
+- **Menus, notifications, deep links and the update banner survive the close** - they run once
+  the new panel is listening instead of after a fixed delay, and a downloaded update (or a
+  download in progress) is restored so the banner isn't lost. ⌘R reload no longer drops you back
+  on the dashboard, and a hung or crashed panel can still be closed.
+
+### Fixed
+- Cancelling the quit confirmation while the panel is already closed no longer leaves NeoHub
+  dockless with no panel: the Dock icon returns to menubar-only residence.
+- Switching, removing or closing the task editor while a save is still pending no longer
+  interleaves the two writes, and a failed save keeps the draft open for correction instead of
+  closing over the validation error.
+
 ## [1.3.0] - 2026-11-02
 
 ### Changed
@@ -169,6 +197,7 @@ First public preview. macOS-only (Apple Silicon).
 - Dashboard control room, folder organization, and a ⌘K command palette.
 - Local-only storage (SQLite). No accounts, no telemetry.
 
+[1.4.0]: https://github.com/neotu23/NeoHub/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/neotu23/NeoHub/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/jainath/devharbor/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/jainath/devharbor/compare/v1.0.1...v1.1.0

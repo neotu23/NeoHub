@@ -1,5 +1,6 @@
 import { BrowserWindow } from 'electron';
 import { autoUpdater, type UpdateInfo } from 'electron-updater';
+import type { EventPayload } from '@shared/ipc';
 
 /** How often to re-poll the release feed after the initial launch check. */
 const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
@@ -20,40 +21,58 @@ export class Updater {
   private started = false;
   /** Handle for the periodic re-check timer so start() can't stack duplicate intervals. */
   private recheckTimer: ReturnType<typeof setInterval> | null = null;
+  private latestUpdate: EventPayload<'update:available'> | null = null;
+  private latestProgress: EventPayload<'update:progress'> | null = null;
+  private downloaded = false;
 
   constructor(private readonly getWin: () => BrowserWindow | null) {
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
 
     autoUpdater.on('update-available', (info) => {
-      this.getWin()?.webContents.send('update:available', {
+      this.downloaded = false;
+      this.latestProgress = null;
+      this.latestUpdate = {
         version: info.version,
         releaseNotes: Updater.normalizeReleaseNotes(info)
-      });
+      };
+      this.getWin()?.webContents.send('update:available', this.latestUpdate);
     });
     autoUpdater.on('download-progress', (p) => {
-      this.getWin()?.webContents.send('update:progress', {
+      this.latestProgress = {
         percent: Math.round(p.percent),
         bytesPerSecond: p.bytesPerSecond,
         transferred: p.transferred,
         total: p.total
-      });
+      };
+      this.getWin()?.webContents.send('update:progress', this.latestProgress);
     });
     autoUpdater.on('update-downloaded', (info) => {
-      this.getWin()?.webContents.send('update:ready', {
+      this.downloaded = true;
+      this.latestUpdate = {
         version: info.version,
         releaseNotes: Updater.normalizeReleaseNotes(info)
-      });
+      };
+      this.getWin()?.webContents.send('update:ready', this.latestUpdate);
     });
     autoUpdater.on('update-not-available', (info) => {
       // Lets a manual "Check for Updates…" confirm the app is current instead of going silent.
       this.getWin()?.webContents.send('update:notAvailable', { version: info.version });
     });
     autoUpdater.on('error', (err) => {
+      if (!this.downloaded) this.latestUpdate = null;
       // Keep the local log, but also surface the failure so the UI doesn't fail silently.
       console.warn('[updater]', err.message);
       this.getWin()?.webContents.send('update:error', { message: err.message });
     });
+  }
+
+  /** A panel can be absent throughout a download, so events alone cannot restore its banner. */
+  replayToPanel(): void {
+    const win = this.getWin();
+    if (!win || !this.latestUpdate) return;
+    win.webContents.send(this.downloaded ? 'update:ready' : 'update:available', this.latestUpdate);
+    if (!this.downloaded && this.latestProgress) win.webContents.send('update:progress', this.latestProgress);
   }
 
   /**

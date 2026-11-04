@@ -28,6 +28,7 @@ import { existsSync, realpathSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import type { StatsTick } from '../services/StatsMonitor';
 import type { PortsEvent } from '../services/PortDetector';
+import type { PanelWindow } from '../services/PanelWindow';
 
 type Handler<C extends InvokeChannelName> = (
   req: InvokeChannels[C]['req']
@@ -44,6 +45,8 @@ export interface IpcRuntime {
   stopAllRunning: () => Promise<void>;
   /** Reset per-renderer state (log subscriptions) when the window reloads/navigates. */
   onRendererReload: () => void;
+  /** Replay main-owned UI state once a newly created renderer has subscribed. */
+  onRendererReady?: () => void;
   /**
    * Enter quit teardown: block/cancel starts so nothing new spawns. Idempotent; call at the
    * committed point of BOTH quit paths (including the zero-task fast path) before proceeding.
@@ -56,15 +59,15 @@ export interface IpcRuntime {
    */
   disposeServices: () => Promise<void>;
   /**
-   * Whether the menubar icon currently exists - the main process only turns a window close
-   * into "hide into the menubar" when there is an icon to get back in with.
+   * Whether the menubar icon currently exists - the Dock can disappear after closing the
+   * panel only when a menu bar icon provides a way to reopen it.
    */
   trayEnabled: () => boolean;
 }
 
 export function registerAllIpcHandlers(
   win: () => BrowserWindow | null,
-  getOrCreateWindow: () => { win: BrowserWindow; created: boolean }
+  getOrCreateWindow: () => PanelWindow
 ): IpcRuntime {
   const settings = new Settings();
   const pathProbe = new PathProbe();
@@ -132,13 +135,7 @@ export function registerAllIpcHandlers(
   const deepLinks = new DeepLinks(
     registry,
     orchestrator,
-    () => {
-      const w = win();
-      if (w) {
-        if (w.isMinimized()) w.restore();
-        w.focus();
-      }
-    },
+    () => getOrCreateWindow().ready,
     win
   );
   void deepLinks;
@@ -239,12 +236,10 @@ export function registerAllIpcHandlers(
 
   // --- Crash / ready desktop notifications (IMPROVEMENT-PLAN 14.2) -----------------------------
   const focusAppInWindow = (appId: AppId): void => {
-    const { win: w, created } = getOrCreateWindow();
-    const send = (): void => {
-      w.webContents.send('deepLink:focusApp', { appId });
-    };
-    if (created) w.webContents.once('did-finish-load', () => setTimeout(send, 200));
-    else send();
+    const { win: w, ready } = getOrCreateWindow();
+    void ready.then((loaded) => {
+      if (loaded && !w.isDestroyed()) w.webContents.send('deepLink:focusApp', { appId });
+    });
   };
   const taskReady = new Map<string, boolean>();
   runner.on('status', (evt: TaskStatusEvent) => {
@@ -557,6 +552,7 @@ export function registerAllIpcHandlers(
     // A renderer reload (⌘R is kept in prod) loses the renderer-side unsubscribe calls; if the
     // stale subscriptions lingered, log forwarding would stay gated to dead taskIds forever.
     onRendererReload: () => logSubs.clear(),
+    onRendererReady: () => updater.replayToPanel(),
     // Close the MCP listener BEFORE tasks are torn down so an in-flight tool call can't spawn
     // a process that outlives the quit as an orphan.
     disposeServices: () => mcpService.dispose(),

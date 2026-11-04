@@ -81,6 +81,8 @@ export interface RunHistoryRow {
  */
 export type InvokeChannels = {
   'app:ping': { req: string; res: string };
+  'panel:ready': { req: void; res: void };
+  'panel:closeReady': { req: { requestId: number; saved: boolean }; res: void };
 
   'apps:list': { req: void; res: App[] };
   'apps:add': { req: { path: string }; res: App };
@@ -183,6 +185,7 @@ export type InvokeChannels = {
 };
 
 export type EventChannels = {
+  'panel:prepareClose': { requestId: number };
   /** Per-task log chunk. Renderer keys log buffers by taskId. */
   'task:log': { taskId: TaskId; appId: AppId; chunk: string; ts: number };
 
@@ -353,6 +356,8 @@ export type EventPayload<C extends EventChannelName> = EventChannels[C];
  */
 const INVOKE_CHANNEL_FLAGS = {
   'app:ping': true,
+  'panel:ready': true,
+  'panel:closeReady': true,
   'apps:list': true,
   'apps:add': true,
   'apps:create': true,
@@ -414,6 +419,7 @@ const INVOKE_CHANNEL_FLAGS = {
 export const INVOKE_CHANNELS = Object.keys(INVOKE_CHANNEL_FLAGS) as InvokeChannelName[];
 
 const EVENT_CHANNEL_FLAGS = {
+  'panel:prepareClose': true,
   'task:log': true,
   'task:status': true,
   'task:stats': true,

@@ -14,6 +14,7 @@ import { ImportProjectsDrawer } from './components/ImportProjectsDrawer';
 import { GlobalLogSearch } from './components/GlobalLogSearch';
 import { ToastHost } from './components/Toast';
 import { invokeOrToast } from './lib/invoke';
+import { flushPanelSaves } from './lib/panelSaves';
 import { useTheme } from './hooks/useTheme';
 import { useLanguage } from './hooks/useLanguage';
 // Read translations through the i18next singleton inside long-lived effects: the effect's
@@ -31,7 +32,6 @@ export function App(): JSX.Element {
   const setRunningTasks = useStore((s) => s.setRunningTasks);
   const upsertApp = useStore((s) => s.upsertApp);
   const setSelected = useStore((s) => s.setSelected);
-  const setView = useStore((s) => s.setView);
   const applyAppStatus = useStore((s) => s.applyAppStatus);
   const applyTaskStatus = useStore((s) => s.applyTaskStatus);
   const applyTaskStats = useStore((s) => s.applyTaskStats);
@@ -50,17 +50,16 @@ export function App(): JSX.Element {
 
   // Latest onAddApp without re-subscribing the event effect when it changes.
   const onAddAppRef = useRef<(() => Promise<void>) | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   // Apply persisted theme to <html>.
   useTheme();
   // Keep i18next in sync with the persisted language setting.
   useLanguage();
 
-  // Re-sync the cached view (apps + running snapshot + tasks) from the main process. Used on
-  // cold boot (resetView: land on Dashboard) and on `state:invalidate` from MCP mutations
-  // (resetView false: keep the user where they are).
+  // Re-sync live state on panel creation and MCP mutations, preserving saved navigation.
   const syncAll = useCallback(
-    async (resetView: boolean): Promise<void> => {
+    async (): Promise<void> => {
       const [list, running, runningTasks] = await Promise.all([
         window.api.invoke('apps:list', undefined),
         window.api.invoke('proc:list', undefined),
@@ -83,13 +82,23 @@ export function App(): JSX.Element {
       } catch {
         // best-effort
       }
-      if (resetView) setView('dashboard');
     },
-    [setApps, setRunningApps, setRunningTasks, setView]
+    [setApps, setRunningApps, setRunningTasks]
   );
 
   useEffect(() => {
-    void syncAll(true);
+    void syncAll();
+    const offPrepareClose = window.api.on('panel:prepareClose', ({ requestId }) => {
+      // Confirmation dialogs are portalled outside this panel and remain interactive.
+      if (panelRef.current) panelRef.current.inert = true;
+      void flushPanelSaves().then(
+        () => window.api.invoke('panel:closeReady', { requestId, saved: true }),
+        () => window.api.invoke('panel:closeReady', { requestId, saved: false })
+      ).catch(() => {}).finally(() => {
+        if (panelRef.current) panelRef.current.inert = false;
+      }); // The successful acknowledgement destroys this renderer.
+    });
+    void window.api.invoke('panel:ready', undefined);
 
     // The MCP server (or any non-renderer path) can add/update/remove/start/stop apps; it
     // fires `state:invalidate` so the desktop reflects those changes without a manual reload.
@@ -97,7 +106,7 @@ export function App(): JSX.Element {
     let invalidateTimer: ReturnType<typeof setTimeout> | null = null;
     const offInvalidate = window.api.on('state:invalidate', () => {
       if (invalidateTimer) clearTimeout(invalidateTimer);
-      invalidateTimer = setTimeout(() => void syncAll(false), 200);
+      invalidateTimer = setTimeout(() => void syncAll(), 200);
     });
 
     const offTaskStatus = window.api.on(
@@ -157,6 +166,7 @@ export function App(): JSX.Element {
       void window.api.invoke('logs:openFolder', undefined);
     });
     return () => {
+      offPrepareClose();
       if (invalidateTimer) clearTimeout(invalidateTimer);
       offInvalidate();
       offTaskStatus();
@@ -196,6 +206,7 @@ export function App(): JSX.Element {
   // Global Cmd+K (command palette) and Cmd+Shift+F (search all logs).
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (panelRef.current?.inert) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && !e.shiftKey) {
         e.preventDefault();
         setPaletteOpen((v) => !v);
@@ -229,7 +240,7 @@ export function App(): JSX.Element {
   }
 
   return (
-    <div className="flex h-full w-full">
+    <div ref={panelRef} className="flex h-full w-full">
       <Sidebar
         onAddApp={onAddApp}
         onOpenSettings={() => setSettingsOpen(true)}

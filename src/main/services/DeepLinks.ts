@@ -28,7 +28,7 @@ export class DeepLinks {
   constructor(
     private readonly registry: AppRegistry,
     private readonly orchestrator: AppOrchestrator,
-    private readonly focusWindow: () => void,
+    private readonly focusWindow: () => void | boolean | Promise<void | boolean>,
     private readonly getWin: () => BrowserWindow | null
   ) {
     if (process.defaultApp) {
@@ -59,9 +59,9 @@ export class DeepLinks {
     const host = parsed.host || parsed.pathname.replace(/^\/+/, '').split('/')[0] || '';
     const params = parsed.searchParams;
 
-    this.focusWindow();
+    if ((await this.focusWindow()) === false) return;
     const win = this.getWin();
-    if (!win) return;
+    if (!win || win.isDestroyed()) return;
 
     if (host === 'open') {
       const id = params.get('id');

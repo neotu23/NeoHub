@@ -1,5 +1,6 @@
-import { Menu, shell, type BrowserWindow, type MenuItemConstructorOptions } from 'electron';
+import { Menu, shell, type MenuItemConstructorOptions } from 'electron';
 import type { EventChannelName } from '@shared/ipc';
+import type { PanelWindow } from './services/PanelWindow';
 
 const APP_NAME = 'NeoHub';
 const WEBSITE = 'https://github.com/neotu23/NeoHub';
@@ -13,7 +14,7 @@ const WEBSITE = 'https://github.com/neotu23/NeoHub';
  *
  * Notes:
  * - **Reload (⌘R) is kept in every build** - the renderer relies on a hard reload to
- *   re-bootstrap onto the Dashboard (see App.tsx). Force Reload + Toggle DevTools are
+ *   re-bootstrap with fresh runtime state. Force Reload + Toggle DevTools are
  *   gated to dev only.
  * - The **Edit** submenu (undo/cut/copy/paste/select-all) is required: once a custom
  *   menu is set, macOS no longer supplies the implicit copy/paste accelerators, so text
@@ -21,23 +22,19 @@ const WEBSITE = 'https://github.com/neotu23/NeoHub';
  */
 export function installAppMenu(
   isDev: boolean,
-  getOrCreateWindow: () => { win: BrowserWindow; created: boolean }
+  getOrCreateWindow: () => PanelWindow
 ): void {
   // Send a menu action to the renderer. Menu items live in the main process, so app-level
   // actions (open Settings, Add App, Add Folder) are forwarded as typed events.
   //
   // On macOS the app keeps running with all windows closed; if there's no window we create
-  // one and wait for the renderer to finish loading (+ a beat for React to subscribe)
+  // one and wait for React to install the renderer's listeners
   // before sending, so the shortcut isn't a dead key.
   const send = (channel: EventChannelName) => (): void => {
-    const { win, created } = getOrCreateWindow();
-    if (created) {
-      win.webContents.once('did-finish-load', () => {
-        setTimeout(() => win.webContents.send(channel, {}), 200);
-      });
-    } else {
-      win.webContents.send(channel, {});
-    }
+    const { win, ready } = getOrCreateWindow();
+    void ready.then((loaded) => {
+      if (loaded && !win.isDestroyed()) win.webContents.send(channel, {});
+    });
   };
 
   const template: MenuItemConstructorOptions[] = [
@@ -84,7 +81,7 @@ export function installAppMenu(
     {
       label: 'View',
       submenu: [
-        // Reload stays in prod (⌘R → re-bootstrap to Dashboard). Force-reload and
+        // Reload stays in prod (⌘R → re-fetch runtime state). Force-reload and
         // DevTools are dev-only.
         { role: 'reload' },
         ...(isDev

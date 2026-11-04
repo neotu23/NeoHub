@@ -8,6 +8,7 @@ import { ErrorBanner } from './ErrorBanner';
 import { useDialog } from '../hooks/useDialog';
 import { openConfirm } from './PromptModal';
 import { cn } from '../lib/cn';
+import { registerPanelSave } from '../lib/panelSaves';
 
 type Scope = 'global' | 'app' | 'task';
 
@@ -222,7 +223,7 @@ export function EnvEditor({
 
   // Gate destructive navigation (close / overlay / task-switch) behind a
   // discard confirmation whenever the relevant scope has unsaved edits.
-  const requestClose = useCallback(async (): Promise<void> => {
+  const confirmDiscard = useCallback(async (): Promise<boolean> => {
     if (
       anyDirty &&
       !(await openConfirm({
@@ -232,10 +233,19 @@ export function EnvEditor({
         confirmLabel: 'Discard'
       }))
     ) {
-      return;
+      return false;
     }
+    return true;
+  }, [anyDirty]);
+
+  useEffect(() => registerPanelSave(async () => {
+    if (!(await confirmDiscard())) throw new Error('Panel close cancelled');
+  }), [confirmDiscard]);
+
+  const requestClose = useCallback(async (): Promise<void> => {
+    if (!(await confirmDiscard())) return;
     onClose();
-  }, [anyDirty, onClose]);
+  }, [confirmDiscard, onClose]);
 
   // Switching the picked task silently overwrites taskVars via refreshTask, so
   // confirm a discard first when the task scope is dirty.

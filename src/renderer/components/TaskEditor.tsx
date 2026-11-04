@@ -67,9 +67,6 @@ export function TaskEditor({
   const dragIdRef = useRef<TaskId | null>(null);
   const [dragOverId, setDragOverId] = useState<TaskId | null>(null);
 
-  // Overlay dialog: focus trap, Escape to close, focus restore, aria wiring.
-  const { dialogProps } = useDialog(onClose, TASK_EDITOR_TITLE_ID);
-
   useEffect(() => {
     void window.api.invoke('apps:detect', { path: appPath }).then(setDetection);
   }, [appPath]);
@@ -106,12 +103,23 @@ export function TaskEditor({
       upsertTask(t);
     } catch (e) {
       setError((e as Error).message);
+      throw e;
     }
   }, 300, mergeTaskSaves);
 
+  const requestClose = async (): Promise<void> => {
+    try {
+      await flushSave();
+      onClose();
+    } catch {
+      // The save callback shows the validation error; keep the draft visible for correction.
+    }
+  };
+  const { dialogProps } = useDialog(() => { void requestClose(); }, TASK_EDITOR_TITLE_ID);
+
   // If the user switches the edited task before pending changes flush, save them first.
   useEffect(() => {
-    return () => flushSave();
+    return () => { void flushSave().catch(() => {}); };
   }, [editingId, flushSave]);
 
   const applyPatch = (patch: Partial<Task>): void => {
@@ -133,8 +141,8 @@ export function TaskEditor({
     });
     if (!ok) return;
     setError(null);
-    flushSave();
     try {
+      await flushSave();
       await window.api.invoke('tasks:remove', { id });
       removeTask(id);
       if (editingId === id) setEditingId(tasks.find((t) => t.id !== id)?.id ?? null);
@@ -159,7 +167,7 @@ export function TaskEditor({
             </p>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => void requestClose()}
             className="rounded-md p-1 text-fg-subtle hover:bg-surface hover:text-fg"
             title="Close task editor"
             aria-label="Close"
@@ -233,7 +241,7 @@ export function TaskEditor({
                   >
                     <GripVertical className="h-3 w-3 cursor-grab text-fg-subtle group-hover:text-fg-muted" />
                     <button
-                      onClick={() => setEditingId(t.id)}
+                      onClick={() => { void flushSave().then(() => setEditingId(t.id)).catch(() => {}); }}
                       className="flex flex-1 items-center gap-2 text-left"
                     >
                       <span className="font-medium">{t.name}</span>
