@@ -1,5 +1,7 @@
 //! State snapshot handed to a (re)connecting window.
 
+use crate::monitor::ports::PortSample;
+use crate::monitor::stats::StatsSample;
 use crate::process::runner::RunningTaskInfo;
 use neohub_domain::{App, AppId, ProcessState, Settings, Task};
 use std::collections::BTreeMap;
@@ -14,4 +16,8 @@ pub struct CoreSnapshot {
     pub running_tasks: Vec<RunningTaskInfo>,
     pub app_states: BTreeMap<AppId, ProcessState>,
     pub settings: Settings,
+    /// Latest CPU/memory sample per running task.
+    pub task_stats: BTreeMap<neohub_domain::TaskId, StatsSample>,
+    /// Latest port picture per running task.
+    pub task_ports: BTreeMap<neohub_domain::TaskId, PortSample>,
 }

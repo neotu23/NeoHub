@@ -21,6 +21,23 @@ pub enum CoreEventKind {
         seq: u64,
         bytes: Vec<u8>,
     },
+    /// CPU/memory sample for one running task.
+    TaskStats {
+        task_id: TaskId,
+        app_id: AppId,
+        cpu_percent: f32,
+        mem_mb: f64,
+        tree_cpu_percent: f32,
+        tree_mem_mb: f64,
+        process_count: usize,
+    },
+    /// Listening ports for one running task, confirmed vs merely mentioned in output.
+    TaskPorts {
+        task_id: TaskId,
+        app_id: AppId,
+        confirmed: Vec<u16>,
+        hinted: Vec<u16>,
+    },
     /// Catalog rows changed (app/task/env edited through the same command path).
     CatalogChanged,
     /// The subscriber missed events; take a fresh snapshot and continue after it.

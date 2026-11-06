@@ -95,7 +95,7 @@
 
 | # | 功能 | 旧版源码依据 | 旧版基线 | Rust 目标 | Rust 状态 |
 |---|---|---|---|---|---|
-| M1 | CPU/内存采样 `task:stats`（pidusage 1 Hz，批量 1 fork/tick） | `StatsMonitor.ts` | 部分（截图 sparkline） | `core/src/monitor/stats.rs`| 部分（`ps` 批量采样已实现，own/tree 口径分离并测试；后台 1 Hz 循环与 `task:stats` 事件待接） |
+| M1 | CPU/内存采样 `task:stats`（pidusage 1 Hz，批量 1 fork/tick） | `StatsMonitor.ts` | 部分（截图 sparkline） | `core/src/monitor/stats.rs`| 已验证（`ps` 批量采样 + own/tree 口径分离；后台循环默认 1000 ms／下限 200 ms，空闲不采样；`TaskStats`/`TaskPorts` 事件与快照缓存） |
 | M2 | 端口探测 `task:ports`：`lsof` 进程表 + stdout 提示，3 次未确认淘汰 | `PortDetector.ts` | 已验证（`PortDetector.test.ts` 7 例） | `core/src/monitor/ports.rs`| 已验证（一次批量 `lsof`，多级后代端口归属实测；进程退出竞态采样为 0） |
 | M3 | confirmed owner 与"仅日志提示"的端口区分 | `PortDetector.ts`, `PortChip.tsx` | 已验证 | `core/src/monitor/ports.rs`| 已验证（confirmed 与 hinted 分离，未确认提示连续 3 次淘汰） |
 | M4 | 变更自动重启 `RestartWatcher`（chokidar + 500 ms 去抖 + glob/ignore） | `RestartWatcher.ts` | 已验证（`RestartWatcher.test.ts`） | `core/src/watch/restart.rs`| 已验证（notify 递归监听、去抖 500 ms、忽略 node_modules/.git/.next/dist/build/target、`**/` 兼容 picomatch） |

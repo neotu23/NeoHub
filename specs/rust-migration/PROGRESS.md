@@ -312,7 +312,7 @@
 ---
 
 ### 阶段 8：端口、资源、文件监听与通知事件
-- 状态：**开发中**（monitor/watch 模块已完成并测试；后台采样循环与事件接入待做）
+- 状态：**已验证**（monitor/watch 模块、后台采样循环与 stats/ports 事件全部完成）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: port process monitoring and file watchers`
 - 实际修改文件：新增 `native/crates/core/src/monitor/{mod,ports,stats}.rs`、
@@ -334,9 +334,21 @@
   3. glob 语义：`glob` crate 的 `**/` 需要至少一层目录，已补上 picomatch 的"零层"折叠形式
   4. 目录级 FSEvents 事件（无法匹配文件 glob）视为"该目录有变化"，避免漏重启；生成目录仍被忽略
 - 未解决问题及所属阶段：
-  1. 后台采样循环（默认 1000 ms、下限 200 ms、无任务时**不轮询**）与 `task:stats`/`task:ports` 事件
-     → 本阶段剩余
+  1. 后台采样循环与 stats/ports 事件 → **已完成**（见下）
   2. 崩溃/就绪通知、通知点击跳转 → 阶段 15
   3. `.env` 变化触发的 UI 横幅与"重启 watcher 复用启动锁"（避免重启风暴）→ 阶段 10/12
 
 ---
+
+- 第二批完成（2026-11-06T19:20Z–19:45Z UTC）：`CoreEventKind::{TaskStats, TaskPorts}`、
+  `CoreSnapshot::{task_stats, task_ports}`；`CoreService::monitor_tick()` + `spawn_monitor()`
+  - 空闲时**不轮询**：无运行任务时循环停在 `Notify` 上（真实 await，不是 sleep 轮询），
+    启动任务时被唤醒；`monitor_sweeps` 计数器可验证"空闲零采样"
+  - 每次 sweep：一次 `ps` 读全表 → 每任务 own/tree 口径；一次 `lsof` 批量取 LISTEN →
+    按进程组归属；日志提示只取尾部 4 KiB，避免每秒钟扫描 5 MiB 缓冲
+  - 任务停止后清理该任务的采样与端口缓存；事件带 revision，快照与事件同源
+  - 顺手修掉：`RunningTaskInfo.app_id` 之前被填成空串（runner 未保存 app），现在保留真实 app id
+  - 验证：`cargo test -p neohub-core --test monitor_loop` → **3 passed**
+    （stats/ports 事件到达订阅者且快照含同样缓存；空闲 700 ms 零采样、启动后开始采样、停止后停止；
+    端口 confirmed 与 hinted 分别上报）；`cargo test --workspace --locked` → **228 passed / 0 failed**；
+    clippy **0 warnings**；`cargo fmt --all`；`pgrep -f test-fixtures/process` 为空

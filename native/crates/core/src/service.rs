@@ -15,6 +15,8 @@ use crate::environment::env_builder::{BuildEnvInput, build_env};
 use crate::environment::node_resolver::NodeResolver;
 use crate::environment::path_probe::PathProbe;
 use crate::events::{CoreEvent, CoreEventKind};
+use crate::monitor::ports::{PortSample, PortTracker, listening_ports_of};
+use crate::monitor::stats::{StatsSample, clamp_interval, read_process_table, sample_from_table};
 use crate::orchestrator::readiness::{ProbeContext, ReadinessOutcome, wait_for_readiness};
 use crate::orchestrator::state::StickyOutcomes;
 use crate::orchestrator::topology::{TopologyError, plan_start, plan_stop};
@@ -27,10 +29,10 @@ use neohub_storage::secrets::{FakeSecretStore, SecretStore, read_secret_value};
 use neohub_storage::{DataDir, Storage};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::broadcast;
+use tokio::sync::{Notify, broadcast};
 
 const EVENT_CAPACITY: usize = 2048;
 
@@ -50,6 +52,13 @@ pub struct CoreService {
     start_cancels: Mutex<HashMap<AppId, Arc<AtomicBool>>>,
     /// Readiness result per task for the current run.
     ready_flags: Mutex<HashMap<TaskId, (String, bool)>>,
+    /// Wakes the monitor loop when a task starts (idle loops must not poll).
+    monitor_notify: Arc<Notify>,
+    /// How many sampling sweeps ran (test/observability hook: idle must stay at 0 growth).
+    monitor_sweeps: Arc<AtomicU64>,
+    port_tracker: Mutex<PortTracker>,
+    stats_cache: Mutex<BTreeMap<TaskId, StatsSample>>,
+    ports_cache: Mutex<BTreeMap<TaskId, PortSample>>,
 }
 
 /// Handle given to the UI and to MCP.
@@ -85,8 +94,14 @@ impl CoreService {
             outcomes: Mutex::new(StickyOutcomes::new()),
             start_cancels: Mutex::new(HashMap::new()),
             ready_flags: Mutex::new(HashMap::new()),
+            monitor_notify: Arc::new(Notify::new()),
+            monitor_sweeps: Arc::new(AtomicU64::new(0)),
+            port_tracker: Mutex::new(PortTracker::new()),
+            stats_cache: Mutex::new(BTreeMap::new()),
+            ports_cache: Mutex::new(BTreeMap::new()),
         });
         Self::spawn_pump(&service);
+        Self::spawn_monitor(&service);
         service
     }
 
@@ -247,6 +262,8 @@ impl CoreService {
             app_states.insert(app.id.clone(), state);
         }
 
+        let task_stats = self.stats_cache.lock().expect("stats cache").clone();
+        let task_ports = self.ports_cache.lock().expect("ports cache").clone();
         Ok(CoreSnapshot {
             revision,
             apps,
@@ -254,6 +271,8 @@ impl CoreService {
             running_tasks,
             app_states,
             settings,
+            task_stats,
+            task_ports,
         })
     }
 
@@ -389,6 +408,8 @@ impl CoreService {
         }) {
             eprintln!("[core] could not record run history for {task_id_owned}: {err}");
         }
+        // Sampling only runs while something is live; wake the (otherwise parked) loop.
+        self.monitor_notify.notify_one();
         Ok(info)
     }
 
@@ -458,6 +479,137 @@ impl CoreService {
         options: &crate::logs::SearchOptions,
     ) -> Result<Vec<(TaskId, crate::logs::LineMatch)>, crate::logs::LogError> {
         self.runner.search_logs_all(query, options)
+    }
+
+    /// Number of sampling sweeps performed (idle periods must not increase this).
+    pub fn monitor_sweeps(&self) -> u64 {
+        self.monitor_sweeps.load(Ordering::SeqCst)
+    }
+
+    /// Sampling interval from settings, clamped to the legacy floor.
+    fn dashboard_interval(&self) -> Duration {
+        let millis = self
+            .with_storage(|storage| {
+                Ok(storage
+                    .settings()
+                    .load()
+                    .map(|settings| settings.dashboard_refresh_ms)
+                    .unwrap_or(1_000))
+            })
+            .unwrap_or(1_000);
+        Duration::from_millis(clamp_interval(millis))
+    }
+
+    /// One sampling sweep: process table once, listening ports once, events per task.
+    pub async fn monitor_tick(&self) {
+        let running = self.runner.running_tasks();
+        if running.is_empty() {
+            return; // nothing to sample: no shell processes, no CPU
+        }
+        self.monitor_sweeps.fetch_add(1, Ordering::SeqCst);
+
+        let table = tokio::task::spawn_blocking(read_process_table)
+            .await
+            .unwrap_or_default();
+
+        let groups: Vec<(TaskId, AppId, i32, Vec<i32>)> = running
+            .iter()
+            .map(|info| {
+                (
+                    info.task_id.clone(),
+                    info.app_id.clone(),
+                    info.pid as i32,
+                    crate::process::process_tree::group_members(info.pgid),
+                )
+            })
+            .collect();
+
+        let ports = groups
+            .iter()
+            .map(|(_, _, _, members)| listening_ports_of(members))
+            .collect::<Vec<_>>();
+
+        for ((task_id, app_id, pid, _), listening) in groups.iter().zip(ports) {
+            let sample = sample_from_table(&table, *pid);
+            self.stats_cache
+                .lock()
+                .expect("stats cache")
+                .insert(task_id.clone(), sample);
+            let revision = self.bump_revision();
+            let _ = self.events.send(CoreEvent {
+                revision,
+                kind: CoreEventKind::TaskStats {
+                    task_id: task_id.clone(),
+                    app_id: app_id.clone(),
+                    cpu_percent: sample.cpu_percent,
+                    mem_mb: sample.mem_mb,
+                    tree_cpu_percent: sample.tree_cpu_percent,
+                    tree_mem_mb: sample.tree_mem_mb,
+                    process_count: sample.process_count,
+                },
+            });
+
+            // Hints come from the tail of the output only (cheap per sweep).
+            let tail = self.runner.logs_tail(task_id, 4 * 1024);
+            let mut tracker = self.port_tracker.lock().expect("port tracker");
+            tracker.observe_logs(task_id, &tail);
+            let port_sample = tracker.sweep(task_id, &listening);
+            drop(tracker);
+            self.ports_cache
+                .lock()
+                .expect("ports cache")
+                .insert(task_id.clone(), port_sample.clone());
+            let revision = self.bump_revision();
+            let _ = self.events.send(CoreEvent {
+                revision,
+                kind: CoreEventKind::TaskPorts {
+                    task_id: task_id.clone(),
+                    app_id: app_id.clone(),
+                    confirmed: port_sample.confirmed,
+                    hinted: port_sample.hinted,
+                },
+            });
+        }
+
+        // Drop samples for tasks that are no longer running.
+        let live: std::collections::HashSet<TaskId> =
+            running.iter().map(|info| info.task_id.clone()).collect();
+        self.stats_cache
+            .lock()
+            .expect("stats cache")
+            .retain(|task_id, _| live.contains(task_id));
+        self.ports_cache
+            .lock()
+            .expect("ports cache")
+            .retain(|task_id, _| live.contains(task_id));
+    }
+
+    /// Background sampling loop. Parks on a notification while nothing is running, so an
+    /// idle NeoHub starts no timers and runs no shell commands.
+    fn spawn_monitor(service: &Arc<Self>) {
+        let weak = Arc::downgrade(service);
+        let notify = service.monitor_notify.clone();
+        tokio::spawn(async move {
+            loop {
+                // Wait until at least one task is live (not a spin: this is a real await).
+                loop {
+                    let Some(service) = weak.upgrade() else {
+                        return;
+                    };
+                    if !service.runner.running_tasks().is_empty() {
+                        break;
+                    }
+                    drop(service);
+                    notify.notified().await;
+                }
+                let Some(service) = weak.upgrade() else {
+                    return;
+                };
+                let interval = service.dashboard_interval();
+                service.monitor_tick().await;
+                tokio::time::sleep(interval).await;
+            }
+        });
     }
 
     fn finish_history(

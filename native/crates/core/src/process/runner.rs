@@ -97,6 +97,7 @@ pub struct RunningTaskInfo {
 }
 
 struct LiveTask {
+    app_id: AppId,
     pid: u32,
     pgid: i32,
     run_id: RunId,
@@ -180,7 +181,7 @@ impl TaskRunner {
             .filter_map(|(task_id, slot)| {
                 slot.live.as_ref().map(|live| RunningTaskInfo {
                     task_id: task_id.clone(),
-                    app_id: AppId::from_existing(""), // filled by the service layer
+                    app_id: live.app_id.clone(),
                     pid: live.pid,
                     pgid: live.pgid,
                     run_id: live.run_id.clone(),
@@ -219,6 +220,26 @@ impl TaskRunner {
             .expect("logs lock")
             .raw_text(task_id)
             .unwrap_or_default()
+    }
+
+    /// Last `limit` bytes of retained output (cheap enough to call every sweep).
+    pub fn logs_tail(&self, task_id: &TaskId, limit: usize) -> String {
+        let text = self
+            .inner
+            .logs
+            .lock()
+            .expect("logs lock")
+            .raw_text(task_id)
+            .unwrap_or_default();
+        if text.len() <= limit {
+            return text;
+        }
+        let mut start = text.len() - limit;
+        // Never split a UTF-8 character.
+        while start < text.len() && !text.is_char_boundary(start) {
+            start += 1;
+        }
+        text[start..].to_string()
     }
 
     /// Take a subscription bootstrap (terminal + cursor + bounded raw tail).
@@ -378,6 +399,7 @@ impl TaskRunner {
             slot.state = ProcessState::Running;
             slot.stopping_by_user = false;
             slot.live = Some(LiveTask {
+                app_id: app_id.clone(),
                 pid,
                 pgid,
                 run_id: run_id.clone(),
