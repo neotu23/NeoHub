@@ -11,4 +11,6 @@ pub use buffer::{
 };
 pub use search::{LineMatch, SearchError, SearchOptions, compile, search_text};
 pub use subscription::{LogBootstrap, LogCursor, LogSubscriptionOutcome};
-pub use terminal_state::{SCROLLBACK_LINES, TerminalSnapshot, TerminalState};
+pub use terminal_state::{
+    AnsiColor, CellStyle, SCROLLBACK_LINES, TerminalSnapshot, TerminalState, TextRun, apply_sgr,
+};

@@ -560,7 +560,7 @@
     3. db danger zone（导出/重置）→ 阶段 15
 
 ### 阶段 11：原生终端、日志搜索与导出
-- 状态：**开发中**（终端视图/选择/搜索 + 详情页终端渲染 + 导出完成；全局搜索视图与 ANSI 颜色待做）
+- 状态：**开发中**（终端视图/选择/搜索 + 渲染 + SGR 颜色 + 导出完成；全局搜索视图待做）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: add the native terminal view, selection and search`
 - 实际修改文件：新增 `native/crates/ui/src/terminal/{mod,view,selection,search}.rs`、
@@ -598,4 +598,19 @@
     1. 终端渲染目前是纯文本行（未按 ANSI 上色、未用等宽字体）；颜色需要把 SGR 状态带出解析器
     2. 日志区刷新依赖"行数变化"触发，尚未做 33 ms/16 KiB 合批与可见性门控（阶段 9 记录的剩余项）
     3. 全局日志搜索视图（跨任务定位 + 点击跳转）仍待做
+
+- 第三批完成（2026-11-07T02:50Z–03:15Z UTC）：
+  - core：`CellStyle`/`AnsiColor`/`TextRun`；`TerminalState` 逐格记录样式，SGR 解析支持
+    重置(0)、粗体(1/22)、默认前景(39)、经典 8 色(30-37)、亮色(90-97)、`38;5;n`(256 色)、
+    `38;2;r;g;b`(真彩)；擦除单元格同时重置样式；`TerminalSnapshot.styled` 输出同样式 run
+  - ui：`terminal/color.rs`（16 色表 + 216 色立方 + 24 级灰阶 + 真彩直传）、`DisplayRow.spans`，
+    详情页日志区按 run 上色渲染（默认色回落到主题 `fg_muted`）
+  - 验证：`cargo test -p neohub-core --lib terminal_state` → **14 passed**（含颜色 3 例：
+    颜色 run 划分与文本不受影响、256/真彩解析、擦行重置样式）；
+    `cargo test --workspace --locked` → **343 passed / 0 failed**；clippy **0 warnings**；
+    实机启动 7 s 无 stderr
+  - 未解决问题：
+    1. 等宽字体尚未指定（GPUI 字体族设置待验证）
+    2. 全局日志搜索视图（跨任务定位 + 点击跳转）仍待做
+    3. 33 ms/16 KiB 合批与可见性门控（阶段 9 起的遗留项）
 

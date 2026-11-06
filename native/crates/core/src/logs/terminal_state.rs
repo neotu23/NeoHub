@@ -27,12 +27,39 @@ pub enum Cell {
     WideContinuation,
 }
 
+/// One SGR colour.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum AnsiColor {
+    #[default]
+    Default,
+    /// 256-colour palette index (0-15 are the classic 16, 16-255 the extended cube).
+    Indexed(u8),
+    /// 24-bit colour.
+    Rgb(u8, u8, u8),
+}
+
+/// Style applied to a run of cells.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct CellStyle {
+    pub fg: AnsiColor,
+    pub bold: bool,
+}
+
+/// A horizontally contiguous run of same-styled text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextRun {
+    pub text: String,
+    pub style: CellStyle,
+}
+
 /// Rendered result for the UI: plain lines plus where the cursor sits.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TerminalSnapshot {
     pub cols: u16,
     pub rows: u16,
     pub lines: Vec<String>,
+    /// Same rows as `lines`, split into same-style runs so the view can colour them.
+    pub styled: Vec<Vec<TextRun>>,
     pub scrollback_lines: usize,
     pub cursor_row: u16,
     pub cursor_col: u16,
@@ -47,6 +74,10 @@ pub struct TerminalState {
     cols: u16,
     rows: u16,
     grid: Vec<Vec<Cell>>,
+    /// Per-cell style, parallel to `grid`.
+    styles: Vec<Vec<CellStyle>>,
+    /// Style new characters inherit (driven by SGR).
+    current_style: CellStyle,
     scrollback: VecDeque<Vec<Cell>>,
     cursor_row: usize,
     cursor_col: usize,
@@ -69,6 +100,8 @@ impl TerminalState {
             cols,
             rows,
             grid: vec![vec![Cell::Blank; cols as usize]; rows as usize],
+            styles: vec![vec![CellStyle::default(); cols as usize]; rows as usize],
+            current_style: CellStyle::default(),
             scrollback: VecDeque::new(),
             cursor_row: 0,
             cursor_col: 0,
@@ -101,6 +134,9 @@ impl TerminalState {
         for line in &mut self.grid {
             line.resize(cols, Cell::Blank);
         }
+        for line in &mut self.styles {
+            line.resize(cols, CellStyle::default());
+        }
         if rows > self.grid.len() {
             self.grid.extend(
                 std::iter::repeat_with(|| vec![Cell::Blank; cols]).take(rows - self.grid.len()),
@@ -125,6 +161,15 @@ impl TerminalState {
             cols: self.cols,
             rows: self.rows,
             lines: self.grid.iter().map(|line| line_to_string(line)).collect(),
+            styled: self
+                .grid
+                .iter()
+                .enumerate()
+                .map(|(row, line)| {
+                    let styles = self.styles.get(row);
+                    line_to_runs(line, styles.map(Vec::as_slice))
+                })
+                .collect(),
             scrollback_lines: self.scrollback.len(),
             cursor_row: self.cursor_row as u16,
             cursor_col: self.cursor_col as u16,
@@ -167,6 +212,11 @@ impl TerminalState {
             let line = self.grid.remove(0);
             self.push_scrollback(line);
             self.grid.push(vec![Cell::Blank; self.cols as usize]);
+            if !self.styles.is_empty() {
+                self.styles.remove(0);
+                self.styles
+                    .push(vec![CellStyle::default(); self.cols as usize]);
+            }
         }
         self.cursor_col = 0;
         self.pending_wrap = false;
@@ -182,6 +232,16 @@ impl TerminalState {
         let row = self.cursor_row;
         let col = self.cursor_col;
         self.grid[row][col] = Cell::Char(ch);
+        if let Some(line) = self.styles.get_mut(row) {
+            if let Some(cell) = line.get_mut(col) {
+                *cell = self.current_style;
+            }
+            if width == 2
+                && let Some(cell) = line.get_mut(col + 1)
+            {
+                *cell = self.current_style;
+            }
+        }
         if width == 2 && col + 1 < self.cols as usize {
             self.grid[row][col + 1] = Cell::WideContinuation;
         }
@@ -197,21 +257,17 @@ impl TerminalState {
     fn erase_line(&mut self, mode: u16) {
         let row = self.cursor_row;
         let cols = self.cols as usize;
-        match mode {
-            1 => {
-                for col in 0..=self.cursor_col.min(cols - 1) {
-                    self.grid[row][col] = Cell::Blank;
-                }
-            }
-            2 => {
-                for col in 0..cols {
-                    self.grid[row][col] = Cell::Blank;
-                }
-            }
-            _ => {
-                for col in self.cursor_col..cols {
-                    self.grid[row][col] = Cell::Blank;
-                }
+        let (from, to) = match mode {
+            1 => (0, self.cursor_col.min(cols - 1) + 1),
+            2 => (0, cols),
+            _ => (self.cursor_col, cols),
+        };
+        for col in from..to {
+            self.grid[row][col] = Cell::Blank;
+            if let Some(line) = self.styles.get_mut(row)
+                && let Some(cell) = line.get_mut(col)
+            {
+                *cell = CellStyle::default();
             }
         }
     }
@@ -294,6 +350,7 @@ impl vte::Perform for Performer<'_> {
         match action {
             'm' => {
                 self.state.last_sgr = values.clone();
+                apply_sgr(&mut self.state.current_style, &values);
             }
             'K' => self.state.erase_line(first),
             'J' => self.state.erase_display(first),
@@ -340,6 +397,95 @@ impl vte::Perform for Performer<'_> {
     }
 }
 
+/// Apply one SGR parameter list to `style`.
+///
+/// Covers the codes the old renderer actually honoured: reset (0), bold (1) / normal (22),
+/// the 8 classic foreground colours (30-37), bright (90-97), default (39), and the extended
+/// forms 38;5;n (256-colour) and 38;2;r;g;b (truecolor). Anything else is ignored rather than
+/// guessed at.
+pub fn apply_sgr(style: &mut CellStyle, values: &[u16]) {
+    if values.is_empty() {
+        *style = CellStyle::default();
+        return;
+    }
+    let mut index = 0;
+    while index < values.len() {
+        match values[index] {
+            0 => *style = CellStyle::default(),
+            1 => style.bold = true,
+            22 => style.bold = false,
+            39 => style.fg = AnsiColor::Default,
+            30..=37 => style.fg = AnsiColor::Indexed((values[index] - 30) as u8),
+            90..=97 => style.fg = AnsiColor::Indexed((values[index] - 90 + 8) as u8),
+            38 => {
+                match values.get(index + 1).copied() {
+                    // 38;5;n — 256-colour palette
+                    Some(5) => {
+                        if let Some(value) = values.get(index + 2) {
+                            style.fg = AnsiColor::Indexed(*value as u8);
+                            index += 2;
+                        }
+                    }
+                    // 38;2;r;g;b — truecolor
+                    Some(2) => {
+                        if let (Some(r), Some(g), Some(b)) = (
+                            values.get(index + 2),
+                            values.get(index + 3),
+                            values.get(index + 4),
+                        ) {
+                            style.fg = AnsiColor::Rgb(*r as u8, *g as u8, *b as u8);
+                            index += 4;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+}
+
+/// Split one grid row into same-style runs.
+fn line_to_runs(line: &[Cell], styles: Option<&[CellStyle]>) -> Vec<TextRun> {
+    let mut runs: Vec<TextRun> = Vec::new();
+    let mut current = CellStyle::default();
+    let mut text = String::new();
+    for (index, cell) in line.iter().enumerate() {
+        let style = styles
+            .and_then(|styles| styles.get(index).copied())
+            .unwrap_or_default();
+        let ch = match cell {
+            Cell::Blank => ' ',
+            Cell::Char(ch) => *ch,
+            Cell::WideContinuation => continue,
+        };
+        if style != current && !text.is_empty() {
+            runs.push(TextRun {
+                text: std::mem::take(&mut text),
+                style: current,
+            });
+        }
+        current = style;
+        text.push(ch);
+    }
+    if !text.is_empty() {
+        runs.push(TextRun {
+            text,
+            style: current,
+        });
+    }
+    // Drop runs that are pure trailing blanks so the view does not paint empty boxes.
+    while runs
+        .last()
+        .map(|run| run.text.trim().is_empty())
+        .unwrap_or(false)
+    {
+        runs.pop();
+    }
+    runs
+}
+
 fn line_to_string(line: &[Cell]) -> String {
     let mut out = String::with_capacity(line.len());
     for cell in line {
@@ -360,6 +506,50 @@ mod tests {
         for chunk in chunks {
             state.feed(chunk);
         }
+    }
+
+    #[test]
+    fn sgr_colours_become_runs_and_do_not_leak_into_plain_text() {
+        let mut state = TerminalState::new(40, 4);
+        state.feed(b"\x1b[32mgreen\x1b[0m plain \x1b[1;34mboldblue\x1b[0m");
+        let snapshot = state.snapshot();
+        let runs = &snapshot.styled[0];
+        assert_eq!(runs[0].text, "green");
+        assert_eq!(runs[0].style.fg, AnsiColor::Indexed(2));
+        assert_eq!(runs[1].text, " plain ");
+        assert_eq!(runs[1].style.fg, AnsiColor::Default);
+        assert_eq!(runs[2].text, "boldblue");
+        assert_eq!(runs[2].style.fg, AnsiColor::Indexed(4));
+        assert!(
+            runs[2].style.bold,
+            "1;34 sets bold and blue on the same run"
+        );
+        assert_eq!(
+            snapshot.lines[0].trim_end(),
+            "green plain boldblue",
+            "the plain text view is unaffected by colour"
+        );
+    }
+
+    #[test]
+    fn extended_colours_are_parsed() {
+        let mut state = TerminalState::new(40, 4);
+        state.feed(b"\x1b[38;5;208morange\x1b[0m \x1b[38;2;1;2;3mrgb\x1b[0m");
+        let runs = &state.snapshot().styled[0];
+        assert_eq!(runs[0].style.fg, AnsiColor::Indexed(208));
+        assert_eq!(runs[1].text, " ");
+        assert_eq!(runs[2].style.fg, AnsiColor::Rgb(1, 2, 3));
+    }
+
+    #[test]
+    fn erasing_a_line_clears_its_styles_too() {
+        let mut state = TerminalState::new(20, 3);
+        state.feed(b"\x1b[31mred text\x1b[0m\r\x1b[K");
+        let runs = &state.snapshot().styled[0];
+        assert!(
+            runs.iter().all(|run| run.style.fg == AnsiColor::Default),
+            "erase-line resets the style of the cells it clears: {runs:?}"
+        );
     }
 
     #[test]

@@ -2396,7 +2396,19 @@ impl Render for ShellView {
                             pane = pane.child("（还没有日志输出）".to_string());
                         }
                         for row in rows {
-                            pane = pane.child(row.text);
+                            let mut line = div().flex().flex_row().gap(px(0.0));
+                            if row.spans.is_empty() {
+                                line = line.child(row.text);
+                            } else {
+                                for span in row.spans {
+                                    let colour = crate::terminal::ansi_to_rgba(
+                                        span.style.fg,
+                                        palette.fg_muted,
+                                    );
+                                    line = line.child(div().text_color(colour).child(span.text));
+                                }
+                            }
+                            pane = pane.child(line);
                         }
                         main = main.child(pane);
                     }

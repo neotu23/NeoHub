@@ -4,7 +4,7 @@
 //! visible, how wide each cell is, and where the cursor sits. Nothing here touches a
 //! process, a database or the raw byte stream, so it is cheap to rebuild every frame.
 
-use neohub_core::logs::TerminalSnapshot;
+use neohub_core::logs::{CellStyle, TerminalSnapshot, TextRun};
 
 /// One display row.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -14,6 +14,8 @@ pub struct DisplayRow {
     pub text: String,
     /// True for the row the terminal cursor is on (only meaningful while following).
     pub has_cursor: bool,
+    /// Same row split into coloured runs (empty when the row has no explicit styling).
+    pub spans: Vec<TextRun>,
 }
 
 /// Rendered view over one task's terminal.
@@ -21,6 +23,8 @@ pub struct DisplayRow {
 pub struct TerminalView {
     /// Full scrollback + grid, one string per row (already trimmed of trailing blanks).
     rows: Vec<String>,
+    /// Per-row styled runs, parallel to `rows` (scrollback rows carry default styles).
+    styled: Vec<Vec<TextRun>>,
     cursor_row: usize,
     cursor_col: usize,
     scrollback_rows: usize,
@@ -40,14 +44,25 @@ impl TerminalView {
             .map(|line| line.trim_end().to_string())
             .collect();
         let scrollback_rows = rows.len();
+        let mut styled: Vec<Vec<TextRun>> = rows
+            .iter()
+            .map(|line| {
+                vec![TextRun {
+                    text: line.clone(),
+                    style: CellStyle::default(),
+                }]
+            })
+            .collect();
         rows.extend(
             snapshot
                 .lines
                 .iter()
                 .map(|line| line.trim_end().to_string()),
         );
+        styled.extend(snapshot.styled.iter().cloned());
         TerminalView {
             rows,
+            styled,
             cursor_row: scrollback_rows + snapshot.cursor_row as usize,
             cursor_col: snapshot.cursor_col as usize,
             scrollback_rows,
@@ -64,8 +79,18 @@ impl TerminalView {
             .map(|line| line.trim_end().to_string())
             .collect();
         let last = rows.len().saturating_sub(1);
+        let styled: Vec<Vec<TextRun>> = rows
+            .iter()
+            .map(|line| {
+                vec![TextRun {
+                    text: line.clone(),
+                    style: CellStyle::default(),
+                }]
+            })
+            .collect();
         TerminalView {
             rows,
+            styled,
             cursor_row: last,
             cursor_col: 0,
             scrollback_rows: 0,
@@ -113,6 +138,12 @@ impl TerminalView {
                 index,
                 text: self.rows[index].clone(),
                 has_cursor: follow && index == self.cursor_row,
+                spans: self.styled.get(index).cloned().unwrap_or_else(|| {
+                    vec![TextRun {
+                        text: self.rows[index].clone(),
+                        style: CellStyle::default(),
+                    }]
+                }),
             })
             .collect()
     }
@@ -169,13 +200,22 @@ impl TerminalView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neohub_core::logs::TerminalSnapshot;
+    use neohub_core::logs::{CellStyle, TerminalSnapshot, TextRun};
 
     fn snapshot(lines: &[&str], cursor: (u16, u16), truncated: bool) -> TerminalSnapshot {
         TerminalSnapshot {
             cols: 40,
             rows: lines.len() as u16,
             lines: lines.iter().map(|line| line.to_string()).collect(),
+            styled: lines
+                .iter()
+                .map(|line| {
+                    vec![TextRun {
+                        text: line.to_string(),
+                        style: CellStyle::default(),
+                    }]
+                })
+                .collect(),
             scrollback_lines: 0,
             cursor_row: cursor.0,
             cursor_col: cursor.1,
