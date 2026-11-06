@@ -1,5 +1,6 @@
 //! Interface state: persisted navigation plus the snapshot/event projection.
 
+pub mod app_form;
 pub mod edit_session;
 pub mod env_editor;
 pub mod session;

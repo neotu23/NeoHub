@@ -1020,3 +1020,20 @@
   - `cargo test --workspace --locked` → **417 passed / 0 failed**；clippy 0
 - 未解决问题：无（S9 完成）。设置界面上该开关已可切换，但**切换后到下一次 tick 才生效**（≤500 ms）。
 
+### U7 应用配置编辑（第一批：模型）
+- 状态：**模型完成**；面板视图未接线
+- 最近提交：`feat: model the app configuration form`
+- 实际修改文件：新增 `native/crates/ui/src/state/app_form.rs`；更新 `ui/src/state/mod.rs`
+- 设计要点：
+  1. **只提交改动过的字段**：未触碰的字段不进 patch，因此保存不会覆盖 MCP 或另一窗口刚改的字段
+  2. 空值语义显式区分：「清空文件夹」是 `Some(None)`，与「没改」不同
+  3. 列表用文本编辑：标签逗号分隔（**重复即报错**，不静默合并）、watch globs 每行一条
+     （**拒绝绝对路径**，它们相对应用根目录）
+  4. `nodeVersion` 接受 `auto`/`system`/具体版本，`v20.11.0` 会归一化为 `20.11.0`
+  5. 保存被拒时保留用户输入（`apply_error` 只加错误，不动字段），成功后 `commit` 更新基线
+- 验证：`cargo test -p neohub-ui --lib app_form` → **10 passed**
+  （初始填充、空 patch、只提交改动字段、清空写 null、列表解析、重复标签、绝对 globs 被拒、
+  版本三种形式与非法值、字段级错误、提交/拒绝语义）
+  `cargo test --workspace --locked` → **427 passed / 0 failed**；clippy 0
+- 未解决问题：`shell.rs` 的配置面板渲染与 `UpdateApp` 提交接线（下一批）
+
