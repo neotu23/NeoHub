@@ -3900,6 +3900,7 @@ dependencies = [
  "neohub-domain",
  "neohub-storage",
  "neohub-ui",
+ "serde_json",
  "tempfile",
  "tokio",
 ]

@@ -627,7 +627,7 @@
     3. 快捷键 ⌘⇧F/⌘K 的键位绑定待阶段 12 与菜单一起接
 
 ### 阶段 12：窗口销毁、菜单栏、Dock、单实例
-- 状态：**开发中**（生命周期、单实例、窗口重建、Dock 桥接、托盘菜单模型完成；NSStatusItem 绑定待做）
+- 状态：**开发中**（生命周期、单实例、窗口重建、bounds 持久化、Dock 桥接、托盘菜单模型完成；NSStatusItem 绑定待做）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: add the window lifecycle and single-instance lock`
 - 实际修改文件：新增 `native/crates/desktop/src/{lib,session_lock,window_session}.rs`、
@@ -688,4 +688,18 @@
     2. Dock 隐藏/恢复尚未接到 `AppHost.dock_hidden` 的变化上（函数已就绪，调用点待接）
     3. Cmd+W 绑定、`window-state.json` 落盘
     4. 打包 `.app` 上验证 Finder/Dock 激活与事件循环不退出的行为 → 阶段 15
+
+- 第四批完成（2026-11-07T05:25Z–05:45Z UTC）：
+  - `AppHost` 增加 `window-state.json` 持久化：关窗时写入 `{x,y,width,height}`，
+    启动时读取；损坏文件视为"无存储 frame"→ 用默认尺寸（不 panic、不猜）
+  - 验证：`cargo test -p neohub-desktop --test window_lifecycle` → **10 passed**
+    （新增两条：frame 在下次启动被恢复；损坏的 window-state.json 回退默认）；
+    `cargo test --workspace --locked` → **361 passed / 0 failed**；clippy **0 warnings**
+  - 未解决问题（本阶段剩余，逐项明确）：
+    1. **NSStatusItem 绑定**：需要在 GPUI 主线程用 objc2 `declare_class!` 定义 target-action
+       对象并创建 `NSStatusItem`/`NSMenu`。本轮未实现——该绑定必须实机点击验证，
+       而本会话无法进行 GUI 点击；已在功能表标注为"托盘 UI 未完成"
+    2. Dock 桥接函数已就绪，但尚未挂到 `AppHost.dock_hidden` 的变化点（调用点待接）
+    3. Cmd+W 键位绑定
+    4. 打包 `.app` 的 Finder/Dock 激活与事件循环验证 → 阶段 15
 

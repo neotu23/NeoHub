@@ -8,6 +8,9 @@
 //! calls `request_close`, then either drops the window or shows the error.
 
 use neohub_core::service::CoreService;
+
+/// Window frame as (x, y, width, height).
+pub type WindowFrame = (f64, f64, f64, f64);
 use neohub_ui::state::SaveBarrier;
 use neohub_ui::state::session::SessionStore;
 use std::path::{Path, PathBuf};
@@ -47,14 +50,14 @@ pub struct AppHost {
     dock_hidden: bool,
     /// How many windows have been created in this process (growth check for tests).
     window_generations: u64,
-    /// Bounds captured on the last close.
-    last_bounds: Option<(f64, f64, f64, f64)>,
+    /// Bounds captured on the last close (persisted to `window-state.json`).
+    last_bounds: Option<WindowFrame>,
     quitting: bool,
 }
 
 impl AppHost {
     pub fn new(service: Arc<CoreService>, data_dir: &Path) -> Self {
-        AppHost {
+        let mut host = AppHost {
             service,
             session_store: SessionStore::new(data_dir),
             barrier: SaveBarrier::new(),
@@ -64,7 +67,10 @@ impl AppHost {
             window_generations: 1,
             last_bounds: None,
             quitting: false,
-        }
+        };
+        // A previous session's frame is the default for this one.
+        host.last_bounds = host.load_bounds();
+        host
     }
 
     pub fn service(&self) -> &Arc<CoreService> {
@@ -120,10 +126,49 @@ impl AppHost {
     }
 
     /// Called after the save barrier reported success (or when there was nothing to save).
-    pub fn finish_close(&mut self, bounds: Option<(f64, f64, f64, f64)>) {
+    pub fn finish_close(&mut self, bounds: Option<WindowFrame>) {
         self.window_open = false;
-        self.last_bounds = bounds;
+        if bounds.is_some() {
+            self.last_bounds = bounds;
+            self.save_bounds();
+        }
         self.reconcile_dock();
+    }
+
+    fn bounds_file(&self) -> PathBuf {
+        self.session_store
+            .path()
+            .parent()
+            .map(|dir| dir.join("window-state.json"))
+            .unwrap_or_else(|| PathBuf::from("window-state.json"))
+    }
+
+    /// Persist the frame so the next launch (not just the next re-open) restores it.
+    fn save_bounds(&self) {
+        let Some((x, y, width, height)) = self.last_bounds else {
+            return;
+        };
+        let json = format!("{{\"x\":{x},\"y\":{y},\"width\":{width},\"height\":{height}}}");
+        let path = self.bounds_file();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(err) = std::fs::write(&path, json) {
+            eprintln!("[host] could not save window bounds: {err}");
+        }
+    }
+
+    /// Read a stored frame, ignoring a corrupt file (the window then opens at its default size).
+    fn load_bounds(&self) -> Option<WindowFrame> {
+        let raw = std::fs::read_to_string(self.bounds_file()).ok()?;
+        let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let number = |key: &str| value.get(key).and_then(|entry| entry.as_f64());
+        Some((
+            number("x")?,
+            number("y")?,
+            number("width")?,
+            number("height")?,
+        ))
     }
 
     /// Re-open from the tray, Finder or a second launch.
@@ -141,7 +186,7 @@ impl AppHost {
         }
     }
 
-    pub fn last_bounds(&self) -> Option<(f64, f64, f64, f64)> {
+    pub fn last_bounds(&self) -> Option<WindowFrame> {
         self.last_bounds
     }
 

@@ -25,8 +25,22 @@ struct Harness {
 impl Harness {
     fn new(script: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let service = CoreService::open(DataDir::new(dir.path())).expect("core");
-        let project = dir.path().join("window-project");
+        let path = dir.path().to_path_buf();
+        let mut harness = Harness::new_in(&path, script);
+        // Keep the temporary directory alive for the test's lifetime.
+        harness.dir = dir;
+        harness
+    }
+
+    fn new_in(dir_path: &std::path::Path, script: &str) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let service = CoreService::open(DataDir::new(dir_path)).expect("core");
+        // Unique per construction so a test can re-open the same data directory.
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let project = dir_path.join(format!("window-project-{unique}"));
         std::fs::create_dir_all(&project).unwrap();
         let path = project.to_string_lossy().into_owned();
         let command = format!("sh {}", fixture(script).display());
@@ -54,7 +68,7 @@ impl Harness {
                 catalog.list_tasks(&app.id).expect("tasks").remove(0).id
             })
             .expect("storage");
-        let host = AppHost::new(service, dir.path());
+        let host = AppHost::new(service, dir_path);
         Harness { dir, host, task }
     }
 
@@ -259,6 +273,34 @@ async fn a_snapshot_taken_after_a_close_still_reports_the_running_task() {
         other => panic!("unexpected reply {other:?}"),
     }
     harness.host.quit().await.expect("quit");
+}
+
+#[tokio::test]
+async fn the_window_frame_is_persisted_and_restored_on_the_next_launch() {
+    let dir = tempfile::tempdir().unwrap();
+    {
+        let mut harness = Harness::new_in(dir.path(), "steady-log.sh");
+        harness.host.finish_close(Some((40.0, 50.0, 1280.0, 820.0)));
+        harness.host.quit().await.expect("quit");
+    }
+    // A fresh process on the same data directory restores the frame it closed with.
+    let harness = Harness::new_in(dir.path(), "steady-log.sh");
+    assert_eq!(
+        harness.host.last_bounds(),
+        Some((40.0, 50.0, 1280.0, 820.0))
+    );
+}
+
+#[tokio::test]
+async fn a_corrupt_window_state_file_falls_back_to_the_default_frame() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("window-state.json"), "{not json").unwrap();
+    let harness = Harness::new_in(dir.path(), "steady-log.sh");
+    assert_eq!(
+        harness.host.last_bounds(),
+        None,
+        "a corrupt file means 'no stored frame', so the window opens at its default size"
+    );
 }
 
 #[tokio::test]
