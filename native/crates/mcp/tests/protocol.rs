@@ -131,8 +131,8 @@ async fn initialize_then_list_then_call_a_tool() {
         .as_str()
         .expect("text content");
     let apps: Value = serde_json::from_str(text).expect("result is JSON text");
-    assert_eq!(apps.as_array().unwrap().len(), 1);
-    assert_eq!(apps[0]["name"], "demo");
+    assert_eq!(apps["count"], 1);
+    assert_eq!(apps["apps"][0]["name"], "demo");
 }
 
 #[tokio::test]

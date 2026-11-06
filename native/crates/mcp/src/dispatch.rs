@@ -108,28 +108,53 @@ pub async fn dispatch(ctx: &ToolContext, tool: ToolName, args: &Value) -> ToolRe
             let CoreReply::Snapshot(snapshot) = snapshot else {
                 return Err(ToolError::new("unexpected snapshot reply"));
             };
-            let running: Vec<&neohub_core::process::runner::RunningTaskInfo> = snapshot
-                .running_tasks
+            let state_of = |app: &neohub_domain::App| {
+                snapshot
+                    .app_states
+                    .get(&app.id)
+                    .cloned()
+                    .unwrap_or(neohub_domain::ProcessState::Idle)
+            };
+            let running = snapshot
+                .apps
                 .iter()
-                .filter(|task| task.state.is_live())
-                .collect();
-            let cpu: f32 = snapshot
-                .task_stats
-                .values()
-                .map(|stats| stats.cpu_percent)
-                .sum();
-            let mem: f64 = snapshot.task_stats.values().map(|stats| stats.mem_mb).sum();
-            let ports: usize = snapshot
+                .filter(|app| {
+                    matches!(
+                        state_of(app),
+                        neohub_domain::ProcessState::Running
+                            | neohub_domain::ProcessState::Starting
+                    )
+                })
+                .count();
+            let crashed = snapshot
+                .apps
+                .iter()
+                .filter(|app| state_of(app) == neohub_domain::ProcessState::Crashed)
+                .count();
+            let mut ports: Vec<u16> = snapshot
                 .task_ports
                 .values()
-                .map(|sample| sample.confirmed.len())
-                .sum();
+                .flat_map(|sample| sample.confirmed.iter().copied())
+                .collect();
+            ports.sort_unstable();
+            ports.dedup();
+            let apps: Vec<Value> = snapshot
+                .apps
+                .iter()
+                .map(|app| {
+                    json!({
+                        "name": app.name,
+                        "state": state_of(app).as_str(),
+                    })
+                })
+                .collect();
             Ok(ctx.redactor.scrub_json(&json!({
-                "apps": snapshot.apps.len(),
-                "running_tasks": running.len(),
-                "cpu_percent": cpu,
-                "mem_mb": mem,
-                "ports": ports,
+                "devharborVersion": env!("CARGO_PKG_VERSION"),
+                "appCount": snapshot.apps.len(),
+                "running": running,
+                "crashed": crashed,
+                "activePorts": ports,
+                "apps": apps,
             })))
         }
         ToolName::ListApps => {
@@ -141,28 +166,42 @@ pub async fn dispatch(ctx: &ToolContext, tool: ToolName, args: &Value) -> ToolRe
             let CoreReply::Snapshot(snapshot) = snapshot else {
                 return Err(ToolError::new("unexpected snapshot reply"));
             };
+            let filter = opt_str(args, "state");
             let apps: Vec<Value> = snapshot
                 .apps
                 .iter()
-                .map(|app| {
-                    let tasks = snapshot
-                        .tasks_by_app
+                .filter_map(|app| {
+                    let state = snapshot
+                        .app_states
                         .get(&app.id)
                         .cloned()
-                        .unwrap_or_default();
-                    json!({
+                        .unwrap_or(neohub_domain::ProcessState::Idle);
+                    if filter
+                        .as_deref()
+                        .is_some_and(|wanted| wanted != state.as_str())
+                    {
+                        return None;
+                    }
+                    let ports = app_ports(&snapshot, &app.id);
+                    Some(json!({
                         "id": app.id,
                         "name": app.name,
                         "path": app.path,
-                        "folder": app.folder,
+                        "state": state.as_str(),
+                        "ports": ports,
                         "tags": app.tags,
-                        "auto_start": app.auto_start,
-                        "state": snapshot.app_states.get(&app.id),
-                        "tasks": tasks.len(),
-                    })
+                        "folder": app.folder,
+                        "defaultScript": app.default_script,
+                        "packageManager": app.package_manager.map(|manager| manager.as_str()),
+                        "autoStart": app.auto_start,
+                        "lastStartedAt": app.last_started_at,
+                    }))
                 })
                 .collect();
-            Ok(ctx.redactor.scrub_json(&json!(apps)))
+            Ok(ctx.redactor.scrub_json(&json!({
+                "count": apps.len(),
+                "apps": apps,
+            })))
         }
         ToolName::GetApp => {
             let snapshot = ctx
@@ -173,14 +212,19 @@ pub async fn dispatch(ctx: &ToolContext, tool: ToolName, args: &Value) -> ToolRe
             let CoreReply::Snapshot(snapshot) = snapshot else {
                 return Err(ToolError::new("unexpected snapshot reply"));
             };
-            let by_id = opt_str(args, "app_id");
-            let by_path = opt_str(args, "path");
+            // The legacy tool took one `app` argument resolved as id, exact name or absolute
+            // path; `app_id`/`path` stay accepted so older clients keep working.
+            let needle = opt_str(args, "app");
+            let by_id = opt_str(args, "app_id").or_else(|| needle.clone());
+            let by_path = opt_str(args, "path").or_else(|| needle.clone());
+            let by_name = needle.clone();
             let app = snapshot.apps.iter().find(|app| {
                 by_id.as_deref() == Some(app.id.as_str())
                     || by_path.as_deref() == Some(app.path.as_str())
+                    || by_name.as_deref() == Some(app.name.as_str())
             });
             let Some(app) = app else {
-                return Err(ToolError::field("app_id", "找不到该应用"));
+                return Err(ToolError::field("app", "没有应用匹配该 id、名称或路径"));
             };
             let tasks = snapshot
                 .tasks_by_app
@@ -651,6 +695,29 @@ pub async fn dispatch(ctx: &ToolContext, tool: ToolName, args: &Value) -> ToolRe
             Ok(json!({"stopped": true}))
         }
     }
+}
+
+/// Confirmed listening ports across every task of one app (the legacy `aggregatePorts`).
+fn app_ports(snapshot: &neohub_core::snapshot::CoreSnapshot, app_id: &AppId) -> Vec<u16> {
+    let mut ports: Vec<u16> = snapshot
+        .tasks_by_app
+        .get(app_id)
+        .map(|tasks| {
+            tasks
+                .iter()
+                .flat_map(|task| {
+                    snapshot
+                        .task_ports
+                        .get(&task.id)
+                        .map(|sample| sample.confirmed.clone())
+                        .unwrap_or_default()
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    ports.sort_unstable();
+    ports.dedup();
+    ports
 }
 
 fn task_json(task: &Task) -> Value {

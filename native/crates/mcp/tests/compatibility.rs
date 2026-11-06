@@ -72,20 +72,16 @@ async fn add_app_then_list_and_get_it_through_the_tool_layer() {
     let app_id = created["app"]["id"].as_str().expect("app id").to_string();
 
     let listed = call(&ctx, ToolName::ListApps, json!({})).await;
-    assert_eq!(listed.as_array().unwrap().len(), 1);
-    assert_eq!(listed[0]["name"], "demo");
-    assert_eq!(
-        listed[0]["tasks"], 1,
-        "the task count comes from the snapshot"
-    );
+    assert_eq!(listed["count"], 1);
+    assert_eq!(listed["apps"][0]["name"], "demo");
 
     let got = call(&ctx, ToolName::GetApp, json!({"app_id": app_id})).await;
     assert_eq!(got["app"]["name"], "demo");
     assert_eq!(got["tasks"].as_array().unwrap().len(), 1);
 
     let overview = call(&ctx, ToolName::GetOverview, json!({})).await;
-    assert_eq!(overview["apps"], 1);
-    assert_eq!(overview["running_tasks"], 0);
+    assert_eq!(overview["appCount"], 1);
+    assert_eq!(overview["running"], 0);
 }
 
 #[tokio::test]
@@ -257,4 +253,99 @@ async fn invalid_arguments_come_back_as_field_errors() {
     )
     .await;
     assert_eq!(bad_kind["error"]["field"], "kind");
+}
+
+#[tokio::test]
+async fn a_tool_mutation_broadcasts_catalog_changed() {
+    // The window and MCP share one command path, so a tool call must reach open windows as an
+    // event. Without this the sidebar would keep showing the pre-call state.
+    let harness = Harness::new();
+    let ctx = harness.context();
+    let mut subscription = harness.service.handle().subscribe();
+    let path = harness.project("events");
+
+    call(
+        &ctx,
+        ToolName::AddApp,
+        json!({"path": path, "name": "events"}),
+    )
+    .await;
+
+    let event = tokio::time::timeout(Duration::from_secs(5), subscription.recv())
+        .await
+        .expect("an event within 5s")
+        .expect("an event");
+    assert!(
+        matches!(
+            event.kind,
+            neohub_core::events::CoreEventKind::CatalogChanged
+        ),
+        "expected CatalogChanged, got {:?}",
+        event.kind
+    );
+    assert!(event.revision > 0, "the event carries a new revision");
+}
+
+#[tokio::test]
+async fn a_read_only_tool_does_not_broadcast() {
+    let harness = Harness::new();
+    let ctx = harness.context();
+    let mut subscription = harness.service.handle().subscribe();
+
+    call(&ctx, ToolName::ListApps, json!({})).await;
+    let outcome = tokio::time::timeout(Duration::from_millis(300), subscription.recv()).await;
+    assert!(outcome.is_err(), "a query must not wake every window");
+}
+
+#[tokio::test]
+async fn read_tools_return_the_legacy_field_names() {
+    // Parity with `src/main/mcp/tools.ts`: camelCase fields, `{count, apps}` for list_apps and
+    // the `state` filter. A client written against the Electron server keeps working.
+    let harness = Harness::new();
+    let ctx = harness.context();
+    let path = harness.project("legacy-shape");
+    call(
+        &ctx,
+        ToolName::AddApp,
+        json!({"path": path, "name": "legacy"}),
+    )
+    .await;
+
+    let overview = call(&ctx, ToolName::GetOverview, json!({})).await;
+    assert_eq!(overview["appCount"], 1);
+    assert_eq!(overview["running"], 0);
+    assert_eq!(overview["crashed"], 0);
+    assert!(overview["activePorts"].as_array().unwrap().is_empty());
+    assert_eq!(overview["apps"][0]["name"], "legacy");
+    assert_eq!(overview["apps"][0]["state"], "idle");
+    assert!(overview.get("devharborVersion").is_some());
+
+    let listed = call(&ctx, ToolName::ListApps, json!({})).await;
+    assert_eq!(listed["count"], 1);
+    let app = &listed["apps"][0];
+    assert_eq!(app["name"], "legacy");
+    assert_eq!(app["state"], "idle");
+    assert!(app.get("defaultScript").is_some(), "camelCase brief fields");
+    assert!(app.get("packageManager").is_some());
+    assert_eq!(app["autoStart"], false);
+    assert!(app["ports"].as_array().unwrap().is_empty());
+
+    // The state filter is exact.
+    let idle = call(&ctx, ToolName::ListApps, json!({"state": "idle"})).await;
+    assert_eq!(idle["count"], 1);
+    let running = call(&ctx, ToolName::ListApps, json!({"state": "running"})).await;
+    assert_eq!(running["count"], 0);
+
+    // get_app resolves by id, exact name or absolute path.
+    for argument in [
+        json!({"app_id": app["id"]}),
+        json!({"app": "legacy"}),
+        json!({"path": app["path"]}),
+    ] {
+        let got = call(&ctx, ToolName::GetApp, argument.clone()).await;
+        assert_eq!(
+            got["app"]["name"], "legacy",
+            "resolution failed for {argument}"
+        );
+    }
 }

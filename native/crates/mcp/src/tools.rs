@@ -121,15 +121,29 @@ pub fn tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: ToolName::ListApps,
-            description: "列出所有应用（含任务数量、状态、标签、文件夹）。",
-            input_schema: json!({"type": "object", "properties": {}, "additionalProperties": false}),
+            description: "列出已注册应用（状态、端口、标签、文件夹）。可选 `state` 只返回该生命周期的应用。",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "state": {
+                        "type": "string",
+                        "enum": ["idle", "starting", "running", "exiting", "exited", "crashed"],
+                        "description": "只返回处于该状态的应用"
+                    }
+                },
+                "additionalProperties": false
+            }),
         },
         ToolSpec {
             name: ToolName::GetApp,
             description: "读取单个应用的详情与任务列表。",
             input_schema: json!({
                 "type": "object",
-                "properties": {"app_id": app_id(), "path": {"type": "string", "description": "或用路径查找"}},
+                "properties": {
+                    "app": {"type": "string", "description": "应用 id、精确名称或绝对路径"},
+                    "app_id": app_id(),
+                    "path": {"type": "string", "description": "绝对路径（兼容旧客户端）"}
+                },
                 "additionalProperties": false
             }),
         },

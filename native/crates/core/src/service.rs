@@ -1170,7 +1170,8 @@ fn worst_state(current: ProcessState, next: ProcessState) -> ProcessState {
 impl CoreHandle {
     /// The only business entry point.
     pub async fn request(&self, command: CoreCommand) -> CoreResult<CoreReply> {
-        match command {
+        let mutated = command.mutates_catalog();
+        let reply = match command {
             CoreCommand::GetSnapshot => Ok(CoreReply::Snapshot(Box::new(self.service.snapshot()?))),
             CoreCommand::ListEnvVars { scope } => {
                 Ok(CoreReply::EnvVars(self.service.list_env_vars(&scope)?))
@@ -1333,7 +1334,16 @@ impl CoreHandle {
                 self.service.shutdown().await?;
                 Ok(CoreReply::Ack)
             }
+        };
+        // One broadcast point for every mutation, whoever asked for it.
+        if mutated && reply.is_ok() {
+            let revision = self.service.bump_revision();
+            let _ = self.service.events.send(CoreEvent {
+                revision,
+                kind: CoreEventKind::CatalogChanged,
+            });
         }
+        reply
     }
 
     /// Subscribe before taking a snapshot, then drop events at or below the snapshot

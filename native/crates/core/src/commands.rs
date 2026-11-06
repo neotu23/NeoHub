@@ -122,6 +122,27 @@ pub enum CoreCommand {
     Shutdown,
 }
 
+impl CoreCommand {
+    /// Does a successful run of this command change the catalog, settings or env of an app?
+    ///
+    /// The answer drives the `CatalogChanged` broadcast: the window and MCP both go through
+    /// `CoreHandle::request`, so a mutation made by a tool refreshes the UI automatically.
+    pub fn mutates_catalog(&self) -> bool {
+        matches!(
+            self,
+            CoreCommand::CreateApp { .. }
+                | CoreCommand::UpdateApp { .. }
+                | CoreCommand::RemoveApp { .. }
+                | CoreCommand::AddTask { .. }
+                | CoreCommand::UpdateTask { .. }
+                | CoreCommand::RemoveTask { .. }
+                | CoreCommand::ReorderTasks { .. }
+                | CoreCommand::SetEnvVars { .. }
+                | CoreCommand::UpdateSettings { .. }
+        )
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum CoreReply {
     Snapshot(Box<CoreSnapshot>),

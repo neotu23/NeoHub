@@ -732,7 +732,7 @@
   4. 迁移后 `migration.json` 清单尚未接入 UI 展示
 
 ### 阶段 14：MCP 全量迁移与协议兼容
-- 状态：**开发中**（22 工具 + dispatch + gate + 脱敏 + HTTP 端点完成并测试；TLS/SSE 与事件广播待做）
+- 状态：**开发中**（22 工具 + dispatch + gate + 脱敏 + HTTP 端点 + 变更广播 + 读取类字段对齐完成；TLS/SSE 待做）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: port the MCP gate, redaction and tool catalogue`
 - 实际修改文件：新增 `native/crates/mcp/{Cargo.toml,src/{lib,auth,redaction,tools}.rs}`；更新 workspace 成员
@@ -799,4 +799,25 @@
   工具层与传输层已解耦（`dispatch` 不依赖 HTTP），换回官方 SDK 是局部替换。
   差异：暂不支持 SSE 流式响应与 `initialize` 后的会话 id（会话在单进程内隐式存在）。
 - 未解决问题：可选自签 TLS、SSE、工具变更后的 `CatalogChanged` 广播、与旧版返回 JSON 的 golden 对照。
+
+- 第四批完成（2026-11-07T08:25Z–09:00Z UTC）：
+  - **修掉一个真实缺陷**：`CoreEventKind::CatalogChanged` 从阶段 7 起只有定义、从未发出，
+    窗口因此只能靠自己发起命令后手动更新。现在 `CoreHandle::request` 在**变更类命令成功**后
+    统一广播（`CoreCommand::mutates_catalog()`），MCP 与 UI 共用这条路径，
+    所以工具修改后窗口/菜单栏立即刷新
+  - **字段与参数对齐旧版 `tools.ts`**（此前用 snake_case，客户端会读不到）：
+    - `get_overview` → `{devharborVersion, appCount, running, crashed, activePorts, apps:[{name,state}]}`
+    - `list_apps` → `{count, apps}`，brief 用 camelCase（`defaultScript`/`packageManager`/`autoStart`/`lastStartedAt`/`ports`/`state`），
+      新增可选 `state` 过滤
+    - `get_app` → 参数改为 `app`（id / 精确名称 / 绝对路径），保留 `app_id`/`path` 兼容旧客户端
+  - 验证：`cargo test -p neohub-mcp` → **31 passed**
+    - 新增：变更类工具广播 `CatalogChanged` 且 revision 递增；只读工具**不广播**
+    - 新增：`read_tools_return_the_legacy_field_names`（camelCase 字段、`{count,apps}`、`state` 过滤、
+      `get_app` 三种解析方式）
+  - `cargo test --workspace --locked` → **405 passed / 0 failed**；clippy **0 warnings**
+- 仍存在的兼容差异（需继续对齐 `tools.ts`）：
+  1. `get_app` 尚未返回 `.env` 发现结果与 `runs`（run history）、`runs_limit` 参数
+  2. `list_running` / `get_ports` / `get_logs` / `search_logs` 的字段名仍是 snake_case
+  3. `add_app`/`update_app` 的参数名（旧版可能用 `app`/`name` 组合）未逐一核对
+  4. 错误消息文案未逐条对齐旧版（只在字段层面一致）
 
