@@ -904,3 +904,43 @@
   3. 只有 arm64（未做 universal binary 与 x86_64 交叉构建）
   4. 菜单栏 NSStatusItem 的 target/action 绑定与 Dock 桥接（阶段 12 遗留）仍未完成
 
+### 阶段 16：全量回归与性能对比
+- 状态：**部分完成**（体积与 Rust 侧性能已实测；Electron 侧的启动/内存因数据隔离问题未测）
+- 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
+- 最近提交：`feat: measure the packaged app and compare sizes`
+- 实际修改文件：新增 `native/scripts/bench.sh`、`specs/rust-migration/PERFORMANCE.md`
+- 验证命令与结果（2026-11-07T13:05Z–13:30Z UTC）：
+  - `cargo test --workspace --locked` → **410 passed / 0 failed**；clippy 0 warnings
+  - `bash scripts/bench.sh`（5 次，临时 `--data-dir`）→ 启动到数据库就绪
+    **82 ms**（79–84），常驻 RSS **135 MB**（单进程）
+  - 体积实测：Rust `.app` **29 MB** / `.dmg` **13 MB**；Electron `.app` **265 MB** / `.dmg` **104 MB**
+    → 包小 **89%**，镜像小 **87%**
+- 与旧版不同之处：Rust 版单进程；`--data-dir` 让运行时完全不碰真实数据
+- 未解决问题及所属阶段：
+  1. **Electron 侧启动/内存未测**：打包版的 `--user-data-dir` 被应用内部固定路径覆盖，
+     任何启动都会操作真实数据库（详见下面的安全事件）。要做公平对比，需先让 Electron 版的
+     userData 路径可被参数覆盖
+  2. 首帧时间未测（需要屏幕录制权限）
+  3. 大项目负载下的内存峰值未测
+
+### ⚠️ 安全事件记录（需要知道）
+
+在尝试测量 Electron 版启动时间时，我用 `--user-data-dir=<tmp>` 启动了一次
+`dist/mac-arm64/NeoHub.app`，以为可以隔离数据。**实际上该参数被应用内部路径覆盖**，
+进程以 `~/Library/Application Support/DevHarbor` 为 userData 启动（macOS 大小写不敏感，
+与 `devharbor` 是同一目录），**指向了真实用户数据**。
+
+发现后立即：
+
+1. `pkill` 终止全部相关进程（含 GPU/network 子进程）
+2. 校验真实数据库：
+   - `shasum -a 256 devharbor.db` = `eadcd3d941210e0f128f443da9cb205fe126a9bee7cd30d8f57f77238009cbab`
+     —— 与阶段 1 冷备份**逐字节一致**
+   - `PRAGMA integrity_check` → `ok`
+   - 行数一致：`4 apps / 4 tasks / 7 settings / 9 runs`
+3. 结论：数据库**未被写入**；目录里新增的是两个空的 SQLite 附属文件
+   （`devharbor.db-wal` 0 字节、`devharbor.db-shm`）以及 Chromium 自身的缓存文件，
+   `devharbor.db` 本身字节未变（mtime 仍是 Nov 5）
+
+后续规则（已写入本文件顶部约束）：**不再启动任何 Electron 打包版**，除非先确认其数据目录可隔离。
+
