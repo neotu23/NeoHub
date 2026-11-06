@@ -8,7 +8,8 @@ use crate::state::session::{Session, SessionStore};
 use crate::state::store::UiStore;
 use crate::theme::{DARK, LIGHT, Palette, metrics};
 use gpui_kit::*;
-use neohub_core::commands::CoreCommand;
+use neohub_core::commands::{CoreCommand, CoreReply};
+use neohub_core::environment::ImportCandidate;
 use neohub_core::events::CoreEvent;
 use neohub_core::service::{CoreHandle, CoreService};
 use neohub_domain::{AppId, ProcessState, TaskId};
@@ -16,12 +17,22 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// Messages from the core to the window: streamed events plus command replies.
+enum HostUpdate {
+    Event(CoreEvent),
+    Candidates(Vec<ImportCandidate>),
+    Imported,
+    Error(String),
+}
+
 /// Everything the view needs from the outside world.
 pub struct HostBridge {
     runtime: Arc<tokio::runtime::Runtime>,
     handle: CoreHandle,
     store: Mutex<UiStore>,
-    events: Mutex<std::sync::mpsc::Receiver<CoreEvent>>,
+    updates: Mutex<std::sync::mpsc::Receiver<HostUpdate>>,
+    /// Command replies are pushed onto the same channel the event stream uses.
+    reply_sink: Arc<std::sync::mpsc::Sender<HostUpdate>>,
     session_store: SessionStore,
 }
 
@@ -41,19 +52,23 @@ impl HostBridge {
 
         let (tx, rx) = std::sync::mpsc::channel();
         let mut subscription = handle.subscribe();
+        let event_tx = tx.clone();
         runtime.spawn(async move {
             while let Some(event) = subscription.recv().await {
-                if tx.send(event).is_err() {
+                if event_tx.send(HostUpdate::Event(event)).is_err() {
                     break;
                 }
             }
         });
+        let command_tx = tx.clone();
+        let reply_sink = Arc::new(command_tx);
 
         let bridge = Arc::new(HostBridge {
             runtime,
             handle: handle.clone(),
             store: Mutex::new(UiStore::new(session)),
-            events: Mutex::new(rx),
+            updates: Mutex::new(rx),
+            reply_sink,
             session_store,
         });
         bridge.refresh_snapshot();
@@ -80,6 +95,81 @@ impl HostBridge {
         });
     }
 
+    /// Where the import panel looks by default: `--import-dir`-style override, else `~/Code`.
+    pub fn default_import_dir() -> String {
+        if let Ok(dir) = std::env::var("NEOHUB_IMPORT_DIR")
+            && !dir.trim().is_empty()
+        {
+            return dir;
+        }
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+        format!("{home}/Code")
+    }
+
+    /// Open the import panel and immediately scan the default folder.
+    pub fn begin_import(&self, dir: String) {
+        self.store
+            .lock()
+            .expect("store lock")
+            .open_import(dir.clone());
+        self.scan_folder(dir);
+    }
+
+    /// Scan a folder for importable projects.
+    pub fn scan_folder(&self, dir: String) {
+        let handle = self.handle.clone();
+        let sink = self.reply_sink.clone();
+        self.runtime.spawn(async move {
+            let reply = handle
+                .request(CoreCommand::ScanFolder { dir: dir.into() })
+                .await;
+            let message = match reply {
+                Ok(CoreReply::ImportCandidates(candidates)) => HostUpdate::Candidates(candidates),
+                Ok(other) => HostUpdate::Error(format!("unexpected scan reply: {other:?}")),
+                Err(err) => HostUpdate::Error(format!("scan failed: {err}")),
+            };
+            let _ = sink.send(message);
+        });
+    }
+
+    /// Import one scanned candidate using the detection the scan already produced.
+    pub fn import_candidate(&self, candidate: ImportCandidate) {
+        let name = candidate.name.clone();
+        let input = neohub_core::catalog::CreateAppInput {
+            path: candidate.path.clone(),
+            name: Some(candidate.name.clone()),
+            node_version_pref: None,
+            package_manager: candidate.package_manager,
+            default_script: candidate.suggested_script.clone(),
+            first_task: candidate.suggested_script.clone().map(|script| {
+                neohub_core::catalog::CreateTaskSpec {
+                    name: script.clone(),
+                    command_kind: Some(neohub_domain::CommandKind::Script),
+                    script: Some(script),
+                    custom_command: None,
+                    working_dir_override: None,
+                }
+            }),
+            tasks: vec![],
+            env_vars: vec![],
+        };
+        let handle = self.handle.clone();
+        let sink = self.reply_sink.clone();
+        self.runtime.spawn(async move {
+            let reply = handle
+                .request(CoreCommand::CreateApp {
+                    input: Box::new(input),
+                })
+                .await;
+            let message = match reply {
+                Ok(CoreReply::App(_)) => HostUpdate::Imported,
+                Ok(other) => HostUpdate::Error(format!("unexpected import reply: {other:?}")),
+                Err(err) => HostUpdate::Error(format!("import {name} failed: {err}")),
+            };
+            let _ = sink.send(message);
+        });
+    }
+
     pub fn start_task(&self, task_id: TaskId) {
         self.send(CoreCommand::StartTask { task_id });
     }
@@ -96,35 +186,56 @@ impl HostBridge {
         self.send(CoreCommand::StopApp { app_id });
     }
 
-    /// Apply queued events; returns true when the visible state changed.
+    /// Apply queued updates; returns true when the visible state changed.
     fn drain(&self) -> bool {
-        let events: Vec<CoreEvent> = {
-            let receiver = self.events.lock().expect("events lock");
+        let updates: Vec<HostUpdate> = {
+            let receiver = self.updates.lock().expect("updates lock");
             let mut drained = Vec::new();
-            while let Ok(event) = receiver.try_recv() {
-                drained.push(event);
+            while let Ok(update) = receiver.try_recv() {
+                drained.push(update);
                 if drained.len() >= 512 {
                     break; // bound the work per frame; the rest arrives next tick
                 }
             }
             drained
         };
-        if events.is_empty() {
+        if updates.is_empty() {
             return false;
         }
-        let mut store = self.store.lock().expect("store lock");
         let mut changed = false;
-        for event in events {
-            let resync = matches!(
-                event.kind,
-                neohub_core::events::CoreEventKind::ResyncRequired { .. }
-            );
-            changed |= store.apply_event(event);
-            if resync {
-                drop(store);
-                self.refresh_snapshot();
-                store = self.store.lock().expect("store lock");
+        let mut need_snapshot = false;
+        {
+            let mut store = self.store.lock().expect("store lock");
+            for update in updates {
+                match update {
+                    HostUpdate::Event(event) => {
+                        let resync = matches!(
+                            event.kind,
+                            neohub_core::events::CoreEventKind::ResyncRequired { .. }
+                        );
+                        changed |= store.apply_event(event);
+                        need_snapshot |= resync;
+                    }
+                    HostUpdate::Candidates(candidates) => {
+                        store.set_import_candidates(candidates);
+                        changed = true;
+                    }
+                    HostUpdate::Imported => {
+                        store.set_import_busy(false);
+                        need_snapshot = true;
+                        changed = true;
+                    }
+                    HostUpdate::Error(message) => {
+                        store.set_import_error(message);
+                        changed = true;
+                    }
+                }
             }
+        }
+        if need_snapshot {
+            // Taken outside the store lock: `refresh_snapshot` re-locks it.
+            self.refresh_snapshot();
+            changed = true;
         }
         changed
     }
@@ -207,6 +318,11 @@ fn state_color(palette: &Palette, state: ProcessState) -> Rgba {
     }
 }
 
+/// Zero-sized filler so the empty state can keep the same flex layout.
+fn grid_placeholder(_palette: &Palette) -> impl IntoElement {
+    div().flex().gap(px(0.0))
+}
+
 fn state_label(state: ProcessState) -> &'static str {
     match state {
         ProcessState::Idle => "空闲",
@@ -230,11 +346,13 @@ impl Render for ShellView {
                 store.all_tags(),
             )
         };
-        let (view, selected) = {
+        let (view, selected, is_empty, import) = {
             let store = self.bridge.store.lock().expect("store lock");
             (
                 store.session().view,
                 store.session().selected_app_id.clone(),
+                store.is_empty(),
+                store.import().clone(),
             )
         };
 
@@ -369,7 +487,24 @@ impl Render for ShellView {
                         .child(format!("CPU {:.1}%", totals.cpu_percent))
                         .child(format!("内存 {:.0} MB", totals.mem_mb))
                         .child(format!("端口 {}", totals.ports)),
-                ),
+                )
+                .child({
+                    let bridge = self.bridge.clone();
+                    let entity = cx.entity().downgrade();
+                    div()
+                        .id("nav-import")
+                        .px(px(metrics::PAD_3))
+                        .py(px(metrics::GAP_1))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(palette.bg_elevated)
+                        .text_size(px(metrics::TEXT_SM))
+                        .cursor_pointer()
+                        .child("+ 导入项目")
+                        .on_click(move |_, _, cx| {
+                            bridge.begin_import(HostBridge::default_import_dir());
+                            let _ = entity.update(cx, |_, cx| cx.notify());
+                        })
+                }),
         );
 
         if !tags.is_empty() {
@@ -389,126 +524,300 @@ impl Render for ShellView {
             main = main.child(tag_row);
         }
 
-        let mut grid = div().flex().flex_wrap().gap(px(metrics::GAP_3));
-        for card in cards {
-            let bridge = self.bridge.clone();
-            let app_id = card.app_id.clone();
-            let running = card.state.is_live();
-            let mut card_view = div()
-                .id(format!("card-{}", card.app_id))
+        if import.open {
+            let mut panel = div()
                 .flex()
                 .flex_col()
                 .gap(px(metrics::GAP_2))
-                .w(px(280.0))
                 .p(px(metrics::PAD_4))
                 .rounded(px(metrics::RADIUS_LG))
                 .border_1()
-                .border_color(if running {
-                    palette.success_border
-                } else {
-                    palette.border
-                })
+                .border_color(palette.border)
                 .bg(palette.bg_surface)
                 .child(
                     div()
                         .flex()
                         .items_center()
                         .justify_between()
-                        .child(
+                        .child(div().text_size(px(metrics::TEXT_BASE)).child("扫描导入"))
+                        .child({
+                            let bridge = self.bridge.clone();
+                            let entity = cx.entity().downgrade();
                             div()
-                                .flex()
-                                .items_center()
-                                .gap(px(metrics::GAP_2))
-                                .child(
-                                    div()
-                                        .w(px(8.0))
-                                        .h(px(8.0))
-                                        .rounded_full()
-                                        .bg(state_color(&palette, card.state)),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(metrics::TEXT_BASE))
-                                        .child(card.name.clone()),
-                                ),
-                        )
-                        .child(
-                            div()
+                                .id("import-close")
+                                .px(px(metrics::PAD_2))
+                                .rounded(px(metrics::RADIUS_MD))
+                                .bg(palette.bg_elevated)
                                 .text_size(px(metrics::TEXT_XS))
-                                .text_color(state_color(&palette, card.state))
-                                .child(state_label(card.state)),
-                        ),
+                                .cursor_pointer()
+                                .child("关闭")
+                                .on_click(move |_, _, cx| {
+                                    bridge.store.lock().expect("store lock").close_import();
+                                    let _ = entity.update(cx, |_, cx| cx.notify());
+                                })
+                        }),
                 )
                 .child(
                     div()
                         .text_size(px(metrics::TEXT_XS))
                         .text_color(palette.fg_subtle)
-                        .child(format!(
-                            "{} 个任务 · {} 运行中",
-                            card.total_tasks, card.running_tasks
-                        )),
-                )
-                .child(
-                    div()
-                        .text_size(px(metrics::TEXT_XS))
-                        .text_color(palette.fg_muted)
-                        .child(format!(
-                            "CPU {:.1}%   {:.0} MB",
-                            card.cpu_percent, card.mem_mb
-                        )),
+                        .child(format!("目录：{}", import.dir)),
                 );
 
-            if !card.ports.is_empty() {
-                let mut ports = div().flex().gap(px(metrics::GAP_1));
-                for port in &card.ports {
-                    ports = ports.child(
-                        div()
-                            .px(px(metrics::PAD_2))
-                            .py(px(1.0))
-                            .rounded(px(metrics::RADIUS_MD))
-                            .bg(palette.bg_elevated)
-                            .text_size(px(metrics::TEXT_XS))
-                            .text_color(palette.accent)
-                            .child(format!(":{port}")),
-                    );
-                }
-                card_view = card_view.child(ports);
+            if let Some(error) = import.error.clone() {
+                panel = panel.child(
+                    div()
+                        .px(px(metrics::PAD_3))
+                        .py(px(metrics::GAP_1))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(palette.danger_bg)
+                        .text_size(px(metrics::TEXT_XS))
+                        .text_color(palette.danger_fg)
+                        .child(error),
+                );
+            }
+            if import.busy {
+                panel = panel.child(
+                    div()
+                        .text_size(px(metrics::TEXT_SM))
+                        .text_color(palette.fg_muted)
+                        .child("正在扫描…"),
+                );
+            } else if import.candidates.is_empty() {
+                panel = panel.child(
+                    div()
+                        .text_size(px(metrics::TEXT_SM))
+                        .text_color(palette.fg_muted)
+                        .child("这个目录下没有找到含 package.json 的项目。"),
+                );
             }
 
-            let toggle_bridge = bridge.clone();
+            for candidate in &import.candidates {
+                let bridge = self.bridge.clone();
+                let entity = cx.entity().downgrade();
+                let candidate = candidate.clone();
+                let registered = candidate.already_registered;
+                panel = panel.child(
+                    div()
+                        .id(format!("candidate-{}", candidate.path))
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .px(px(metrics::PAD_3))
+                        .py(px(metrics::GAP_1))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(palette.bg_elevated)
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .child(
+                                    div()
+                                        .text_size(px(metrics::TEXT_SM))
+                                        .child(candidate.name.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(metrics::TEXT_XS))
+                                        .text_color(palette.fg_subtle)
+                                        .child(candidate.path.clone()),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .id(format!("candidate-add-{}", candidate.path))
+                                .px(px(metrics::PAD_2))
+                                .rounded(px(metrics::RADIUS_MD))
+                                .bg(if registered {
+                                    palette.bg_surface
+                                } else {
+                                    palette.accent
+                                })
+                                .text_size(px(metrics::TEXT_XS))
+                                .text_color(if registered {
+                                    palette.fg_subtle
+                                } else {
+                                    palette.accent_fg
+                                })
+                                .cursor_pointer()
+                                .child(if registered { "已导入" } else { "添加" })
+                                .on_click(move |_, _, cx| {
+                                    if !registered {
+                                        bridge
+                                            .store
+                                            .lock()
+                                            .expect("store lock")
+                                            .set_import_busy(true);
+                                        bridge.import_candidate(candidate.clone());
+                                    }
+                                    let _ = entity.update(cx, |_, cx| cx.notify());
+                                }),
+                        ),
+                );
+            }
+            main = main.child(panel);
+        } else if is_empty {
+            let bridge = self.bridge.clone();
             let entity = cx.entity().downgrade();
-            card_view = card_view.child(
+            main = main.child(
                 div()
-                    .id(format!("toggle-{}", card.app_id))
-                    .px(px(metrics::PAD_3))
-                    .py(px(metrics::GAP_1))
-                    .rounded(px(metrics::RADIUS_MD))
-                    .bg(if running {
-                        palette.danger_bg
-                    } else {
-                        palette.bg_elevated
-                    })
-                    .text_size(px(metrics::TEXT_SM))
-                    .text_color(if running {
-                        palette.danger_fg
-                    } else {
-                        palette.fg
-                    })
-                    .cursor_pointer()
-                    .child(if running { "停止" } else { "启动" })
-                    .on_click(move |_, _, cx| {
-                        if running {
-                            toggle_bridge.stop_app(app_id.clone());
-                        } else {
-                            toggle_bridge.start_app(app_id.clone());
-                        }
-                        let _ = entity.update(cx, |_, cx| cx.notify());
-                    }),
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .flex_1()
+                    .gap(px(metrics::GAP_3))
+                    .child(
+                        div()
+                            .text_size(px(metrics::TEXT_LG))
+                            .child("欢迎使用 NeoHub"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(metrics::TEXT_SM))
+                            .text_color(palette.fg_muted)
+                            .child("还没有项目。扫描一个目录，把本地 Node 项目导进来。"),
+                    )
+                    .child(
+                        div()
+                            .id("empty-import")
+                            .px(px(metrics::PAD_4))
+                            .py(px(metrics::GAP_2))
+                            .rounded(px(metrics::RADIUS_MD))
+                            .bg(palette.accent)
+                            .text_color(palette.accent_fg)
+                            .text_size(px(metrics::TEXT_SM))
+                            .cursor_pointer()
+                            .child("扫描文件夹导入")
+                            .on_click(move |_, _, cx| {
+                                bridge.begin_import(HostBridge::default_import_dir());
+                                let _ = entity.update(cx, |_, cx| cx.notify());
+                            }),
+                    ),
             );
+            main = main.child(grid_placeholder(&palette));
+        } else {
+            let mut grid = div().flex().flex_wrap().gap(px(metrics::GAP_3));
+            for card in cards {
+                let bridge = self.bridge.clone();
+                let app_id = card.app_id.clone();
+                let running = card.state.is_live();
+                let mut card_view = div()
+                    .id(format!("card-{}", card.app_id))
+                    .flex()
+                    .flex_col()
+                    .gap(px(metrics::GAP_2))
+                    .w(px(280.0))
+                    .p(px(metrics::PAD_4))
+                    .rounded(px(metrics::RADIUS_LG))
+                    .border_1()
+                    .border_color(if running {
+                        palette.success_border
+                    } else {
+                        palette.border
+                    })
+                    .bg(palette.bg_surface)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(metrics::GAP_2))
+                                    .child(
+                                        div()
+                                            .w(px(8.0))
+                                            .h(px(8.0))
+                                            .rounded_full()
+                                            .bg(state_color(&palette, card.state)),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(metrics::TEXT_BASE))
+                                            .child(card.name.clone()),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(metrics::TEXT_XS))
+                                    .text_color(state_color(&palette, card.state))
+                                    .child(state_label(card.state)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(metrics::TEXT_XS))
+                            .text_color(palette.fg_subtle)
+                            .child(format!(
+                                "{} 个任务 · {} 运行中",
+                                card.total_tasks, card.running_tasks
+                            )),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(metrics::TEXT_XS))
+                            .text_color(palette.fg_muted)
+                            .child(format!(
+                                "CPU {:.1}%   {:.0} MB",
+                                card.cpu_percent, card.mem_mb
+                            )),
+                    );
 
-            grid = grid.child(card_view);
+                if !card.ports.is_empty() {
+                    let mut ports = div().flex().gap(px(metrics::GAP_1));
+                    for port in &card.ports {
+                        ports = ports.child(
+                            div()
+                                .px(px(metrics::PAD_2))
+                                .py(px(1.0))
+                                .rounded(px(metrics::RADIUS_MD))
+                                .bg(palette.bg_elevated)
+                                .text_size(px(metrics::TEXT_XS))
+                                .text_color(palette.accent)
+                                .child(format!(":{port}")),
+                        );
+                    }
+                    card_view = card_view.child(ports);
+                }
+
+                let toggle_bridge = bridge.clone();
+                let entity = cx.entity().downgrade();
+                card_view = card_view.child(
+                    div()
+                        .id(format!("toggle-{}", card.app_id))
+                        .px(px(metrics::PAD_3))
+                        .py(px(metrics::GAP_1))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(if running {
+                            palette.danger_bg
+                        } else {
+                            palette.bg_elevated
+                        })
+                        .text_size(px(metrics::TEXT_SM))
+                        .text_color(if running {
+                            palette.danger_fg
+                        } else {
+                            palette.fg
+                        })
+                        .cursor_pointer()
+                        .child(if running { "停止" } else { "启动" })
+                        .on_click(move |_, _, cx| {
+                            if running {
+                                toggle_bridge.stop_app(app_id.clone());
+                            } else {
+                                toggle_bridge.start_app(app_id.clone());
+                            }
+                            let _ = entity.update(cx, |_, cx| cx.notify());
+                        }),
+                );
+
+                grid = grid.child(card_view);
+            }
+            main = main.child(grid);
         }
-        main = main.child(grid);
 
         div()
             .flex()

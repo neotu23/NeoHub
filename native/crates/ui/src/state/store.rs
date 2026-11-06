@@ -5,6 +5,7 @@
 //! expensive logic testable without a window, and keeps rendering a pure function of state.
 
 use crate::state::session::{AppSort, GroupBy, Session};
+use neohub_core::environment::ImportCandidate;
 use neohub_core::events::{CoreEvent, CoreEventKind};
 use neohub_core::snapshot::CoreSnapshot;
 use neohub_domain::{App, AppId, ProcessState, Task, TaskId};
@@ -58,6 +59,28 @@ pub struct DashboardTotals {
     pub ports: usize,
 }
 
+/// State of the "import a folder of repos" panel.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ImportState {
+    pub open: bool,
+    /// Folder being scanned (shown as the panel's subtitle).
+    pub dir: String,
+    /// A scan or an import is in flight.
+    pub busy: bool,
+    /// Last error, shown in the panel and dismissable.
+    pub error: Option<String>,
+    pub candidates: Vec<ImportCandidate>,
+}
+
+impl ImportState {
+    /// Candidates that can still be added.
+    pub fn addable(&self) -> impl Iterator<Item = &ImportCandidate> {
+        self.candidates
+            .iter()
+            .filter(|candidate| !candidate.already_registered)
+    }
+}
+
 /// Everything the views read.
 pub struct UiStore {
     snapshot: Option<CoreSnapshot>,
@@ -68,6 +91,7 @@ pub struct UiStore {
     filter: String,
     /// Active tag filter on the dashboard.
     tag_filter: Option<String>,
+    import: ImportState,
 }
 
 impl UiStore {
@@ -78,6 +102,7 @@ impl UiStore {
             logs: BTreeMap::new(),
             filter: String::new(),
             tag_filter: None,
+            import: ImportState::default(),
         }
     }
 
@@ -99,6 +124,48 @@ impl UiStore {
 
     pub fn filter(&self) -> &str {
         &self.filter
+    }
+
+    pub fn import(&self) -> &ImportState {
+        &self.import
+    }
+
+    /// Open the import panel for `dir` and mark it busy (a scan is about to start).
+    pub fn open_import(&mut self, dir: impl Into<String>) {
+        self.import = ImportState {
+            open: true,
+            dir: dir.into(),
+            busy: true,
+            error: None,
+            candidates: Vec::new(),
+        };
+    }
+
+    pub fn close_import(&mut self) {
+        self.import = ImportState::default();
+    }
+
+    pub fn set_import_candidates(&mut self, candidates: Vec<ImportCandidate>) {
+        self.import.busy = false;
+        self.import.error = None;
+        self.import.candidates = candidates;
+    }
+
+    pub fn set_import_error(&mut self, message: impl Into<String>) {
+        self.import.busy = false;
+        self.import.error = Some(message.into());
+    }
+
+    pub fn set_import_busy(&mut self, busy: bool) {
+        self.import.busy = busy;
+    }
+
+    /// True when the dashboard has nothing to show (first run).
+    pub fn is_empty(&self) -> bool {
+        self.snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.apps.is_empty())
+            .unwrap_or(true)
     }
 
     pub fn set_tag_filter(&mut self, tag: Option<String>) {
@@ -864,6 +931,67 @@ mod tests {
             },
         });
         assert_eq!(store.logs_of(&task_id).len(), LOG_TAIL_BYTES);
+    }
+
+    fn candidate(path: &str, registered: bool) -> ImportCandidate {
+        ImportCandidate {
+            path: path.to_string(),
+            name: path.rsplit('/').next().unwrap_or(path).to_string(),
+            package_manager: None,
+            suggested_script: Some("dev".into()),
+            scripts: vec!["dev".into()],
+            already_registered: registered,
+        }
+    }
+
+    #[test]
+    fn the_import_panel_tracks_scan_progress_and_errors() {
+        let mut store = UiStore::new(Session::default());
+        assert!(!store.import().open);
+
+        store.open_import("/tmp/synth");
+        assert!(store.import().open);
+        assert!(store.import().busy, "a scan starts as busy");
+        assert_eq!(store.import().dir, "/tmp/synth");
+
+        store.set_import_candidates(vec![
+            candidate("/tmp/synth/a", false),
+            candidate("/tmp/synth/b", true),
+        ]);
+        assert!(!store.import().busy);
+        assert_eq!(store.import().candidates.len(), 2);
+        assert_eq!(
+            store.import().addable().count(),
+            1,
+            "an already-registered project is not offerable"
+        );
+
+        store.set_import_busy(true);
+        store.set_import_error("import a failed: duplicate path");
+        assert!(!store.import().busy);
+        assert_eq!(
+            store.import().error.as_deref(),
+            Some("import a failed: duplicate path")
+        );
+
+        store.close_import();
+        assert!(!store.import().open);
+        assert!(store.import().candidates.is_empty());
+        assert!(store.import().error.is_none());
+    }
+
+    #[test]
+    fn emptiness_drives_the_first_run_screen() {
+        let mut store = UiStore::new(Session::default());
+        assert!(store.is_empty(), "no snapshot yet is empty");
+        store.apply_snapshot(snapshot(vec![], vec![], vec![]));
+        assert!(store.is_empty(), "an empty registry is empty");
+        store.apply_snapshot(snapshot(
+            vec![app("a1", "demo", None, &[], None)],
+            vec![],
+            vec![],
+        ));
+        assert!(!store.is_empty());
     }
 
     #[test]

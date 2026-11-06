@@ -354,7 +354,7 @@
     clippy **0 warnings**；`cargo fmt --all`；`pgrep -f test-fixtures/process` 为空
 
 ### 阶段 9：原生主界面、侧栏、仪表盘、导入
-- 状态：**开发中**（窗口外壳 + 侧栏 + 仪表盘已渲染真实快照；添加/导入/命令面板等未做）
+- 状态：**已验证**（外壳/侧栏/仪表盘 + 扫描导入 + 空态；命令面板与右键菜单留给阶段 10）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: build native dashboard and project navigation`
 - 实际修改文件：新增 `native/crates/ui/src/state/{mod,session,store}.rs`、
@@ -386,3 +386,26 @@
   扫描导入列表、空态、命令面板），再完成端到端人工闭环。
 
 ---
+
+- 第二批完成（2026-11-06T20:45Z–21:20Z UTC）：
+  - core：`environment::scan_folder`（浅层扫描，只列直接子目录含 `package.json`，跳过
+    node_modules/隐藏目录，200 上限）、`CoreCommand::{ScanFolder, CreateApp}`、
+    `CoreReply::{ImportCandidates, App}`，`ImportCandidate.already_registered` 由 service 填充
+  - ui：`UiStore` 增加 `ImportState`（open/dir/busy/error/candidates + `addable()` 过滤已注册）；
+    `HostBridge` 把命令回复并入同一通道（`HostUpdate`），扫描/导入结果回到界面；
+    视图加入顶栏「+ 导入项目」、导入面板（候选列表、已导入灰显、错误条、扫描中状态）、
+    首次运行空态（欢迎 + 扫描入口），导入成功后自动刷新快照
+  - 验证：`cargo test -p neohub-core --test import_flow` → **2 passed**
+    （scan → create → rescan 显示已导入 → StartApp → 快照 app_state=running →
+    `TaskPorts` 事件含确认端口 → StopApp → 非 live；重复导入被拒绝）
+    `cargo test -p neohub-ui` → **19 passed**；`cargo test --workspace --locked` → **253 passed / 0 failed**；
+    `cargo clippy -p {core,ui,desktop} --all-targets` → **0 warnings**；`cargo fmt --all`
+  - 实机：`NEOHUB_IMPORT_DIR=/tmp/neohub-synth-repos ./neohub-desktop --data-dir /tmp/neohub-ui-probe2`
+    启动 8 秒无 stderr、数据目录正确创建 `devharbor.db(-wal/-shm)`
+  - 与旧版不同之处：导入目录由 `NEOHUB_IMPORT_DIR`（缺省 `~/Code`）决定，扫描结果带
+    `already_registered` 标记；旧的"选择文件夹"对话框尚未接入（GPUI 文件对话框 API 待验证）
+  - 未解决问题：
+    1. 文件选择对话框（`prompt_for_paths`）与命令面板 ⌘K / 右键菜单 / 虚拟列表 → 阶段 10 一并处理
+    2. 完整人工点击闭环（导入→启动→卡片运行→点端口→停止）需要用户桌面会话操作；
+       上述 `import_flow` 测试从命令层验证了同一链路
+

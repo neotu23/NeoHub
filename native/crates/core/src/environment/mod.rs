@@ -6,7 +6,9 @@ pub mod env_builder;
 pub mod node_resolver;
 pub mod path_probe;
 
-pub use detect::{DetectionResult, WorkspaceCandidate, detect_project};
+pub use detect::{
+    DetectionResult, ImportCandidate, WorkspaceCandidate, detect_project, scan_folder,
+};
 pub use dotenv::{is_secret_key, parse_dotenv};
 pub use env_builder::{
     BuildEnvInput, ENV_FILE_PRECEDENCE, build_env, is_process_control_key, read_env_files,

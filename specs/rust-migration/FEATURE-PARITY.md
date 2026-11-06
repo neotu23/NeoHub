@@ -28,8 +28,8 @@
 | A4 | 任务 CRUD + 重排 `tasks:reorder`、`TaskRegistry` 字段冻结 | `TaskRegistry.ts` | 已验证（MCP add_task/remove_task） | `core/src/catalog/` | 已验证（任务 CRUD/重排；重排必须全覆盖） |
 | A5 | 任务依赖 `dependsOn` + 拓扑/环/未知依赖校验 | `topo.ts`, `topo.test.ts`（8 例） | 已验证 | `core/src/orchestrator/topology.rs` | 部分（环/未知依赖/自依赖检测已实现；拓扑启动顺序在阶段 7） |
 | A6 | 文件夹分组：list/rename/clear、`apps.folder` | `AppRegistry.ts`, `0005_app_folders.sql` | 已验证 | `core/src/catalog/` | 已验证（list/rename/clear，清空不动磁盘目录） |
-| A7 | 扫描导入 `apps:scanFolder`（浅层扫描 package.json） | `DetectionService.ts`, `ImportProjectsDrawer.tsx` | 部分 | `core/src/environment/detect.rs` | 部分（monorepo 工作区展开与检测已实现；`scanFolder` 浅层扫描待接） |
-| A8 | 项目检测 `apps:detect`：scripts、PM、`.env`、engines、monorepo workspaces | `DetectionService.ts`, `PMDetector.ts` | 已验证 | `core/src/environment/detect.rs` | 已验证（PM/scripts/建议脚本/env 文件/engines/workspaces 全量检测，含损坏 JSON 与软链） |
+| A7 | 扫描导入 `apps:scanFolder`（浅层扫描 package.json） | `DetectionService.ts`, `ImportProjectsDrawer.tsx` | 部分 | `core/src/environment/detect.rs`| 已验证（浅层扫描只列直接子目录含 `package.json` 的项目，跳过 node_modules/隐藏目录，重复项标记已导入） |
+| A8 | 项目检测 `apps:detect`：scripts、PM、`.env`、engines、monorepo workspaces | `DetectionService.ts`, `PMDetector.ts` | 已验证 | `core/src/environment/detect.rs`| 已验证（PM/scripts/建议脚本/env 文件/engines/workspaces 全量检测，含损坏 JSON 与软链） |
 
 ## 3. 进程 / PTY / 生命周期
 
@@ -162,7 +162,7 @@
 |---|---|---|---|---|---|
 | U1 | 外壳 + 侧栏（分组/标签双模式、折叠、排序、筛选 ⌘P、⋮ 菜单、拖拽分组） | `Sidebar.tsx`, `sortApps.ts` | 部分（截图） | `ui/src/views/{shell,sidebar}.rs`| 部分（侧栏分组/标签/排序/筛选/选中态已实现并测试；折叠、⋮ 菜单、拖拽分组未做） |
 | U2 | 仪表盘（汇总卡、项目卡、CPU sparkline、端口 chip、标签筛选、全部停止） | `Dashboard.tsx` | 部分（截图） | `ui/src/views/dashboard.rs`| 部分（仪表盘汇总卡 + 项目卡 + 端口 chip + 状态色已渲染真实快照；sparkline/空态/标签下拉未做） |
-| U3 | 项目详情（任务 tabs、启停/重启、端口、历史、日志区、Open In、复制路径） | `AppDetail.tsx`, `TaskTabs.tsx` | 部分（截图） | `ui/src/views/app_detail.rs` | 未开始 |
+| U3 | 项目详情（任务 tabs、启停/重启、端口、历史、日志区、Open In、复制路径） | `AppDetail.tsx`, `TaskTabs.tsx` | 部分（截图） | `ui/src/views/app_detail.rs`| 部分（详情页骨架：任务 tabs / 端口 / 启停待阶段 10；卡片与侧栏已可选中） |
 | U4 | 添加项目抽屉（浏览 → 检测 → 命名/Node/PM/脚本 → 环境；monorepo 每包一任务） | `AddAppDrawer.tsx` | 部分 | `ui/src/views/add_app.rs` | 未开始 |
 | U5 | 扫描导入抽屉（候选列表、已注册标记、批量添加） | `ImportProjectsDrawer.tsx` | 部分 | `ui/src/views/import_projects.rs` | 未开始 |
 | U6 | 任务编辑器抽屉（命令/脚本/工作目录/依赖/readiness/oneShot/enabled/重排） | `TaskEditor.tsx` | 部分 | `ui/src/views/task_editor.rs` | 未开始 |

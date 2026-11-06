@@ -13,6 +13,55 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+/// One project found by a shallow folder scan (bulk import).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ImportCandidate {
+    pub path: String,
+    pub name: String,
+    pub package_manager: Option<PackageManager>,
+    pub suggested_script: Option<String>,
+    pub scripts: Vec<String>,
+    /// Filled by the service (it owns the database): true when this path is already registered.
+    pub already_registered: bool,
+}
+
+/// Shallow scan of `dir`: every immediate subdirectory that has a `package.json`, sorted by
+/// name. Older NeoHub offered this as "import a folder of repos"; it never recurses, so a
+/// monorepo is imported once (its workspaces become tasks), not once per package.
+pub fn scan_folder(dir: &Path) -> Vec<ImportCandidate> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut out: Vec<ImportCandidate> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if !path.join("package.json").is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if name.starts_with('.') || name == "node_modules" {
+            continue;
+        }
+        let detection = detect_project(&path);
+        out.push(ImportCandidate {
+            path: path.to_string_lossy().into_owned(),
+            name: name.to_string(),
+            package_manager: detection.package_manager,
+            suggested_script: detection.suggested_default_script,
+            scripts: detection.scripts.keys().cloned().collect(),
+            already_registered: false,
+        });
+    }
+    out.sort_by_key(|candidate| candidate.name.to_lowercase());
+    out.truncate(200);
+    out
+}
+
 /// Scripts tried in order when suggesting a default task command.
 pub const SCRIPT_PRIORITY: [&str; 4] = ["dev", "start", "serve", "develop"];
 
@@ -344,6 +393,46 @@ mod tests {
             std::fs::create_dir_all(parent).unwrap();
         }
         std::fs::write(path, contents).unwrap();
+    }
+
+    #[test]
+    fn scanning_a_folder_lists_only_direct_children_with_a_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &dir.path().join("demo-web/package.json"),
+            r#"{"scripts":{"dev":"vite"}}"#,
+        );
+        write(
+            &dir.path().join("demo-api/package.json"),
+            r#"{"scripts":{"start":"node ."}}"#,
+        );
+        std::fs::create_dir_all(dir.path().join("not-a-project")).unwrap();
+        std::fs::create_dir_all(dir.path().join("node_modules/pkg")).unwrap();
+        write(&dir.path().join("node_modules/pkg/package.json"), "{}");
+        // A nested project is NOT picked up by the shallow scan.
+        write(
+            &dir.path().join("demo-web/packages/inner/package.json"),
+            r#"{"scripts":{"dev":"x"}}"#,
+        );
+
+        let candidates = scan_folder(dir.path());
+        let names: Vec<&str> = candidates.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["demo-api", "demo-web"],
+            "sorted, flat, no node_modules"
+        );
+        assert_eq!(
+            candidates[1].suggested_script.as_deref(),
+            Some("dev"),
+            "the scan reuses the same detection as the add flow"
+        );
+        assert_eq!(candidates[0].scripts, vec!["start".to_string()]);
+    }
+
+    #[test]
+    fn scanning_a_missing_folder_is_empty_not_an_error() {
+        assert!(scan_folder(Path::new("/tmp/neohub-no-such-folder-xyz")).is_empty());
     }
 
     #[test]

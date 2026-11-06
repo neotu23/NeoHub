@@ -3,11 +3,22 @@
 use crate::logs::{LineMatch, LogSubscriptionOutcome};
 use crate::process::runner::RunningTaskInfo;
 use crate::snapshot::CoreSnapshot;
-use neohub_domain::{AppId, TaskId};
+use neohub_domain::{App, AppId, TaskId};
+use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
 pub enum CoreCommand {
     GetSnapshot,
+    /// Shallow scan of a folder for importable projects.
+    ScanFolder {
+        dir: PathBuf,
+    },
+    /// Create an app (with its first task and env) atomically.
+    CreateApp {
+        /// Boxed: this is the largest payload by far, and unboxed it would inflate every
+        /// other command in the enum.
+        input: Box<crate::catalog::CreateAppInput>,
+    },
     StartTask {
         task_id: TaskId,
     },
@@ -43,6 +54,8 @@ pub enum CoreReply {
     Snapshot(Box<CoreSnapshot>),
     Started(Box<RunningTaskInfo>),
     Logs(String),
+    ImportCandidates(Vec<crate::environment::ImportCandidate>),
+    App(Box<App>),
     LogBootstrap(LogSubscriptionOutcome),
     LogMatches(Vec<(TaskId, LineMatch)>),
     Ack,

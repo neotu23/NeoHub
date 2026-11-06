@@ -634,6 +634,36 @@ impl CoreService {
         }
     }
 
+    /// Scan a folder for importable projects, marking the ones already registered.
+    pub fn scan_folder(
+        &self,
+        dir: &std::path::Path,
+    ) -> CoreResult<Vec<crate::environment::ImportCandidate>> {
+        let mut candidates = crate::environment::scan_folder(dir);
+        self.with_storage(|storage| {
+            let catalog = storage.catalog();
+            for candidate in &mut candidates {
+                // Registered projects are flagged so the UI can grey them out; the path and
+                // the suggested script are left untouched (the UI uses the path as its key,
+                // and canonicalising it here would make the row stop matching).
+                let canonical = std::fs::canonicalize(&candidate.path)
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .unwrap_or_else(|_| candidate.path.clone());
+                candidate.already_registered = catalog.get_app_by_path(&canonical)?.is_some();
+            }
+            Ok(())
+        })?;
+        Ok(candidates)
+    }
+
+    /// Create an app through the same atomic path the UI uses.
+    pub fn create_app(&self, input: crate::catalog::CreateAppInput) -> CoreResult<App> {
+        self.with_storage(|storage| {
+            let catalog = crate::catalog::AppCatalog::new(storage);
+            catalog.create_app(input)
+        })
+    }
+
     /// Readiness result recorded for a task's current run.
     pub fn readiness_of(&self, task_id: &TaskId) -> Option<(String, bool)> {
         self.ready_flags
@@ -919,6 +949,14 @@ impl CoreHandle {
     pub async fn request(&self, command: CoreCommand) -> CoreResult<CoreReply> {
         match command {
             CoreCommand::GetSnapshot => Ok(CoreReply::Snapshot(Box::new(self.service.snapshot()?))),
+            CoreCommand::ScanFolder { dir } => {
+                let candidates = self.service.scan_folder(&dir)?;
+                Ok(CoreReply::ImportCandidates(candidates))
+            }
+            CoreCommand::CreateApp { input } => {
+                let app = self.service.create_app(*input)?;
+                Ok(CoreReply::App(Box::new(app)))
+            }
             CoreCommand::StartTask { task_id } => {
                 let info = self.service.start_task(&task_id).await?;
                 Ok(CoreReply::Started(Box::new(info)))
