@@ -352,3 +352,37 @@
     （stats/ports 事件到达订阅者且快照含同样缓存；空闲 700 ms 零采样、启动后开始采样、停止后停止；
     端口 confirmed 与 hinted 分别上报）；`cargo test --workspace --locked` → **228 passed / 0 failed**；
     clippy **0 warnings**；`cargo fmt --all`；`pgrep -f test-fixtures/process` 为空
+
+### 阶段 9：原生主界面、侧栏、仪表盘、导入
+- 状态：**开发中**（窗口外壳 + 侧栏 + 仪表盘已渲染真实快照；添加/导入/命令面板等未做）
+- 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
+- 最近提交：`feat: build native dashboard and project navigation`
+- 实际修改文件：新增 `native/crates/ui/src/state/{mod,session,store}.rs`、
+  `native/crates/ui/src/views/{mod,shell}.rs`、`native/crates/ui/tests/navigation.rs`；
+  重写 `native/crates/desktop/src/main.rs`（真实宿主装配）；更新 `ui/Cargo.toml`、`desktop/Cargo.toml`、
+  `ui/src/lib.rs`、`FEATURE-PARITY.md`、本文件
+- 验证命令与结果（2026-11-06T19:50Z–20:40Z UTC）：
+  - `cargo test -p neohub-ui --locked` → **17 passed**（session 6 + store 11）
+  - `cargo test -p neohub-ui --test navigation --locked` → **4 passed**
+    （选择在窗口销毁后恢复、被删除的 app 回退仪表盘、100 个项目下的分组/筛选/排序、
+    仪表盘端口与 CPU/内存聚合口径）
+  - `cargo test --workspace --locked` → **247 passed / 0 failed**
+  - `cargo clippy -p neohub-ui -p neohub-desktop --all-targets --locked` → **0 warnings**；`cargo fmt --all`
+  - 实机：`./target/debug/neohub-desktop --data-dir /tmp/neohub-ui-probe` 启动成功，
+    GPUI 自报窗口 `1280×853 @ (160,103)`，`CGWindowList` 看到 `owner=neohub-desktop, layer=0, onscreen=true`
+- 与旧版不同之处：
+  1. 界面状态与渲染分离：`UiStore` 是纯投影（快照+事件 → 侧栏/卡片/汇总），无 GPUI、无 IO，
+     因此导航与聚合逻辑可以在没有窗口的情况下测试
+  2. 导航会话写在数据目录的 `session.json`（原子写：临时文件 + rename），不是 Chromium localStorage
+  3. 渲染线程不做阻塞调用：命令通过 `tokio` 运行时下发，事件泵每 50 ms 取一次并 `notify()`
+- 未解决问题及所属阶段：
+  1. **窗口尺寸观测不一致**：GPUI 自报 1280×853，`CGWindowList` 报告 150×129（极简视图同样如此，
+     说明与本视图内容无关，是本会话窗口服务器的观测限制）。像素级验证仍需用户桌面会话或阶段 16
+  2. 添加项目 / 扫描导入 / Node 选择 / 空态 / 错误提示 / 加载态 / 命令面板 ⌘K /
+     右键菜单 / 虚拟列表 / 快捷键 → 本阶段剩余
+  3. "导入合成项目 → 启动 → 卡片显示运行 → 端口 → 停止" 的端到端人工闭环依赖上面的导入界面；
+     core 侧链路已由阶段 5–8 的测试覆盖
+- 下一项具体动作：补 `views/{sidebar,dashboard,add_app,import_projects}.rs` 的交互（添加入口、
+  扫描导入列表、空态、命令面板），再完成端到端人工闭环。
+
+---

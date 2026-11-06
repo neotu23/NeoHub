@@ -1,76 +1,19 @@
 //! NeoHub native desktop host (macOS first).
 //!
-//! Phase 2's job is only to prove the host works: a real GPUI window with the
-//! product's name, size limits, palette and CJK-capable text. Product views move
-//! into `neohub-ui` from phase 9; nothing here is a delivered feature yet.
+//! Responsibilities: build the Tokio runtime, open the core (database + runner + MCP later),
+//! create the GPUI window, and hand the window a bridge to the core. The window is a *view*
+//! over the core — destroying it never stops the core, which is what makes "close the window,
+//! keep the servers running" work.
 
 use gpui_kit::*;
-use neohub_ui::theme::{DARK, metrics};
+use neohub_core::service::CoreService;
+use neohub_storage::db::DataDir;
+use neohub_ui::theme::metrics;
+use neohub_ui::views::{HostBridge, ShellView};
+use std::sync::Arc;
 
-/// Placeholder view used by the phase-2 host verification.
-struct HostProbe {
-    typed: String,
-}
-
-impl Render for HostProbe {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = DARK;
-        let typed = self.typed.clone();
-        let show_placeholder = typed.is_empty();
-        div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .gap(px(metrics::GAP_3))
-            .bg(palette.bg_base)
-            .text_color(palette.fg)
-            .p(px(metrics::PAD_6))
-            .child(
-                div()
-                    .text_size(px(metrics::TEXT_LG))
-                    .child("NeoHub · native host probe · 中文输入验证"),
-            )
-            .child(
-                div()
-                    .text_size(px(metrics::TEXT_SM))
-                    .text_color(palette.fg_muted)
-                    .child("侧栏 / 仪表盘占位 — phase 2 host check only"),
-            )
-            .child(
-                div()
-                    .text_size(px(metrics::TEXT_SM))
-                    .child("输入框（验证中文输入法 / 选择 / 粘贴）："),
-            )
-            .child(
-                div()
-                    .id("probe-input")
-                    .w(px(360.0))
-                    .px(px(metrics::PAD_3))
-                    .py(px(metrics::PAD_2))
-                    .rounded(px(metrics::RADIUS_MD))
-                    .border_1()
-                    .border_color(palette.border_strong)
-                    .bg(palette.bg_surface)
-                    .text_size(px(metrics::TEXT_BASE))
-                    .child(if show_placeholder {
-                        SharedString::from("在此输入…")
-                    } else {
-                        SharedString::from(typed)
-                    }),
-            )
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
-                let text = event.keystroke.key_char.clone().unwrap_or_default();
-                if text.is_empty() {
-                    return;
-                }
-                this.typed.push_str(&text);
-                cx.notify();
-            }))
-    }
-}
-
-fn main() {
-    let window_options = WindowOptions {
+fn window_options() -> WindowOptions {
+    WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::new(
             point(
                 px(metrics::DEFAULT_WINDOW_WIDTH / 8.0),
@@ -90,15 +33,34 @@ fn main() {
             ..Default::default()
         }),
         ..Default::default()
-    };
+    }
+}
+
+fn main() {
+    // One runtime for everything: the core spawns its pumps/monitors on it, the UI sends
+    // commands through it. Nothing is `block_on`-ed on the GPUI thread except the initial
+    // snapshot read.
+    let runtime = Arc::new(
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("tokio runtime"),
+    );
+    let _enter = runtime.enter();
+
+    let data_dir = DataDir::from_args(std::env::args()).expect("resolve data dir");
+    let service = CoreService::open(data_dir.clone()).expect("open the NeoHub core");
+    let bridge = HostBridge::new(runtime.clone(), service, data_dir.path().to_path_buf());
 
     gpui_kit::application().run(move |cx| {
         gpui_kit::init(cx);
-        gpui_kit::open_window(window_options, cx, |_, cx| {
-            cx.new(|_| HostProbe {
-                typed: String::new(),
-            })
+        let bridge = bridge.clone();
+        gpui_kit::open_window(window_options(), cx, move |_, cx| {
+            let view = cx.new(|_| ShellView::new(bridge.clone()));
+            view.update(cx, |view, cx| view.start_event_pump(cx));
+            view
         })
-        .expect("failed to open the NeoHub host window");
+        .expect("failed to open the NeoHub window");
     });
 }

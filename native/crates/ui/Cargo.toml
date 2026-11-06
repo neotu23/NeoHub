@@ -10,3 +10,11 @@ description = "NeoHub native GPUI interface"
 
 [dependencies]
 gpui-kit.workspace = true
+neohub-core = { path = "../core" }
+neohub-domain = { path = "../domain" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+
+[dev-dependencies]
+tempfile = "3.14"

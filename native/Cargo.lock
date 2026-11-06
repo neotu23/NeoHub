@@ -3894,7 +3894,10 @@ name = "neohub-desktop"
 version = "0.1.0"
 dependencies = [
  "gpui-kit",
+ "neohub-core",
+ "neohub-storage",
  "neohub-ui",
+ "tokio",
 ]
 
 [[package]]
@@ -3936,6 +3939,12 @@ name = "neohub-ui"
 version = "0.1.0"
 dependencies = [
  "gpui-kit",
+ "neohub-core",
+ "neohub-domain",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
