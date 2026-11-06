@@ -23,6 +23,7 @@ enum HostUpdate {
     Event(CoreEvent),
     Candidates(Vec<ImportCandidate>),
     Imported,
+    History(AppId, Vec<neohub_domain::RunHistoryRow>),
     Error(String),
 }
 
@@ -133,6 +134,26 @@ impl HostBridge {
         });
     }
 
+    /// Load the run history the detail pane renders.
+    pub fn load_history(&self, app_id: AppId) {
+        let handle = self.handle.clone();
+        let sink = self.reply_sink.clone();
+        self.runtime.spawn(async move {
+            let reply = handle
+                .request(CoreCommand::ListRunHistory {
+                    app_id: app_id.clone(),
+                    limit: Some(10),
+                })
+                .await;
+            let message = match reply {
+                Ok(CoreReply::RunHistory(rows)) => HostUpdate::History(app_id, rows),
+                Ok(_) => HostUpdate::History(app_id, Vec::new()),
+                Err(err) => HostUpdate::Error(format!("history failed: {err}")),
+            };
+            let _ = sink.send(message);
+        });
+    }
+
     /// Import one scanned candidate using the detection the scan already produced.
     pub fn import_candidate(&self, candidate: ImportCandidate) {
         let name = candidate.name.clone();
@@ -226,6 +247,10 @@ impl HostBridge {
                         need_snapshot = true;
                         changed = true;
                     }
+                    HostUpdate::History(app_id, rows) => {
+                        store.set_history(app_id, rows);
+                        changed = true;
+                    }
                     HostUpdate::Error(message) => {
                         store.set_import_error(message);
                         changed = true;
@@ -264,6 +289,8 @@ pub struct ShellView {
     /// Sidebar filter (the ⌘P search box).
     search: TextField,
     search_focus: FocusHandle,
+    /// App whose history was last requested (avoids re-requesting every frame).
+    history_requested: Option<AppId>,
 }
 
 impl ShellView {
@@ -273,6 +300,7 @@ impl ShellView {
             bridge,
             search: TextField::new(""),
             search_focus,
+            history_requested: None,
         }
     }
 
@@ -579,6 +607,14 @@ impl Render for ShellView {
             main = main.child(tag_row);
         }
 
+        if view == crate::state::session::View::App
+            && let Some(app_id) = selected.clone()
+            && self.history_requested.as_ref() != Some(&app_id)
+        {
+            self.history_requested = Some(app_id.clone());
+            self.bridge.load_history(app_id);
+        }
+
         if import.open {
             let mut panel = div()
                 .flex()
@@ -711,6 +747,318 @@ impl Render for ShellView {
                 );
             }
             main = main.child(panel);
+        } else if view == crate::state::session::View::App {
+            let (app, tasks, current, history, refresh) = {
+                let store = self.bridge.store.lock().expect("store lock");
+                let app_id = store.session().selected_app_id.clone();
+                (
+                    store.selected_app().cloned(),
+                    store.tasks_of_selected_app(),
+                    store.selected_task(),
+                    app_id
+                        .as_ref()
+                        .map(|id| store.history_of(id).to_vec())
+                        .unwrap_or_default(),
+                    app_id,
+                )
+            };
+
+            if let Some(app) = app.clone() {
+                let mut header = div().flex().items_center().justify_between().child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(metrics::GAP_1))
+                        .child(
+                            div()
+                                .text_size(px(metrics::TEXT_LG))
+                                .child(app.name.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(metrics::TEXT_XS))
+                                .text_color(palette.fg_subtle)
+                                .child(app.path.clone()),
+                        ),
+                );
+
+                let running = self
+                    .bridge
+                    .store
+                    .lock()
+                    .expect("store lock")
+                    .app_state(&app.id)
+                    .is_live();
+                let mut actions = div().flex().gap(px(metrics::GAP_2));
+                {
+                    let bridge = self.bridge.clone();
+                    let app_id = app.id.clone();
+                    let entity = cx.entity().downgrade();
+                    actions = actions.child(
+                        div()
+                            .id("detail-start-stop")
+                            .px(px(metrics::PAD_3))
+                            .py(px(metrics::GAP_1))
+                            .rounded(px(metrics::RADIUS_MD))
+                            .bg(if running {
+                                palette.danger_bg
+                            } else {
+                                palette.success_strong
+                            })
+                            .text_color(if running {
+                                palette.danger_fg
+                            } else {
+                                palette.accent_fg
+                            })
+                            .text_size(px(metrics::TEXT_SM))
+                            .cursor_pointer()
+                            .child(if running {
+                                "停止应用"
+                            } else {
+                                "启动应用"
+                            })
+                            .on_click(move |_, _, cx| {
+                                if running {
+                                    bridge.stop_app(app_id.clone());
+                                } else {
+                                    bridge.start_app(app_id.clone());
+                                }
+                                let _ = entity.update(cx, |_, cx| cx.notify());
+                            }),
+                    );
+                }
+                {
+                    let bridge = self.bridge.clone();
+                    let app_id = app.id.clone();
+                    let entity = cx.entity().downgrade();
+                    actions = actions.child(
+                        div()
+                            .id("detail-restart")
+                            .px(px(metrics::PAD_3))
+                            .py(px(metrics::GAP_1))
+                            .rounded(px(metrics::RADIUS_MD))
+                            .bg(palette.bg_elevated)
+                            .text_size(px(metrics::TEXT_SM))
+                            .cursor_pointer()
+                            .child("重启应用")
+                            .on_click(move |_, _, cx| {
+                                bridge.send(CoreCommand::RestartApp {
+                                    app_id: app_id.clone(),
+                                });
+                                let _ = entity.update(cx, |_, cx| cx.notify());
+                            }),
+                    );
+                }
+                header = header.child(actions);
+                main = main.child(header);
+
+                // Task tabs.
+                let mut tabs = div().flex().gap(px(metrics::GAP_1));
+                for task in &tasks {
+                    let _bridge = self.bridge.clone();
+                    let app_id = app.id.clone();
+                    let task_id = task.id.clone();
+                    let is_current = current.as_ref().map(|t| t.id == task.id).unwrap_or(false);
+                    let state = self
+                        .bridge
+                        .store
+                        .lock()
+                        .expect("store lock")
+                        .app_state(&app.id);
+                    let _ = state;
+                    let label = task.name.clone();
+                    tabs = tabs.child(
+                        div()
+                            .id(format!("tab-{}", task.id))
+                            .px(px(metrics::PAD_3))
+                            .py(px(metrics::GAP_1))
+                            .rounded(px(metrics::RADIUS_MD))
+                            .bg(if is_current {
+                                palette.bg_elevated
+                            } else {
+                                palette.bg_surface
+                            })
+                            .text_size(px(metrics::TEXT_SM))
+                            .text_color(if task.enabled {
+                                palette.fg
+                            } else {
+                                palette.fg_subtle
+                            })
+                            .cursor_pointer()
+                            .child(label)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.bridge.with_session(|session| {
+                                    session.select_app(app_id.clone(), Some(task_id.clone()))
+                                });
+                                this.history_requested = None;
+                                cx.notify();
+                            })),
+                    );
+                }
+                main = main.child(tabs);
+
+                // Current task row + per-task controls.
+                if let Some(task) = current.clone() {
+                    let running = self
+                        .bridge
+                        .store
+                        .lock()
+                        .expect("store lock")
+                        .snapshot()
+                        .map(|snapshot| {
+                            snapshot
+                                .running_tasks
+                                .iter()
+                                .any(|info| info.task_id == task.id && info.state.is_live())
+                        })
+                        .unwrap_or(false);
+                    let command = task
+                        .custom_command
+                        .clone()
+                        .or_else(|| task.script.clone())
+                        .unwrap_or_else(|| "(未配置命令)".to_string());
+                    let mut row = div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .px(px(metrics::PAD_3))
+                        .py(px(metrics::GAP_1))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(palette.bg_surface)
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .child(
+                                    div()
+                                        .text_size(px(metrics::TEXT_SM))
+                                        .child(format!("{} · {}", task.name, command)),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(metrics::TEXT_XS))
+                                        .text_color(palette.fg_subtle)
+                                        .child(format!(
+                                            "就绪：{} · {}",
+                                            task.readiness.kind(),
+                                            if task.enabled {
+                                                "已启用"
+                                            } else {
+                                                "已停用"
+                                            }
+                                        )),
+                                ),
+                        );
+                    {
+                        let bridge = self.bridge.clone();
+                        let task_id = task.id.clone();
+                        let entity = cx.entity().downgrade();
+                        row = row.child(
+                            div()
+                                .id(format!("task-toggle-{}", task.id))
+                                .px(px(metrics::PAD_3))
+                                .py(px(metrics::GAP_1))
+                                .rounded(px(metrics::RADIUS_MD))
+                                .bg(if running {
+                                    palette.danger_bg
+                                } else {
+                                    palette.bg_elevated
+                                })
+                                .text_size(px(metrics::TEXT_SM))
+                                .cursor_pointer()
+                                .child(if running {
+                                    "停止任务"
+                                } else {
+                                    "启动任务"
+                                })
+                                .on_click(move |_, _, cx| {
+                                    if running {
+                                        bridge.stop_task(task_id.clone());
+                                    } else {
+                                        bridge.start_task(task_id.clone());
+                                    }
+                                    let _ = entity.update(cx, |_, cx| cx.notify());
+                                }),
+                        );
+                    }
+                    main = main.child(row);
+
+                    // Log tail from the live event stream.
+                    let logs = {
+                        let store = self.bridge.store.lock().expect("store lock");
+                        store.logs_of(&task.id)
+                    };
+                    let tail: String = logs
+                        .lines()
+                        .rev()
+                        .take(20)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect::<Vec<_>>()
+                        .join(
+                            "
+",
+                        );
+                    main = main.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .p(px(metrics::PAD_3))
+                            .rounded(px(metrics::RADIUS_MD))
+                            .bg(palette.bg_surface)
+                            .text_size(px(metrics::TEXT_XS))
+                            .text_color(palette.fg_muted)
+                            .child(if tail.is_empty() {
+                                "（还没有日志输出）".to_string()
+                            } else {
+                                tail
+                            }),
+                    );
+                }
+
+                // Run history.
+                if !history.is_empty() {
+                    let mut rows = div().flex().flex_col().gap(px(1.0));
+                    rows = rows.child(
+                        div()
+                            .text_size(px(metrics::TEXT_XS))
+                            .text_color(palette.fg_subtle)
+                            .child("最近运行"),
+                    );
+                    for row in history.iter().take(5) {
+                        let code = row
+                            .exit_code
+                            .map(|code| format!("退出码 {code}"))
+                            .unwrap_or_else(|| "运行中/无退出码".to_string());
+                        rows = rows.child(
+                            div()
+                                .text_size(px(metrics::TEXT_XS))
+                                .text_color(if row.was_killed_by_user {
+                                    palette.fg_muted
+                                } else if row.exit_code == Some(0) {
+                                    palette.success_fg
+                                } else {
+                                    palette.danger_fg
+                                })
+                                .child(format!(
+                                    "{} · {} · {}{}",
+                                    row.task_name.clone().unwrap_or_else(|| "(任务)".into()),
+                                    code,
+                                    if row.was_killed_by_user {
+                                        "用户停止"
+                                    } else {
+                                        "自行退出"
+                                    },
+                                    row.ended_at.map(|_| "").unwrap_or(" · 未结束")
+                                )),
+                        );
+                    }
+                    main = main.child(rows);
+                }
+                let _ = refresh;
+            }
         } else if is_empty {
             let bridge = self.bridge.clone();
             let entity = cx.entity().downgrade();

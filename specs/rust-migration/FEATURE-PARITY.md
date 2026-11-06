@@ -25,7 +25,7 @@
 | A1 | 应用 CRUD（list/add/update/remove/findByPath）、身份字段 pinning 校验 | `ipc/index.ts`, `AppRegistry.ts` | 已验证 | `core/src/catalog/` | 已验证（core catalog：列出/读取/更新/删除/按路径查） |
 | A2 | 原子创建 `apps:create`：应用 + 首个任务 + 多任务 + 环境变量，单事务 | `AppRegistry.ts`, `AddAppDrawer.tsx` | 已验证 | `core/src/catalog/` | 已验证（单事务创建 app+任务+env，失败不留半个 app） |
 | A3 | realpath 去重、路径不存在报错 | `AppRegistry.ts` | 部分（无独立测试） | `core/src/catalog/` | 已验证（realpath 去重 + 非目录/不存在报错，含 symlink 用例） |
-| A4 | 任务 CRUD + 重排 `tasks:reorder`、`TaskRegistry` 字段冻结 | `TaskRegistry.ts` | 已验证（MCP add_task/remove_task） | `core/src/catalog/` | 已验证（任务 CRUD/重排；重排必须全覆盖） |
+| A4 | 任务 CRUD + 重排 `tasks:reorder`、`TaskRegistry` 字段冻结 | `TaskRegistry.ts` | 已验证（MCP add_task/remove_task） | `core/src/catalog/`| 已验证（任务 CRUD/重排；重排必须全覆盖；命令层 `AddTask/UpdateTask/RemoveTask/ReorderTasks` 已接） |
 | A5 | 任务依赖 `dependsOn` + 拓扑/环/未知依赖校验 | `topo.ts`, `topo.test.ts`（8 例） | 已验证 | `core/src/orchestrator/topology.rs` | 部分（环/未知依赖/自依赖检测已实现；拓扑启动顺序在阶段 7） |
 | A6 | 文件夹分组：list/rename/clear、`apps.folder` | `AppRegistry.ts`, `0005_app_folders.sql` | 已验证 | `core/src/catalog/` | 已验证（list/rename/clear，清空不动磁盘目录） |
 | A7 | 扫描导入 `apps:scanFolder`（浅层扫描 package.json） | `DetectionService.ts`, `ImportProjectsDrawer.tsx` | 部分 | `core/src/environment/detect.rs`| 已验证（浅层扫描只列直接子目录含 `package.json` 的项目，跳过 node_modules/隐藏目录，重复项标记已导入） |
@@ -162,14 +162,14 @@
 |---|---|---|---|---|---|
 | U1 | 外壳 + 侧栏（分组/标签双模式、折叠、排序、筛选 ⌘P、⋮ 菜单、拖拽分组） | `Sidebar.tsx`, `sortApps.ts` | 部分（截图） | `ui/src/views/{shell,sidebar}.rs`| 部分（侧栏分组/标签/排序/筛选/选中态已实现并测试；折叠、⋮ 菜单、拖拽分组未做） |
 | U2 | 仪表盘（汇总卡、项目卡、CPU sparkline、端口 chip、标签筛选、全部停止） | `Dashboard.tsx` | 部分（截图） | `ui/src/views/dashboard.rs`| 部分（仪表盘汇总卡 + 项目卡 + 端口 chip + 状态色已渲染真实快照；sparkline/空态/标签下拉未做） |
-| U3 | 项目详情（任务 tabs、启停/重启、端口、历史、日志区、Open In、复制路径） | `AppDetail.tsx`, `TaskTabs.tsx` | 部分（截图） | `ui/src/views/app_detail.rs`| 部分（详情页骨架：任务 tabs / 端口 / 启停待阶段 10；卡片与侧栏已可选中） |
+| U3 | 项目详情（任务 tabs、启停/重启、端口、历史、日志区、Open In、复制路径） | `AppDetail.tsx`, `TaskTabs.tsx` | 部分（截图） | `ui/src/views/app_detail.rs`| 部分（详情页：任务 tabs、每任务启停、项目级启停/重启、日志尾、最近运行历史；Open In 与崩溃日志入口待做） |
 | U4 | 添加项目抽屉（浏览 → 检测 → 命名/Node/PM/脚本 → 环境；monorepo 每包一任务） | `AddAppDrawer.tsx` | 部分 | `ui/src/views/add_app.rs` | 未开始 |
 | U5 | 扫描导入抽屉（候选列表、已注册标记、批量添加） | `ImportProjectsDrawer.tsx` | 部分 | `ui/src/views/import_projects.rs` | 未开始 |
 | U6 | 任务编辑器抽屉（命令/脚本/工作目录/依赖/readiness/oneShot/enabled/重排） | `TaskEditor.tsx` | 部分 | `ui/src/views/task_editor.rs` | 未开始 |
 | U7 | 应用配置抽屉（名称/颜色/文件夹/标签/自动重启/watch globs/autoStart/Node/PM） | `AppConfigDrawer.tsx`, `TagInput.tsx`, `FolderSelect.tsx` | 部分 | `ui/src/views/app_config.rs` | 未开始 |
 | U8 | 环境变量编辑器（见 E7） | `EnvEditor.tsx` | 部分 | `ui/src/views/env_editor.rs` | 未开始 |
 | U9 | 设置抽屉（17 项设置 + 危险区 db 导出/重置 + MCP 状态/Token） | `SettingsDrawer.tsx` | 部分（截图） | `ui/src/views/settings.rs` | 未开始 |
-| U10 | 运行历史子视图（含 Rerun） | `AppDetail.tsx` History | 部分 | `ui/src/views/run_history.rs` | 未开始 |
+| U10 | 运行历史子视图（含 Rerun） | `AppDetail.tsx` History | 部分 | `ui/src/views/run_history.rs`| 部分（运行历史列表已渲染在详情页；Rerun 按钮与独立子视图待做） |
 | U11 | 命令面板 ⌘K（Apps/Start/Stop/Restart/Actions 分组） | `CommandPalette.tsx`（cmdk） | 部分 | `ui/src/components/` | 未开始 |
 | U12 | 全局日志搜索 ⌘⇧F | `GlobalLogSearch.tsx` | 部分 | `ui/src/views/log_search.rs` | 未开始 |
 | U13 | 通用组件：Toast、ErrorBanner、ErrorBoundary、ContextMenu、PromptModal、StatusDot、PortChip、NodeVersionPicker、OpenInMenu、EmptyState、CrashPin、UpdateBanner | 对应 `components/*.tsx` | 部分（截图） | `ui/src/components/` | 未开始 |

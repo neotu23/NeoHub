@@ -664,6 +664,46 @@ impl CoreService {
         })
     }
 
+    /// Task mutations always go through the catalog so validation stays in one place.
+    pub fn add_task(
+        &self,
+        app_id: &AppId,
+        input: crate::catalog::AddTaskInput,
+    ) -> CoreResult<Task> {
+        self.with_storage(|storage| {
+            crate::catalog::AppCatalog::new(storage).add_task(app_id, input)
+        })
+    }
+
+    pub fn update_task(
+        &self,
+        task_id: &TaskId,
+        input: crate::catalog::UpdateTaskInput,
+    ) -> CoreResult<Task> {
+        self.with_storage(|storage| {
+            crate::catalog::AppCatalog::new(storage).update_task(task_id, input)
+        })
+    }
+
+    pub fn remove_task(&self, task_id: &TaskId) -> CoreResult<()> {
+        self.with_storage(|storage| crate::catalog::AppCatalog::new(storage).remove_task(task_id))
+    }
+
+    pub fn reorder_tasks(&self, app_id: &AppId, task_ids: &[TaskId]) -> CoreResult<()> {
+        self.with_storage(|storage| {
+            crate::catalog::AppCatalog::new(storage).reorder_tasks(app_id, task_ids)
+        })
+    }
+
+    /// Run history for one app, newest first.
+    pub fn run_history(
+        &self,
+        app_id: &AppId,
+        limit: Option<u32>,
+    ) -> CoreResult<Vec<RunHistoryRow>> {
+        self.with_storage(|storage| Ok(storage.history().list_for_app(app_id, limit)?))
+    }
+
     /// Readiness result recorded for a task's current run.
     pub fn readiness_of(&self, task_id: &TaskId) -> Option<(String, bool)> {
         self.ready_flags
@@ -980,11 +1020,73 @@ impl CoreHandle {
                     })?;
                 Ok(CoreReply::Ack)
             }
+            CoreCommand::AddTask { app_id, input } => {
+                let task = self.service.add_task(&app_id, *input)?;
+                Ok(CoreReply::Task(Box::new(task)))
+            }
+            CoreCommand::UpdateTask { task_id, input } => {
+                let task = self.service.update_task(&task_id, *input)?;
+                Ok(CoreReply::Task(Box::new(task)))
+            }
+            CoreCommand::RemoveTask { task_id } => {
+                self.service.remove_task(&task_id)?;
+                Ok(CoreReply::Ack)
+            }
+            CoreCommand::ReorderTasks { app_id, task_ids } => {
+                self.service.reorder_tasks(&app_id, &task_ids)?;
+                Ok(CoreReply::Ack)
+            }
+            CoreCommand::ListRunHistory { app_id, limit } => {
+                let rows = self.service.run_history(&app_id, limit)?;
+                Ok(CoreReply::RunHistory(rows))
+            }
             CoreCommand::GetLogs { task_id } => {
                 Ok(CoreReply::Logs(self.service.runner.logs_of(&task_id)))
             }
             CoreCommand::StartApp { app_id } => {
                 self.service.start_app(&app_id).await?;
+                Ok(CoreReply::Ack)
+            }
+            CoreCommand::BootstrapLogs { task_id, after } => {
+                let outcome = self
+                    .service
+                    .runner
+                    .bootstrap_logs(&task_id, after.as_ref())
+                    .ok_or_else(|| DomainError::NotFound {
+                        entity: "logs",
+                        id: task_id.to_string(),
+                    })?;
+                Ok(CoreReply::LogBootstrap(outcome))
+            }
+            CoreCommand::SearchLogs {
+                task_id,
+                query,
+                options,
+            } => {
+                let matches = match task_id {
+                    Some(task_id) => self
+                        .service
+                        .runner
+                        .search_logs(&task_id, &query, &options)
+                        .map_err(|err| DomainError::InvalidInput {
+                            field: "query",
+                            message: err.to_string(),
+                        })?
+                        .into_iter()
+                        .map(|hit| (task_id.clone(), hit))
+                        .collect(),
+                    None => self
+                        .service
+                        .search_logs_all(&query, &options)
+                        .map_err(|err| DomainError::InvalidInput {
+                            field: "query",
+                            message: err.to_string(),
+                        })?,
+                };
+                Ok(CoreReply::LogMatches(matches))
+            }
+            CoreCommand::ClearLogs { task_id } => {
+                self.service.runner.clear_logs(&task_id);
                 Ok(CoreReply::Ack)
             }
             CoreCommand::StopApp { app_id } => {

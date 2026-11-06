@@ -195,6 +195,19 @@ impl LogStore {
         }
     }
 
+    /// Make sure a run has a log entry even before it prints anything, so a re-opened window
+    /// gets an (empty) bootstrap instead of "no logs".
+    pub fn ensure_run(&mut self, task_id: &TaskId, run_id: &RunId) {
+        let entry = self
+            .logs
+            .entry(task_id.clone())
+            .or_insert_with(|| TaskLog::new(run_id.clone()));
+        if &entry.run_id != run_id {
+            self.total = self.total.saturating_sub(entry.bytes);
+            *entry = TaskLog::new(run_id.clone());
+        }
+    }
+
     /// Append raw PTY bytes for one run.
     pub fn append(&mut self, task_id: &TaskId, run_id: &RunId, bytes: &[u8]) -> AppendOutcome {
         let mut new_run = false;

@@ -417,6 +417,13 @@ impl TaskRunner {
             generation,
         );
 
+        // Register the run so a subscriber can bootstrap before the first byte arrives.
+        self.inner
+            .logs
+            .lock()
+            .expect("logs lock")
+            .ensure_run(&task_id, &run_id);
+
         // PTY reader: blocking by nature, so it gets its own thread.
         {
             let inner = self.inner.clone();

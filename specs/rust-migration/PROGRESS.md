@@ -410,7 +410,7 @@
        上述 `import_flow` 测试从命令层验证了同一链路
 
 ### 阶段 10：项目详情、任务编辑、环境变量与设置
-- 状态：**开发中**（编辑会话/保存屏障/语言包/文本输入完成；详情与编辑器视图待做）
+- 状态：**开发中**（编辑会话/保存屏障/语言包/文本输入/详情页完成；任务编辑器与设置面板待做）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: add edit drafts, save barrier and locales`
 - 实际修改文件：新增 `native/crates/ui/src/state/edit_session.rs`、
@@ -453,4 +453,21 @@
   - 未解决问题：
     1. 详情页/任务编辑器/设置面板视图仍未做（下一步），依赖文本字段（已具备）与多行日志区
     2. 组件库输入控件若要用，需要按其源码写一个最小可编译示例并固化 API 版本
+
+- 第三批完成（2026-11-06T22:30Z–23:05Z UTC）：
+  - core 命令面补齐：`AddTask`/`UpdateTask`/`RemoveTask`/`ReorderTasks`/`ListRunHistory`，
+    以及**补回阶段 6 遗漏的** `BootstrapLogs`/`SearchLogs`/`ClearLogs`（见下"记录更正"）
+  - `LogStore::ensure_run`：任务启动即登记日志条目，未输出时可 bootstrap（原来会报 NotFound）
+  - ui：`UiStore` 增加运行历史缓存；`HostBridge::load_history`；**详情页**渲染任务 tabs、
+    每任务启停、项目级启停/重启、日志尾 20 行、最近 5 条运行历史（含退出码与"用户停止"归因）
+  - 验证：`cargo test -p neohub-core --test app_detail` → **4 passed**
+    （每任务启停与项目级启停/重启一致；命令层编辑校验并定位字段；重排/删除生效；
+    停止后历史行闭合且标记用户停止；重开详情可 bootstrap 日志）
+    `cargo test --workspace --locked` → **279 passed / 0 failed**；clippy **0 warnings**；实机启动无 stderr
+- **记录更正**：阶段 6 的进度条目曾写明已加 `BootstrapLogs`/`SearchLogs`/`ClearLogs` 命令，
+  实际代码里只有 runner/service 的底层方法，命令枚举与分发缺失（本轮测试暴露）。现已补齐，
+  阶段 6 的"已验证"结论只对底层能力成立，命令面在阶段 10 才接上。
+- 未解决问题：
+  1. 任务编辑器视图（表单：命令/工作目录/依赖/readiness/oneShot/enabled）与设置面板 → 本阶段剩余
+  2. Open In、崩溃日志钉住、`.env` 变化横幅 → 阶段 12/15
 

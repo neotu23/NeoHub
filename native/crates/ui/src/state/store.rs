@@ -8,7 +8,7 @@ use crate::state::session::{AppSort, GroupBy, Session};
 use neohub_core::environment::ImportCandidate;
 use neohub_core::events::{CoreEvent, CoreEventKind};
 use neohub_core::snapshot::CoreSnapshot;
-use neohub_domain::{App, AppId, ProcessState, Task, TaskId};
+use neohub_domain::{App, AppId, ProcessState, RunHistoryRow, Task, TaskId};
 use std::collections::BTreeMap;
 
 /// Cap for the in-memory log tail per task shown in the detail pane.
@@ -92,6 +92,8 @@ pub struct UiStore {
     /// Active tag filter on the dashboard.
     tag_filter: Option<String>,
     import: ImportState,
+    /// Run history per app, as loaded by the detail pane.
+    history: BTreeMap<AppId, Vec<RunHistoryRow>>,
 }
 
 impl UiStore {
@@ -103,6 +105,7 @@ impl UiStore {
             filter: String::new(),
             tag_filter: None,
             import: ImportState::default(),
+            history: BTreeMap::new(),
         }
     }
 
@@ -124,6 +127,14 @@ impl UiStore {
 
     pub fn filter(&self) -> &str {
         &self.filter
+    }
+
+    pub fn set_history(&mut self, app_id: AppId, rows: Vec<RunHistoryRow>) {
+        self.history.insert(app_id, rows);
+    }
+
+    pub fn history_of(&self, app_id: &AppId) -> &[RunHistoryRow] {
+        self.history.get(app_id).map(Vec::as_slice).unwrap_or(&[])
     }
 
     pub fn import(&self) -> &ImportState {
