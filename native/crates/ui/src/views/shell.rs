@@ -504,6 +504,7 @@ impl HostBridge {
         }
         let mut changed = false;
         let mut need_snapshot = false;
+        let mut notices: Vec<neohub_platform_macos::notify::Notification> = Vec::new();
         let mut saved_task: Option<neohub_domain::Task> = None;
         let mut db_notice_out: Option<String> = None;
         let mut app_saved_out: Option<neohub_domain::App> = None;
@@ -523,6 +524,30 @@ impl HostBridge {
                             event.kind,
                             neohub_core::events::CoreEventKind::ResyncRequired { .. }
                         );
+                        // A crash is the one state change worth interrupting the user for; the
+                        // decision itself lives in `notify::for_task_exit` so it is testable.
+                        if let neohub_core::events::CoreEventKind::TaskStatus {
+                            task_id,
+                            state,
+                            ..
+                        } = &event.kind
+                        {
+                            let settings = store.settings();
+                            if settings.notify_on_crash {
+                                let (app_name, task_name) = store.labels_for(task_id);
+                                if let Some(notification) =
+                                    neohub_platform_macos::notify::for_task_exit(
+                                        &app_name,
+                                        &task_name,
+                                        true,
+                                        *state == neohub_domain::ProcessState::Crashed,
+                                        false,
+                                    )
+                                {
+                                    notices.push(notification);
+                                }
+                            }
+                        }
                         changed |= store.apply_event(event);
                         need_snapshot |= resync;
                     }
@@ -616,6 +641,13 @@ impl HostBridge {
             changed = true;
         }
         // Hand the app form outcome back the same way the task editor gets its result.
+        // Sent outside the store lock: `osascript` is a process spawn, and holding the lock
+        // across it would stall every other update.
+        for notice in notices {
+            if let Err(error) = neohub_platform_macos::notify::send(&notice) {
+                eprintln!("[ui] notification failed: {error}");
+            }
+        }
         if let Some(notice) = db_notice_out
             && let Ok(mut guard) = self.last_db_notice.lock()
         {

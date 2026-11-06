@@ -1202,3 +1202,28 @@
   1. 导出没有原生保存对话框（固定落在数据目录的 `exports/`），用户不能选位置
   2. 重置后不自动重启：当前会话已用新库继续运行（旧库在磁盘上，重启也可）
 
+### S8 桌面通知（崩溃）
+- 状态：**崩溃通知可用**；`notify_on_ready` 未接
+- 最近提交：`feat: notify on a crash`
+- 实际修改文件：新增 `platform-macos/src/notify.rs`；更新 `platform-macos/src/lib.rs`、
+  `ui/src/views/shell.rs`（事件处理里按开关发通知）
+- **为什么不用 `UNUserNotificationCenter`**：它要求正确签名（macOS 13+ 还要公证）的 bundle，
+  ad-hoc 构建下通知**根本不投递**，且不给用户可处理的错误；`NSUserNotification` 已废弃。
+  走 AppleScript 的 `display notification` 是唯一在未签名开发构建下真正会出现的路径，
+  而且仍然经过系统通知中心（专注模式、勿扰、通知中心都照常生效）。
+  代价是横幅来源显示为脚本宿主而非 NeoHub —— 换来"通知真的能到"，我认为值得。
+  以后换 `UNUserNotificationCenter` 只需改这一个模块。
+- 语义：**只对意外退出发通知**。用户自己点的停止不是新闻，把用户刚做的事再通知一遍
+  正是通知被关掉的原因（这条规则写成 `for_task_exit`，有测试）
+- 防注错：标题/正文按 AppleScript 字面量转义（反斜杠 → 双写、双引号 → `\"`、换行 → 空格）。
+  未转义的引号会让脚本在运行时失败，**静默丢失通知**
+- 发送在 store 锁**之外**执行：`osascript` 是进程启动，持锁会卡住所有其他更新
+- 验证：`cargo test -p neohub-platform-macos --lib notify` → **6 passed**
+  （脚本形状、引号/反斜杠转义、换行折叠、空通知先拒、只对意外退出通知、崩溃文案含应用与任务名）
+  `cargo test --workspace --locked` → **455 passed / 0 failed**；clippy 0；
+  重新打包（30 MB）并启动，日志无 error/panic
+- 未解决问题：
+  1. `notify_on_ready`（任务就绪通知）未接
+  2. 通知实际弹出需人工确认（自动化不能点授权/看横幅）
+  3. 用户在"系统设置 → 通知"里若禁用脚本宿主，通知不会出现
+
