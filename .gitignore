@@ -46,3 +46,6 @@ generated_images/
 
 # Stray electron-vite root output (canonical build goes to out/)
 /index.js
+
+# Packaging output (scripts/package.sh)
+native/dist/

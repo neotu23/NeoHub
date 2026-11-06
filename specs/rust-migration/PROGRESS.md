@@ -874,8 +874,33 @@
   2. 错误消息文案未逐条照抄旧版（字段层面一致；`interpretedAs`、`note` 等为中文）
   3. `get_ports` 的 `pid`/`process` 为 `null`（只报占用任务，不猜进程名）
 
-
-
-
-
+### 阶段 15：应用包与分发
+- 状态：**完成**（.app + .dmg 可构建、可启动；签名走 ad-hoc，公证流程已写明）
+- 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
+- 最近提交：`feat: package NeoHub.app and a dmg`
+- 实际修改文件：新增 `native/scripts/package.sh`、`native/docs/BUILD.md`；更新 `.gitignore`
+- 验证命令与结果（2026-11-07T12:20Z–13:00Z UTC）：
+  - `bash scripts/package.sh` → 成功
+    - `NeoHub.app` **29 MB**，`lipo -archs` → `arm64`
+    - `Info.plist` 由 `plutil -lint` 校验通过；`CFBundleIdentifier=app.neohub.desktop`、
+      版本 `1.4.0`、`LSMinimumSystemVersion=13.0`
+    - 无 Developer ID → **ad-hoc 签名**，`codesign --verify --strict` 通过
+    - `NeoHub-1.4.0.dmg` **13 MB**（UDZO，含 `/Applications` 链接）
+  - 通过 **LaunchServices** 启动（`open -a dist/NeoHub.app --args --data-dir <tmp>`）：
+    - `lsappinfo` 报告 `bundleID="app.neohub.desktop"`、`bundle path=…/NeoHub.app`、
+      `Version="1.4.0"`、`Arch=ARM64`、`type="Foreground"`
+    - 窗口存在且 onscreen；数据库在指定 `--data-dir` 内初始化（`devharbor.db` + WAL + 锁文件）
+    - `SIGTERM` 后正常退出，无残留进程
+- 与旧版不同之处：
+  1. 包结构手写组装（`scripts/package.sh`），不依赖 electron-builder；信息更透明，也少一层工具链
+  2. 语言文件放在 `Contents/Resources/locales/*.json`，运行时读取，缺失时回退英文
+  3. 图标沿用旧版 `build/icon.icns`
+- 未解决问题及所属阶段：
+  1. **公证未做**：没有 Developer ID 证书，只能 ad-hoc；分发到其他 Mac 会被 Gatekeeper 拒绝。
+     流程写在 `native/docs/BUILD.md`，需要证书与 Apple 账号
+  2. **窗口尺寸无法自动断言**：本机 `CGWindowListCopyWindowInfo` 对所有应用都返回失真尺寸
+     （微信也是 144×146），因此改用"进程存活 + 窗口 onscreen + 数据目录初始化"作为启动证据；
+     视觉细节需人眼确认
+  3. 只有 arm64（未做 universal binary 与 x86_64 交叉构建）
+  4. 菜单栏 NSStatusItem 的 target/action 绑定与 Dock 桥接（阶段 12 遗留）仍未完成
 
