@@ -92,6 +92,7 @@ fn snapshot(apps: Vec<App>, tasks: Vec<Task>, running: Vec<RunningTaskInfo>) -> 
         settings: Settings::default(),
         task_stats: BTreeMap::new(),
         task_ports: BTreeMap::new(),
+        task_ready: BTreeMap::new(),
     }
 }
 

@@ -732,7 +732,7 @@
   4. 迁移后 `migration.json` 清单尚未接入 UI 展示
 
 ### 阶段 14：MCP 全量迁移与协议兼容
-- 状态：**开发中**（22 工具 + dispatch + gate + 脱敏 + HTTP 端点 + 变更广播 + 读取类字段对齐完成；TLS/SSE 待做）
+- 状态：**开发中**（22 工具 + dispatch + gate + 脱敏 + HTTP 端点 + 变更广播 + 读取类工具全部对齐旧版形状；`get_logs`/`add_app`/`update_app` 待对齐；TLS/SSE 待做）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: port the MCP gate, redaction and tool catalogue`
 - 实际修改文件：新增 `native/crates/mcp/{Cargo.toml,src/{lib,auth,redaction,tools}.rs}`；更新 workspace 成员
@@ -815,9 +815,21 @@
     - 新增：`read_tools_return_the_legacy_field_names`（camelCase 字段、`{count,apps}`、`state` 过滤、
       `get_app` 三种解析方式）
   - `cargo test --workspace --locked` → **405 passed / 0 failed**；clippy **0 warnings**
+- 第五批完成（2026-11-07T09:05Z–09:45Z UTC）：按 `tools.ts` 继续对齐读取类工具
+  - `list_running` → `{count, running:[{app, appId, taskId, pid, state, ready, listening, uptimeSec, cpu, memMB, ports}]}`
+  - `search_logs` → 参数 `{query, regex, app?, limit}`；返回 `{interpretedAs, count, matches:[{app, task, line}]}`，
+    `app` 支持 id/名称/路径并过滤
+  - `list_env_vars` → 参数 `{app, task?}`（`scope` 保留兼容）；返回 `{app, scope, vars:[{key, value, isSecret, enabled}]}`，
+    秘密值恒为 `null`
+  - `scan_folder` → `{count, candidates}`；`list_node_versions` → `{installations}`
+  - **新增 `CoreSnapshot.task_ready`**：`ready` 在旧版是"该 run 有真实探测才给出的结论"，
+    现在由 `ready_flags` 导出；无探测时为 `null`，不会把"起来了"说成"就绪"
+  - 验证：`cargo test -p neohub-mcp` → **31 passed**；`cargo test --workspace --locked` → **405 passed**；clippy 0
 - 仍存在的兼容差异（需继续对齐 `tools.ts`）：
-  1. `get_app` 尚未返回 `.env` 发现结果与 `runs`（run history）、`runs_limit` 参数
-  2. `list_running` / `get_ports` / `get_logs` / `search_logs` 的字段名仍是 snake_case
-  3. `add_app`/`update_app` 的参数名（旧版可能用 `app`/`name` 组合）未逐一核对
-  4. 错误消息文案未逐条对齐旧版（只在字段层面一致）
+  1. `get_app` 尚未返回 `.env` 发现结果与 `recentRuns`（run history）、`runs_limit` 参数
+  2. `get_logs` 仍是 `{task_id, lines}` + 单段文本；旧版是 `{app, task?, lines}` + 分任务段落 + `{app, linesPerTask, tasks}`
+  3. `get_ports` 仍是 `{task_id, confirmed, hinted}` 数组；旧版是 `{apps:[{app, ports, portDetails}]}` 或按 `port` 查所有者
+  4. `add_app`/`update_app` 的参数集未对齐（旧版 `add_app` 用 `path/name/script/command/workspaceTasks/autoStart`）
+  5. 错误消息文案未逐条对齐旧版（只在字段层面一致）
+
 

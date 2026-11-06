@@ -208,6 +208,7 @@ mod tests {
             settings: Settings::default(),
             task_stats: BTreeMap::<TaskId, StatsSample>::new(),
             task_ports: BTreeMap::<TaskId, PortSample>::new(),
+            task_ready: BTreeMap::<TaskId, bool>::new(),
         }
     }
 

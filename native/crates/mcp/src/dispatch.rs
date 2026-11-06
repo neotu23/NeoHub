@@ -246,22 +246,45 @@ pub async fn dispatch(ctx: &ToolContext, tool: ToolName, args: &Value) -> ToolRe
             let CoreReply::Snapshot(snapshot) = snapshot else {
                 return Err(ToolError::new("unexpected snapshot reply"));
             };
+            let now = neohub_storage::db::now_ms();
+            let name_of = |app_id: &AppId| {
+                snapshot
+                    .apps
+                    .iter()
+                    .find(|app| &app.id == app_id)
+                    .map(|app| app.name.clone())
+                    .unwrap_or_else(|| app_id.to_string())
+            };
             let running: Vec<Value> = snapshot
                 .running_tasks
                 .iter()
+                .filter(|task| task.state.is_live())
                 .map(|task| {
+                    let ports = snapshot
+                        .task_ports
+                        .get(&task.task_id)
+                        .map(|sample| sample.confirmed.clone())
+                        .unwrap_or_default();
                     json!({
-                        "task_id": task.task_id,
-                        "app_id": task.app_id,
+                        "app": name_of(&task.app_id),
+                        "appId": task.app_id,
+                        "taskId": task.task_id,
                         "pid": task.pid,
-                        "state": task.state,
-                        "command": task.command,
-                        "started_at": task.started_at,
-                        "ports": snapshot.task_ports.get(&task.task_id).map(|sample| sample.confirmed.clone()).unwrap_or_default(),
+                        "state": task.state.as_str(),
+                        // null means "no probe": up is not the same as serving.
+                        "ready": snapshot.task_ready.get(&task.task_id).copied(),
+                        "listening": !ports.is_empty(),
+                        "uptimeSec": ((now - task.started_at).max(0)) / 1000,
+                        "cpu": snapshot.task_stats.get(&task.task_id).map(|stats| stats.cpu_percent).unwrap_or(0.0),
+                        "memMB": snapshot.task_stats.get(&task.task_id).map(|stats| stats.mem_mb).unwrap_or(0.0),
+                        "ports": ports,
                     })
                 })
                 .collect();
-            Ok(ctx.redactor.scrub_json(&json!(running)))
+            Ok(ctx.redactor.scrub_json(&json!({
+                "count": running.len(),
+                "running": running,
+            })))
         }
         ToolName::GetLogs => {
             let task = task_id(args)?;
@@ -284,11 +307,14 @@ pub async fn dispatch(ctx: &ToolContext, tool: ToolName, args: &Value) -> ToolRe
         }
         ToolName::SearchLogs => {
             let query = require_str(args, "query")?;
+            let use_regex = opt_bool(args, "regex").unwrap_or(false);
             let options = neohub_core::logs::SearchOptions {
-                regex: opt_bool(args, "regex").unwrap_or(false),
+                regex: use_regex,
                 case_sensitive: opt_bool(args, "case_sensitive").unwrap_or(false),
-                limit: opt_u64(args, "limit").unwrap_or(100) as usize,
+                limit: opt_u64(args, "limit").unwrap_or(100).min(1000) as usize,
             };
+            // An app filter is resolved to its tasks; the core search takes one task or all.
+            let app = opt_str(args, "app");
             let reply = ctx
                 .handle
                 .request(CoreCommand::SearchLogs {
@@ -301,38 +327,91 @@ pub async fn dispatch(ctx: &ToolContext, tool: ToolName, args: &Value) -> ToolRe
             let CoreReply::LogMatches(matches) = reply else {
                 return Err(ToolError::new("unexpected search reply"));
             };
-            let hits: Vec<Value> = matches
+            let snapshot = ctx
+                .handle
+                .request(CoreCommand::GetSnapshot)
+                .await
+                .map_err(core_error)?;
+            let CoreReply::Snapshot(snapshot) = snapshot else {
+                return Err(ToolError::new("unexpected snapshot reply"));
+            };
+            let app_matches = |task_id: &TaskId| -> bool {
+                match app.as_deref() {
+                    None => true,
+                    Some(needle) => snapshot
+                        .apps
+                        .iter()
+                        .find(|candidate| {
+                            candidate.id.as_str() == needle
+                                || candidate.name == needle
+                                || candidate.path == needle
+                        })
+                        .map(|candidate| {
+                            snapshot
+                                .tasks_by_app
+                                .get(&candidate.id)
+                                .map(|tasks| tasks.iter().any(|task| &task.id == task_id))
+                                .unwrap_or(false)
+                        })
+                        .unwrap_or(false),
+                }
+            };
+            let rows: Vec<Value> = matches
                 .into_iter()
+                .filter(|(task_id, _)| app_matches(task_id))
                 .map(|(task_id, hit)| {
-                    json!({"task_id": task_id, "line": hit.line_no, "text": hit.line})
+                    let (app_name, task_name) = locate(&snapshot, &task_id);
+                    json!({"app": app_name, "task": task_name, "line": hit.line})
                 })
                 .collect();
-            Ok(ctx.redactor.scrub_json(&json!(hits)))
+            Ok(ctx.redactor.scrub_json(&json!({
+                "interpretedAs": if use_regex { "regex" } else { "literal" },
+                "count": rows.len(),
+                "matches": rows,
+            })))
         }
         ToolName::ListEnvVars => {
-            let scope = scope(args)?;
+            // Legacy arguments: `app` (plus optional `task`); `scope` stays accepted so callers
+            // written against the earlier shape keep working.
+            let scope = if let Some(task) = opt_str(args, "task") {
+                EnvScope::Task(TaskId::from_existing(task))
+            } else if let Some(app) = opt_str(args, "app") {
+                EnvScope::App(resolve_app(&ctx.handle, &app).await?)
+            } else {
+                scope(args)?
+            };
             let reply = ctx
                 .handle
-                .request(CoreCommand::ListEnvVars { scope })
+                .request(CoreCommand::ListEnvVars {
+                    scope: scope.clone(),
+                })
                 .await
                 .map_err(core_error)?;
             let CoreReply::EnvVars(rows) = reply else {
                 return Err(ToolError::new("unexpected env reply"));
             };
-            let rows: Vec<Value> = rows
+            let vars: Vec<Value> = rows
                 .into_iter()
                 .map(|row| {
                     json!({
                         "key": row.key,
-                        // A secret is reported as "set" — never with its value.
+                        // A secret is reported as null, never as text.
                         "value": row.value,
-                        "is_secret": row.is_secret,
+                        "isSecret": row.is_secret,
                         "enabled": row.enabled,
-                        "note": row.note,
                     })
                 })
                 .collect();
-            Ok(ctx.redactor.scrub_json(&json!(rows)))
+            let app_name = app_name_for_scope(&ctx.handle, &scope).await;
+            Ok(ctx.redactor.scrub_json(&json!({
+                "app": app_name,
+                "scope": match scope {
+                    EnvScope::Global => "global",
+                    EnvScope::App(_) => "app",
+                    EnvScope::Task(_) => "task",
+                },
+                "vars": vars,
+            })))
         }
         ToolName::GetPorts => {
             let snapshot = ctx
@@ -695,6 +774,72 @@ pub async fn dispatch(ctx: &ToolContext, tool: ToolName, args: &Value) -> ToolRe
             Ok(json!({"stopped": true}))
         }
     }
+}
+
+/// Resolve `app` as an id, exact name or absolute path.
+async fn resolve_app(handle: &CoreHandle, needle: &str) -> Result<AppId, ToolError> {
+    let reply = handle
+        .request(CoreCommand::GetSnapshot)
+        .await
+        .map_err(core_error)?;
+    let CoreReply::Snapshot(snapshot) = reply else {
+        return Err(ToolError::new("unexpected snapshot reply"));
+    };
+    snapshot
+        .apps
+        .iter()
+        .find(|app| app.id.as_str() == needle || app.name == needle || app.path == needle)
+        .map(|app| app.id.clone())
+        .ok_or_else(|| {
+            ToolError::field(
+                "app",
+                "没有应用匹配该 id、名称或路径（先用 list_apps 看看有哪些）",
+            )
+        })
+}
+
+/// App name for app/task scopes (a task scope resolves through its owner app).
+async fn app_name_for_scope(handle: &CoreHandle, scope: &EnvScope) -> Option<String> {
+    let app_id = match scope {
+        EnvScope::Global => return None,
+        EnvScope::App(app_id) => app_id.clone(),
+        EnvScope::Task(task_id) => {
+            let reply = handle.request(CoreCommand::GetSnapshot).await.ok()?;
+            let CoreReply::Snapshot(snapshot) = reply else {
+                return None;
+            };
+            snapshot
+                .tasks_by_app
+                .iter()
+                .find(|(_, tasks)| tasks.iter().any(|task| &task.id == task_id))
+                .map(|(app_id, _)| app_id.clone())?
+        }
+    };
+    let reply = handle.request(CoreCommand::GetSnapshot).await.ok()?;
+    let CoreReply::Snapshot(snapshot) = reply else {
+        return None;
+    };
+    snapshot
+        .apps
+        .iter()
+        .find(|app| app.id == app_id)
+        .map(|app| app.name.clone())
+}
+
+/// `(app name, task name)` for one task id.
+fn locate(snapshot: &neohub_core::snapshot::CoreSnapshot, task_id: &TaskId) -> (String, String) {
+    for (app_id, tasks) in &snapshot.tasks_by_app {
+        if let Some(task) = tasks.iter().find(|task| &task.id == task_id) {
+            let app_name = snapshot
+                .apps
+                .iter()
+                .find(|app| &app.id == app_id)
+                .map(|app| app.name.clone())
+                .unwrap_or_else(|| app_id.to_string());
+            return (app_name, task.name.clone());
+        }
+    }
+    (task_id.to_string(), task_id.to_string())
 }
 
 /// Confirmed listening ports across every task of one app (the legacy `aggregatePorts`).

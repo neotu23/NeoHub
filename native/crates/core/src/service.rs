@@ -264,6 +264,14 @@ impl CoreService {
 
         let task_stats = self.stats_cache.lock().expect("stats cache").clone();
         let task_ports = self.ports_cache.lock().expect("ports cache").clone();
+        // ready_flags stores (probe description, verdict); only the verdict is public.
+        let task_ready: std::collections::BTreeMap<neohub_domain::TaskId, bool> = self
+            .ready_flags
+            .lock()
+            .expect("ready flags")
+            .iter()
+            .map(|(task_id, (_, verdict))| (task_id.clone(), *verdict))
+            .collect();
         Ok(CoreSnapshot {
             revision,
             apps,
@@ -273,6 +281,7 @@ impl CoreService {
             settings,
             task_stats,
             task_ports,
+            task_ready,
         })
     }
 

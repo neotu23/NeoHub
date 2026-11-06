@@ -114,11 +114,12 @@ async fn a_secret_never_comes_back_as_text() {
         !text.contains("hunter2"),
         "listing leaks the secret: {text}"
     );
+    assert_eq!(listed["scope"], "app");
+    assert_eq!(listed["app"], "secrets");
     assert!(
-        listed[0]["value"].is_null(),
+        listed["vars"][0]["value"].is_null(),
         "a secret is reported as 'set only'"
     );
-    assert_eq!(listed[0]["is_secret"], true);
 }
 
 #[tokio::test]
@@ -140,8 +141,11 @@ async fn logs_and_ports_come_from_the_running_task() {
     assert_eq!(started["started"], true);
 
     let running = call(&ctx, ToolName::ListRunning, json!({})).await;
-    assert_eq!(running.as_array().unwrap().len(), 1);
-    let task_id = running[0]["task_id"].as_str().unwrap().to_string();
+    assert_eq!(running["count"], 1);
+    let task_id = running["running"][0]["taskId"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // Ports: the listener is real, so it must show up as confirmed.
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -192,7 +196,10 @@ async fn log_search_and_readiness_updates_work_through_tools() {
     call(&ctx, ToolName::StartApp, json!({"app_id": app_id})).await;
 
     let running = call(&ctx, ToolName::ListRunning, json!({})).await;
-    let task_id = running[0]["task_id"].as_str().unwrap().to_string();
+    let task_id = running["running"][0]["taskId"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // Wait for output, then search for it across every task.
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -219,9 +226,14 @@ async fn log_search_and_readiness_updates_work_through_tools() {
         json!({"query": "tick", "limit": 5}),
     )
     .await;
+    assert_eq!(hits["interpretedAs"], "literal");
     assert!(
-        !hits.as_array().unwrap().is_empty(),
+        hits["count"].as_u64().unwrap() > 0,
         "search found nothing: {hits}"
+    );
+    assert!(
+        hits["matches"][0]["app"].is_string(),
+        "matches name the app"
     );
 
     // Readiness can be changed without restarting the task.

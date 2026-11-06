@@ -20,4 +20,7 @@ pub struct CoreSnapshot {
     pub task_stats: BTreeMap<neohub_domain::TaskId, StatsSample>,
     /// Latest port picture per running task.
     pub task_ports: BTreeMap<neohub_domain::TaskId, PortSample>,
+    /// Readiness verdict per task. Absent means "no probe has reported anything yet", which
+    /// clients render as `null` — an idle task must not look verified.
+    pub task_ready: BTreeMap<neohub_domain::TaskId, bool>,
 }
