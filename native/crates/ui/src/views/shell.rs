@@ -4,6 +4,7 @@
 //! view model and never blocks — commands go to the core over a background Tokio runtime and
 //! results come back as events, which the pump applies before the next frame.
 
+use crate::state::env_editor::{EnvEditor, ScopeTab, effective, scope_for};
 use crate::state::session::{Session, SessionStore};
 use crate::state::settings_form::{NumberField, SettingsForm, pending_native_fields};
 use crate::state::store::UiStore;
@@ -20,6 +21,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// One environment-variable load/save result: which scope, and its rows.
+type EnvUpdate = (
+    neohub_core::service::EnvScope,
+    Vec<neohub_core::service::EnvVarView>,
+);
+
 /// Messages from the core to the window: streamed events plus command replies.
 enum HostUpdate {
     Event(CoreEvent),
@@ -30,6 +37,11 @@ enum HostUpdate {
     TaskError(String),
     SettingsSaved(Box<neohub_domain::Settings>),
     SettingsError(String),
+    EnvVars(
+        neohub_core::service::EnvScope,
+        Vec<neohub_core::service::EnvVarView>,
+    ),
+    EnvError(String),
     Error(String),
 }
 
@@ -45,6 +57,8 @@ pub struct HostBridge {
     last_save: Mutex<(Option<neohub_domain::Task>, Option<String>)>,
     /// Outcome of the last settings save, picked up by the settings panel.
     last_settings: Mutex<(Option<neohub_domain::Settings>, Option<String>)>,
+    /// Environment-variable loads/saves waiting to be folded into the editor.
+    last_env: Mutex<(Vec<EnvUpdate>, Option<String>)>,
     session_store: SessionStore,
 }
 
@@ -83,6 +97,7 @@ impl HostBridge {
             reply_sink,
             last_save: Mutex::new((None, None)),
             last_settings: Mutex::new((None, None)),
+            last_env: Mutex::new((Vec::new(), None)),
             session_store,
         });
         bridge.refresh_snapshot();
@@ -161,6 +176,49 @@ impl HostBridge {
                 Ok(CoreReply::Task(task)) => HostUpdate::TaskSaved(task),
                 Ok(other) => HostUpdate::TaskError(format!("unexpected save reply: {other:?}")),
                 Err(err) => HostUpdate::TaskError(err.to_string()),
+            };
+            let _ = sink.send(message);
+        });
+    }
+
+    /// Load one scope's environment variables.
+    pub fn load_env_vars(&self, scope: neohub_core::service::EnvScope) {
+        let handle = self.handle.clone();
+        let sink = self.reply_sink.clone();
+        self.runtime.spawn(async move {
+            let reply = handle
+                .request(CoreCommand::ListEnvVars {
+                    scope: scope.clone(),
+                })
+                .await;
+            let message = match reply {
+                Ok(CoreReply::EnvVars(rows)) => HostUpdate::EnvVars(scope, rows),
+                Ok(_) => HostUpdate::EnvError("unexpected env reply".into()),
+                Err(err) => HostUpdate::EnvError(err.to_string()),
+            };
+            let _ = sink.send(message);
+        });
+    }
+
+    /// Persist one scope's variables; masked rows arrive as `None` and are kept as-is.
+    pub fn save_env_vars(
+        &self,
+        scope: neohub_core::service::EnvScope,
+        vars: Vec<neohub_core::service::EnvVarInput>,
+    ) {
+        let handle = self.handle.clone();
+        let sink = self.reply_sink.clone();
+        self.runtime.spawn(async move {
+            let reply = handle
+                .request(CoreCommand::SetEnvVars {
+                    scope: scope.clone(),
+                    vars,
+                })
+                .await;
+            let message = match reply {
+                Ok(CoreReply::EnvVars(rows)) => HostUpdate::EnvVars(scope, rows),
+                Ok(_) => HostUpdate::EnvError("unexpected env reply".into()),
+                Err(err) => HostUpdate::EnvError(err.to_string()),
             };
             let _ = sink.send(message);
         });
@@ -277,6 +335,8 @@ impl HostBridge {
         let mut save_error: Option<String> = None;
         let mut saved_settings_out: Option<neohub_domain::Settings> = None;
         let mut settings_error_out: Option<String> = None;
+        let mut env_updates_out: Vec<EnvUpdate> = Vec::new();
+        let mut env_error_out: Option<String> = None;
 
         {
             let mut store = self.store.lock().expect("store lock");
@@ -321,6 +381,14 @@ impl HostBridge {
                         settings_error_out = Some(message);
                         changed = true;
                     }
+                    HostUpdate::EnvVars(scope, rows) => {
+                        env_updates_out.push((scope, rows));
+                        changed = true;
+                    }
+                    HostUpdate::EnvError(message) => {
+                        env_error_out = Some(message);
+                        changed = true;
+                    }
                     HostUpdate::Error(message) => {
                         store.set_import_error(message);
                         changed = true;
@@ -338,6 +406,11 @@ impl HostBridge {
             && let Ok(mut guard) = self.last_save.lock()
         {
             *guard = (saved_task, save_error);
+        }
+        if (!env_updates_out.is_empty() || env_error_out.is_some())
+            && let Ok(mut guard) = self.last_env.lock()
+        {
+            *guard = (std::mem::take(&mut env_updates_out), env_error_out);
         }
         if (saved_settings_out.is_some() || settings_error_out.is_some())
             && let Ok(mut guard) = self.last_settings.lock()
@@ -358,6 +431,12 @@ impl HostBridge {
     /// Take the last save outcome (task or error), clearing it.
     pub fn take_save_outcome(&self) -> (Option<neohub_domain::Task>, Option<String>) {
         let mut guard = self.last_save.lock().expect("save outcome");
+        std::mem::take(&mut *guard)
+    }
+
+    /// Take environment-variable updates (scope + rows) and any error, clearing them.
+    pub fn take_env_updates(&self) -> (Vec<EnvUpdate>, Option<String>) {
+        let mut guard = self.last_env.lock().expect("env outcome");
         std::mem::take(&mut *guard)
     }
 
@@ -390,6 +469,16 @@ pub struct ShellView {
     /// Open settings panel, if any.
     settings: Option<SettingsForm>,
     settings_focus: FocusHandle,
+    /// Open environment editor, if any.
+    env: Option<EnvEditor>,
+    env_tab: ScopeTab,
+    /// Row being edited in the env panel: (index, editing_key).
+    env_editing: Option<(usize, bool)>,
+    /// Buffer for the row currently being edited (used once inline cell editing lands).
+    #[allow(dead_code)]
+    env_text: TextField,
+    env_paste: TextField,
+    env_focus: FocusHandle,
 }
 
 impl ShellView {
@@ -397,6 +486,7 @@ impl ShellView {
         let search_focus = cx.focus_handle();
         let editor_focus = cx.focus_handle();
         let settings_focus = cx.focus_handle();
+        let env_focus = cx.focus_handle();
         ShellView {
             bridge,
             search: TextField::new(""),
@@ -406,6 +496,12 @@ impl ShellView {
             editor_focus,
             settings: None,
             settings_focus,
+            env: None,
+            env_tab: ScopeTab::Global,
+            env_editing: None,
+            env_text: TextField::new(""),
+            env_paste: TextField::new(""),
+            env_focus,
         }
     }
 
@@ -495,6 +591,19 @@ impl Render for ShellView {
             } else if let Some(message) = save_error.as_ref() {
                 editor.apply_core_error(message);
             }
+        }
+
+        // Fold env loads/saves into the open editor.
+        let (env_updates, env_error) = self.bridge.take_env_updates();
+        for (scope, rows) in env_updates {
+            if let Some(editor) = self.env.as_mut()
+                && editor.scope() == &scope
+            {
+                editor.ack(rows);
+            }
+        }
+        if let (Some(message), Some(_)) = (env_error, self.env.as_ref()) {
+            eprintln!("[ui] env editor: {message}");
         }
 
         // Fold a completed settings save back into the open panel.
@@ -1305,6 +1414,30 @@ impl Render for ShellView {
                                 }
                             })
                     });
+                    actions = actions.child({
+                        let bridge = self.bridge.clone();
+                        let entity = cx.entity().downgrade();
+                        let app_id = app.id.clone();
+                        div()
+                            .id("detail-env")
+                            .px(px(metrics::PAD_3))
+                            .py(px(metrics::GAP_1))
+                            .rounded(px(metrics::RADIUS_MD))
+                            .bg(palette.bg_elevated)
+                            .text_size(px(metrics::TEXT_SM))
+                            .cursor_pointer()
+                            .child("环境变量")
+                            .on_click(move |_, _, cx| {
+                                let scope = neohub_core::service::EnvScope::Global;
+                                bridge.load_env_vars(scope.clone());
+                                let _ = &app_id;
+                                let _ = entity.update(cx, |this, cx| {
+                                    this.env_tab = ScopeTab::Global;
+                                    this.env = Some(EnvEditor::new(scope, Vec::new()));
+                                    cx.notify();
+                                });
+                            })
+                    });
                     actions = actions.child(
                         div()
                             .id("detail-restart")
@@ -1456,6 +1589,325 @@ impl Render for ShellView {
                         );
                     }
                     main = main.child(row);
+
+                    // Environment editor panel.
+                    if let Some(editor) = self.env.as_mut() {
+                        let tab = self.env_tab;
+                        let rows = editor.rows().to_vec();
+                        let mut panel =
+                            div()
+                                .id("env-editor")
+                                .flex()
+                                .flex_col()
+                                .gap(px(metrics::GAP_1))
+                                .p(px(metrics::PAD_3))
+                                .rounded(px(metrics::RADIUS_LG))
+                                .border_1()
+                                .border_color(palette.border_strong)
+                                .bg(palette.bg_surface)
+                                .child(div().flex().items_center().justify_between().child(
+                                    div().text_size(px(metrics::TEXT_SM)).child(
+                                        if editor.is_dirty() {
+                                            "环境变量（未保存）"
+                                        } else {
+                                            "环境变量"
+                                        },
+                                    ),
+                                ));
+
+                        // Scope tabs.
+                        let mut tabs = div().flex().gap(px(metrics::GAP_1));
+                        for scope_tab in [ScopeTab::Global, ScopeTab::App, ScopeTab::Task] {
+                            let bridge = self.bridge.clone();
+                            let entity = cx.entity().downgrade();
+                            let app_id = app.id.clone();
+                            let task_id = current.as_ref().map(|task| task.id.clone());
+                            let active = tab == scope_tab;
+                            let scope = scope_for(scope_tab, Some(&app_id), task_id.as_ref());
+                            tabs = tabs.child(
+                                div()
+                                    .id(format!("env-tab-{:?}", scope_tab))
+                                    .px(px(metrics::PAD_2))
+                                    .py(px(1.0))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .bg(if active {
+                                        palette.accent
+                                    } else {
+                                        palette.bg_elevated
+                                    })
+                                    .text_color(if active {
+                                        palette.accent_fg
+                                    } else {
+                                        palette.fg_muted
+                                    })
+                                    .text_size(px(metrics::TEXT_XS))
+                                    .cursor_pointer()
+                                    .child(scope_tab.label())
+                                    .on_click(move |_, _, cx| {
+                                        if let Some(scope) = scope.clone() {
+                                            bridge.load_env_vars(scope.clone());
+                                            let _ = entity.update(cx, |this, cx| {
+                                                this.env_tab = scope_tab;
+                                                this.env = Some(EnvEditor::new(scope, Vec::new()));
+                                                this.env_editing = None;
+                                                cx.notify();
+                                            });
+                                        }
+                                    }),
+                            );
+                        }
+                        panel = panel.child(tabs);
+
+                        for (index, row) in rows.iter().enumerate() {
+                            let toggle = cx.entity().downgrade();
+                            let secret = cx.entity().downgrade();
+                            let remove = cx.entity().downgrade();
+                            panel = panel.child(
+                                div()
+                                    .id(format!("env-row-{index}"))
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(metrics::GAP_2))
+                                    .px(px(metrics::PAD_2))
+                                    .py(px(1.0))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .bg(if row.enabled {
+                                        palette.bg_base
+                                    } else {
+                                        palette.bg_surface
+                                    })
+                                    .text_size(px(metrics::TEXT_XS))
+                                    .child(
+                                        div()
+                                            .w(px(140.0))
+                                            .text_color(palette.fg)
+                                            .child(if row.key.is_empty() {
+                                                "(新变量)".to_string()
+                                            } else {
+                                                row.key.clone()
+                                            }),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w(px(120.0))
+                                            .text_color(if row.enabled {
+                                                palette.fg_muted
+                                            } else {
+                                                palette.fg_subtle
+                                            })
+                                            .child(row.value.display()),
+                                    )
+                                    .child(
+                                        div()
+                                            .id(format!("env-toggle-{index}"))
+                                            .px(px(metrics::GAP_1))
+                                            .rounded(px(metrics::RADIUS_MD))
+                                            .bg(palette.bg_elevated)
+                                            .cursor_pointer()
+                                            .child(if row.enabled { "启用" } else { "停用" })
+                                            .on_click(move |_, _, cx| {
+                                                let _ = toggle.update(cx, |this, cx| {
+                                                    if let Some(editor) = this.env.as_mut() {
+                                                        editor.toggle_enabled(index);
+                                                    }
+                                                    cx.notify();
+                                                });
+                                            }),
+                                    )
+                                    .child(
+                                        div()
+                                            .id(format!("env-secret-{index}"))
+                                            .px(px(metrics::GAP_1))
+                                            .rounded(px(metrics::RADIUS_MD))
+                                            .bg(palette.bg_elevated)
+                                            .cursor_pointer()
+                                            .child(if matches!(
+                                                row.value,
+                                                crate::state::env_editor::RowValue::Masked
+                                                    | crate::state::env_editor::RowValue::NewSecret(_)
+                                            ) {
+                                                "秘密"
+                                            } else {
+                                                "明文"
+                                            })
+                                            .on_click(move |_, _, cx| {
+                                                let _ = secret.update(cx, |this, cx| {
+                                                    if let Some(editor) = this.env.as_mut() {
+                                                        editor.toggle_secret(index);
+                                                    }
+                                                    cx.notify();
+                                                });
+                                            }),
+                                    )
+                                    .child(
+                                        div()
+                                            .id(format!("env-remove-{index}"))
+                                            .px(px(metrics::GAP_1))
+                                            .rounded(px(metrics::RADIUS_MD))
+                                            .bg(palette.danger_bg)
+                                            .text_color(palette.danger_fg)
+                                            .cursor_pointer()
+                                            .child("删除")
+                                            .on_click(move |_, _, cx| {
+                                                let _ = remove.update(cx, |this, cx| {
+                                                    if let Some(editor) = this.env.as_mut() {
+                                                        editor.remove_row(index);
+                                                    }
+                                                    cx.notify();
+                                                });
+                                            }),
+                                    ),
+                            );
+                        }
+
+                        panel = panel.child(
+                            div()
+                                .flex()
+                                .gap(px(metrics::GAP_2))
+                                .text_size(px(metrics::TEXT_XS))
+                                .text_color(palette.fg_subtle)
+                                .child("粘贴 .env 片段后点击「应用粘贴」；掩码行保存时不回写。"),
+                        );
+
+                        let mut paste_row = div().flex().gap(px(metrics::GAP_2)).items_center();
+                        {
+                            let entity = cx.entity().downgrade();
+                            let focus = self.env_focus.clone();
+                            paste_row = paste_row.child(
+                                div()
+                                    .id("env-paste")
+                                    .track_focus(&self.env_focus)
+                                    .px(px(metrics::PAD_2))
+                                    .py(px(1.0))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .border_1()
+                                    .border_color(palette.border)
+                                    .bg(palette.bg_base)
+                                    .text_size(px(metrics::TEXT_XS))
+                                    .cursor_pointer()
+                                    .child(if self.env_paste.text().is_empty() {
+                                        "KEY=VALUE KEY2=VALUE2".to_string()
+                                    } else {
+                                        self.env_paste.text().to_string()
+                                    })
+                                    .on_click(move |_, window, cx| {
+                                        window.focus(&focus, cx);
+                                        let _ = entity.update(cx, |_, cx| cx.notify());
+                                    }),
+                            );
+                        }
+                        {
+                            let entity = cx.entity().downgrade();
+                            paste_row = paste_row.child(
+                                div()
+                                    .id("env-paste-apply")
+                                    .px(px(metrics::PAD_2))
+                                    .py(px(1.0))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .bg(palette.bg_elevated)
+                                    .text_size(px(metrics::TEXT_XS))
+                                    .cursor_pointer()
+                                    .child("应用粘贴")
+                                    .on_click(move |_, _, cx| {
+                                        let _ = entity.update(cx, |this, cx| {
+                                            let blob = this.env_paste.text().to_string();
+                                            if let Some(editor) = this.env.as_mut() {
+                                                editor.paste_dotenv(&blob);
+                                            }
+                                            this.env_paste.clear();
+                                            cx.notify();
+                                        });
+                                    }),
+                            );
+                        }
+                        panel = panel.child(paste_row);
+
+                        let mut buttons = div().flex().gap(px(metrics::GAP_2));
+                        {
+                            let bridge = self.bridge.clone();
+                            let entity = cx.entity().downgrade();
+                            buttons = buttons.child(
+                                div()
+                                    .id("env-add")
+                                    .px(px(metrics::PAD_3))
+                                    .py(px(metrics::GAP_1))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .bg(palette.bg_elevated)
+                                    .text_size(px(metrics::TEXT_SM))
+                                    .cursor_pointer()
+                                    .child("新增变量")
+                                    .on_click(move |_, _, cx| {
+                                        let _ = entity.update(cx, |this, cx| {
+                                            if let Some(editor) = this.env.as_mut() {
+                                                editor.add_row();
+                                            }
+                                            cx.notify();
+                                        });
+                                    }),
+                            );
+                            let _ = &bridge;
+                        }
+                        {
+                            let bridge = self.bridge.clone();
+                            let entity = cx.entity().downgrade();
+                            buttons = buttons.child(
+                                div()
+                                    .id("env-save")
+                                    .px(px(metrics::PAD_3))
+                                    .py(px(metrics::GAP_1))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .bg(palette.success_strong)
+                                    .text_color(palette.accent_fg)
+                                    .text_size(px(metrics::TEXT_SM))
+                                    .cursor_pointer()
+                                    .child("保存")
+                                    .on_click(move |_, _, cx| {
+                                        let _ = entity.update(cx, |this, cx| {
+                                            if let Some(editor) = this.env.as_ref() {
+                                                bridge.save_env_vars(
+                                                    editor.scope().clone(),
+                                                    editor.to_inputs(),
+                                                );
+                                            }
+                                            cx.notify();
+                                        });
+                                    }),
+                            );
+                        }
+                        {
+                            let entity = cx.entity().downgrade();
+                            buttons = buttons.child(
+                                div()
+                                    .id("env-close")
+                                    .px(px(metrics::PAD_3))
+                                    .py(px(metrics::GAP_1))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .bg(palette.bg_elevated)
+                                    .text_size(px(metrics::TEXT_SM))
+                                    .cursor_pointer()
+                                    .child("关闭")
+                                    .on_click(move |_, _, cx| {
+                                        let _ = entity.update(cx, |this, cx| {
+                                            this.env = None;
+                                            cx.notify();
+                                        });
+                                    }),
+                            );
+                        }
+                        panel = panel.child(buttons);
+                        panel =
+                            panel.on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                let characters = event.keystroke.key_char.as_deref();
+                                if this.env_paste.apply_key(&event.keystroke.key, characters)
+                                    == KeyOutcome::Changed
+                                {
+                                    cx.notify();
+                                }
+                            }));
+                        main = main.child(panel);
+                        let _ = effective;
+                    }
 
                     // Task editor panel.
                     if let Some(editor) = self.editor.as_mut() {

@@ -410,7 +410,7 @@
        上述 `import_flow` 测试从命令层验证了同一链路
 
 ### 阶段 10：项目详情、任务编辑、环境变量与设置
-- 状态：**开发中**（详情页、任务编辑器、设置面板、环境变量编辑器（模型+命令）完成；env 视图与 db danger zone 待做）
+- 状态：**开发中**（详情页、任务编辑器、设置面板、环境变量编辑器（模型+命令+视图）完成；行内编辑与 db danger zone 待做）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: add edit drafts, save barrier and locales`
 - 实际修改文件：新增 `native/crates/ui/src/state/edit_session.rs`、
@@ -543,5 +543,19 @@
   - 未解决问题：
     1. 环境变量编辑器的**视图**尚未渲染（模型与命令已就绪）
     2. 已存储的旧 `enc1:` 密文仍会在启动时阻止任务（阶段 13 迁移）
+    3. db danger zone（导出/重置）→ 阶段 15
+
+- 第九批完成（2026-11-07T01:25Z–01:45Z UTC）：
+  - 环境变量面板渲染进详情页：三层 tab（全局/应用/任务）切换即加载对应作用域；
+    行显示 key、值或 `••••••` 掩码、启用状态；每行三个小按钮（启用/停用、明文/秘密、删除）；
+    「新增变量」「应用粘贴」（把 `KEY=VALUE …` 粘进列表，掩码/秘密语义保持）、保存、关闭
+  - `HostBridge::{load_env_vars, save_env_vars}` + `HostUpdate::{EnvVars, EnvError}`，
+    结果按作用域回填到打开的编辑器（`EnvEditor::ack`）
+  - 验证：`cargo test --workspace --locked` → **311 passed / 0 failed**；clippy **0 warnings**；
+    `cargo fmt --all`；实机启动 7 s 无 stderr
+  - 未解决问题：
+    1. **行内值/key 编辑**尚未接（点击单元格进入编辑需要一个额外的焦点状态机；
+       当前只能通过「应用粘贴」或新增空行再粘贴来改值）
+    2. 覆盖来源预览 `effective()` 已在模型里可用，但面板上还没渲染「哪一层生效」列表
     3. db danger zone（导出/重置）→ 阶段 15
 
