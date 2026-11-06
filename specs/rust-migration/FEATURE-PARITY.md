@@ -67,9 +67,9 @@
 | E2 | `.env*` 文件优先级 `.env` → `.env.development` → `.env.local` → `.env.development.local` | `src/shared/dotenv.ts` | 已验证（EnvLayering） | `core/src/environment/dotenv.rs` | 已验证（`.env`→`.env.development`→`.env.local`→`.env.development.local`，多行/引号/转义有测试） |
 | E3 | 进程控制键保护：项目 `.env` 不能覆盖 `PATH/NODE_OPTIONS/NODE_PATH/DYLD_*/LD_*` | `EnvBuilder.ts` | 已验证 | `core/src/environment/env_builder.rs` | 已验证（`PATH/NODE_OPTIONS/NODE_PATH/DYLD_*/LD_*` 被项目文件丢弃；UI 变量仍可覆盖） |
 | E4 | 强制 `FORCE_COLOR=1`、`TERM=xterm-256color` | `EnvBuilder.ts` | 已验证 | `core/src/environment/env_builder.rs` | 已验证（`FORCE_COLOR=1`、`TERM=xterm-256color` 强制写入） |
-| E5 | 秘密值加密存储（Electron `safeStorage` → `enc1:` 前缀） | `EnvStore.ts` | 部分（依赖 Keychain，未在测试中断言解密） | `storage/src/secrets.rs` + `platform-macos/src/keychain.rs` | 已验证（`nhk1:` + AES-256-GCM，master key 在 login Keychain；真实 round-trip 实测通过；启动来源头待接） |
+| E5 | 秘密值加密存储（Electron `safeStorage` → `enc1:` 前缀） | `EnvStore.ts` | 部分（依赖 Keychain，未在测试中断言解密） | `storage/src/secrets.rs` + `platform-macos/src/keychain.rs`| 已验证（`nhk1:` + AES-256-GCM，master key 在 login Keychain；写入时加密、读取时只回 `set 状态`；集成测试断言库里无明文；启动来源头待接） |
 | E6 | 密钥不可用时报 `SecretUnavailable` 并阻止受影响任务启动 | 计划要求（旧版行为需在阶段 4 复核） | **待复核** | `core/src/environment/` | 部分（`read_secret_value` 明确拒绝 `enc1:` 并报告 Locked/Corrupt；启动流程拦截待接） |
-| E7 | 环境变量编辑 UI：三 tab、启用开关、秘密遮挡、备注、批量粘贴、合并预览 | `EnvEditor.tsx` | 部分（截图 missing，见 BASELINE §5） | `ui/src/views/env_editor.rs` | 未开始 |
+| E7 | 环境变量编辑 UI：三 tab、启用开关、秘密遮挡、备注、批量粘贴、合并预览 | `EnvEditor.tsx` | 部分（截图 missing，见 BASELINE §5） | `ui/src/views/env_editor.rs`| 部分（编辑器模型完成：三层作用域、掩码不回写、秘密切换、粘贴 .env、覆盖来源预览；视图渲染待接） |
 | E8 | `.env` 文件变化推送 `env:fileChanged` + 横幅 | `EnvFileWatcher.ts` | 部分 | `core/src/watch/environment.rs`| 已验证（notify 非递归监听 `.env*`，去抖 250 ms，非 `.env` 文件不产生事件） |
 
 ## 6. Node 环境与 PATH

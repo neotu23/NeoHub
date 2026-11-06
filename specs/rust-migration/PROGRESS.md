@@ -410,7 +410,7 @@
        上述 `import_flow` 测试从命令层验证了同一链路
 
 ### 阶段 10：项目详情、任务编辑、环境变量与设置
-- 状态：**开发中**（详情页、任务编辑器、设置面板完成；环境变量编辑器与 db danger zone 待做）
+- 状态：**开发中**（详情页、任务编辑器、设置面板、环境变量编辑器（模型+命令）完成；env 视图与 db danger zone 待做）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: add edit drafts, save barrier and locales`
 - 实际修改文件：新增 `native/crates/ui/src/state/edit_session.rs`、
@@ -528,4 +528,20 @@
     1. 设置面板的点击路径（开关/步进/保存）在实机上仍需人工确认一次（本会话无辅助功能权限）
     2. db danger zone（导出/重置）需要平台对话框与 WAL 安全导出 → 阶段 15
     3. 环境变量编辑器（Global/App/Task 三层 + 秘密遮挡 + 掩码不回写）仍待做
+
+- 第八批完成（2026-11-07T00:55Z–01:20Z UTC）：
+  - core：`ListEnvVars`/`SetEnvVars` 命令 + `EnvScope`/`EnvVarView`/`EnvVarInput`
+    - 读取时**秘密只回报"已设置"**（`value: None`），核心从不把秘密文本发给视图
+    - 写入时 `value: None` 表示"保留原值"，因此 UI 不可能把掩码字符当成密码写回
+    - 秘密写入经 `SecretStore.encrypt`（`nhk1:` 前缀），数据库里没有明文
+  - ui：`EnvEditor`（三层作用域、掩码/明文/新秘密三态、启用开关、备注、粘贴 `.env` 合并、
+    `effective()` 覆盖来源预览、`scope_for(tab)`）
+  - 验证：`cargo test -p neohub-ui --lib env_editor` → **9 passed**（含掩码不回写回归测试）；
+    `cargo test -p neohub-core --test env_cmd` → **3 passed**
+    （库内为 `nhk1:` 密文且不含明文；掩码重存不改动密文；三层各自独立）；
+    `cargo test --workspace --locked` → **311 passed / 0 failed**；clippy **0 warnings**
+  - 未解决问题：
+    1. 环境变量编辑器的**视图**尚未渲染（模型与命令已就绪）
+    2. 已存储的旧 `enc1:` 密文仍会在启动时阻止任务（阶段 13 迁移）
+    3. db danger zone（导出/重置）→ 阶段 15
 

@@ -664,6 +664,92 @@ impl CoreService {
         })
     }
 
+    /// Read one scope's environment variables, masking secrets.
+    pub fn list_env_vars(&self, scope: &EnvScope) -> CoreResult<Vec<EnvVarView>> {
+        let vars = self.with_storage(|storage| {
+            let env = storage.env_store();
+            Ok(match scope {
+                EnvScope::Global => env.list_global()?,
+                EnvScope::App(app_id) => env.list_app(app_id)?,
+                EnvScope::Task(task_id) => env.list_task(task_id)?,
+            })
+        })?;
+        Ok(vars
+            .into_iter()
+            .map(|var| EnvVarView {
+                key: var.key,
+                // A secret never leaves the core as text; the UI only learns that it is set.
+                value: if var.is_secret { None } else { Some(var.value) },
+                is_secret: var.is_secret,
+                enabled: var.enabled,
+                note: var.note,
+            })
+            .collect())
+    }
+
+    /// Replace one scope's variables. A `None` value keeps the stored secret as-is, which is
+    /// what makes it impossible for the UI to write a mask character back as a password.
+    pub fn set_env_vars(&self, scope: &EnvScope, inputs: Vec<EnvVarInput>) -> CoreResult<()> {
+        let now = neohub_storage::db::now_ms();
+        self.with_storage(|storage| {
+            let existing = {
+                let env = storage.env_store();
+                match scope {
+                    EnvScope::Global => env.list_global()?,
+                    EnvScope::App(app_id) => env.list_app(app_id)?,
+                    EnvScope::Task(task_id) => env.list_task(task_id)?,
+                }
+            };
+            let mut vars: Vec<neohub_domain::EnvVar> = Vec::new();
+            for input in inputs {
+                if input.key.trim().is_empty() {
+                    continue;
+                }
+                let previous = existing.iter().find(|var| var.key == input.key);
+                let value = match input.value {
+                    Some(value) if input.is_secret => {
+                        // Encrypt on the way in; the store never holds a plaintext secret.
+                        self.secrets.encrypt(&value).map_err(|err| {
+                            DomainError::SecretUnavailable {
+                                key: format!("{} ({err})", input.key),
+                            }
+                        })?
+                    }
+                    Some(value) => value,
+                    None => match previous {
+                        Some(previous) => previous.value.clone(),
+                        None => continue, // nothing stored and nothing typed: skip the row
+                    },
+                };
+                let mut var = neohub_storage::env::new_var(
+                    match scope {
+                        EnvScope::Global => None,
+                        EnvScope::App(_) | EnvScope::Task(_) => scope.app_id(),
+                    },
+                    match scope {
+                        EnvScope::Task(task_id) => Some(task_id.clone()),
+                        _ => None,
+                    },
+                    &input.key,
+                    &value,
+                    input.is_secret,
+                );
+                var.enabled = input.enabled;
+                var.note = input.note;
+                vars.push(var);
+            }
+            let mut env = storage.env_store();
+            match scope {
+                EnvScope::Global => env.set_global(&vars, now)?,
+                EnvScope::App(app_id) => env.set_app(app_id, &vars, now)?,
+                EnvScope::Task(task_id) => {
+                    env.set_task(scope.app_id().as_ref(), task_id, &vars, now)?
+                }
+            }
+            Ok(())
+        })
+    }
+
     /// Read the current settings.
     pub fn settings(&self) -> CoreResult<neohub_domain::Settings> {
         self.with_storage(|storage| Ok(storage.settings().load()?))
@@ -970,6 +1056,46 @@ impl CoreService {
     }
 }
 
+/// Which scope an env operation applies to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EnvScope {
+    Global,
+    App(AppId),
+    Task(TaskId),
+}
+
+impl EnvScope {
+    /// The owning app, when the scope has one (task scopes carry it for cascade purposes).
+    pub fn app_id(&self) -> Option<AppId> {
+        match self {
+            EnvScope::Global => None,
+            EnvScope::App(app_id) => Some(app_id.clone()),
+            EnvScope::Task(_) => None,
+        }
+    }
+}
+
+/// One row as the UI sees it: secrets are reported as "set" without their value.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvVarView {
+    pub key: String,
+    /// `None` for a secret: the core never sends secret text to a view.
+    pub value: Option<String>,
+    pub is_secret: bool,
+    pub enabled: bool,
+    pub note: Option<String>,
+}
+
+/// One row to write. `value: None` means "keep whatever is stored".
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvVarInput {
+    pub key: String,
+    pub value: Option<String>,
+    pub is_secret: bool,
+    pub enabled: bool,
+    pub note: Option<String>,
+}
+
 #[derive(Default)]
 struct EnvVars {
     global: Vec<neohub_domain::EnvVar>,
@@ -1010,6 +1136,14 @@ impl CoreHandle {
     pub async fn request(&self, command: CoreCommand) -> CoreResult<CoreReply> {
         match command {
             CoreCommand::GetSnapshot => Ok(CoreReply::Snapshot(Box::new(self.service.snapshot()?))),
+            CoreCommand::ListEnvVars { scope } => {
+                Ok(CoreReply::EnvVars(self.service.list_env_vars(&scope)?))
+            }
+            CoreCommand::SetEnvVars { scope, vars } => {
+                self.service.set_env_vars(&scope, vars)?;
+                let rows = self.service.list_env_vars(&scope)?;
+                Ok(CoreReply::EnvVars(rows))
+            }
             CoreCommand::GetSettings => {
                 let settings = self.service.settings()?;
                 Ok(CoreReply::Settings(Box::new(settings)))

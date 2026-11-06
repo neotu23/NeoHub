@@ -9,6 +9,15 @@ use std::path::PathBuf;
 #[derive(Clone, Debug)]
 pub enum CoreCommand {
     GetSnapshot,
+    /// Environment variables for one scope.
+    ListEnvVars {
+        scope: crate::service::EnvScope,
+    },
+    /// Replace one scope's variables. `value: None` keeps the stored secret untouched.
+    SetEnvVars {
+        scope: crate::service::EnvScope,
+        vars: Vec<crate::service::EnvVarInput>,
+    },
     /// Current settings.
     GetSettings,
     /// Patch settings; only the named fields change, unknown fields are rejected by the type.
@@ -100,6 +109,7 @@ pub enum CoreReply {
     App(Box<App>),
     Task(Box<Task>),
     Settings(Box<neohub_domain::Settings>),
+    EnvVars(Vec<crate::service::EnvVarView>),
     RunHistory(Vec<neohub_domain::RunHistoryRow>),
     LogBootstrap(LogSubscriptionOutcome),
     LogMatches(Vec<(TaskId, LineMatch)>),
