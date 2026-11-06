@@ -786,7 +786,7 @@ fn state_label(state: ProcessState) -> &'static str {
 
 impl ShellView {
     /// Apply a shortcut. Kept as one method so the bindings and the behaviour are adjacent.
-    fn on_shortcut(&mut self, action: Shortcut, cx: &mut Context<Self>) {
+    fn on_shortcut(&mut self, action: Shortcut, window: &mut Window, cx: &mut Context<Self>) {
         match action {
             Shortcut::Settings => {
                 let settings_now = self.bridge.store.lock().expect("store lock").settings();
@@ -797,8 +797,9 @@ impl ShellView {
                 self.bridge.begin_import(dir);
             }
             Shortcut::Filter => {
-                // Deferred focus: the handle is stored, the next frame honours it.
-                self.search_focus = self.search_focus.clone();
+                // Focus has to be moved on the window, not just remembered: the filter row
+                // tracks this handle, so this is what puts the caret in the box.
+                window.focus(&self.search_focus, cx);
             }
             Shortcut::GlobalSearch => {
                 self.bridge
@@ -3274,20 +3275,20 @@ impl Render for ShellView {
             .bg(palette.bg_base)
             .child(sidebar)
             .child(main)
-            .on_action(cx.listener(|this, _: &OpenSettings, _, cx| {
-                this.on_shortcut(Shortcut::Settings, cx);
+            .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
+                this.on_shortcut(Shortcut::Settings, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &OpenImport, _, cx| {
-                this.on_shortcut(Shortcut::Import, cx);
+            .on_action(cx.listener(|this, _: &OpenImport, window, cx| {
+                this.on_shortcut(Shortcut::Import, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &FocusFilter, _, cx| {
-                this.on_shortcut(Shortcut::Filter, cx);
+            .on_action(cx.listener(|this, _: &FocusFilter, window, cx| {
+                this.on_shortcut(Shortcut::Filter, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &GlobalSearch, _, cx| {
-                this.on_shortcut(Shortcut::GlobalSearch, cx);
+            .on_action(cx.listener(|this, _: &GlobalSearch, window, cx| {
+                this.on_shortcut(Shortcut::GlobalSearch, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &RestartSelected, _, cx| {
-                this.on_shortcut(Shortcut::RestartSelected, cx);
+            .on_action(cx.listener(|this, _: &RestartSelected, window, cx| {
+                this.on_shortcut(Shortcut::RestartSelected, window, cx);
             }))
     }
 }

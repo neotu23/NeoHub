@@ -1101,3 +1101,24 @@
   3. `⌘P` 目前只"重新设置焦点句柄"，未真正把焦点移入筛选框（GPUI 的焦点需要在标签上用
      `track_focus`）；本轮先保证动作通路，焦点落在下一轮修正
 
+### S5 焦点修正 + S7 Open In（模型与启动）
+- 状态：S5 的 ⌘P 焦点**已修正**；S7 模型与启动**完成**，详情页接线待做
+- 最近提交：`feat: open a project in another app`
+- 实际修改文件：`ui/src/views/shell.rs`（`on_shortcut` 改为接收 `&mut Window`，Filter 分支真正
+  `window.focus(&search_focus)`）、新增 `platform-macos/src/open_in.rs`、`platform-macos/src/lib.rs`
+- S5 修正说明：上一版只重置了焦点句柄、没有把焦点交给窗口，等于**按了没反应**。现在调用
+  `window.focus`，而筛选框本来就 `track_focus(&self.search_focus)`，链路完整
+- S7 实现：
+  1. 五个目标（Finder/Terminal/VS Code/Cursor/Sublime），一律走 `/usr/bin/open`：
+     Finder 用 `open -R`（在父目录中**显示**），其余用 `open -a <app> <dir>`
+  2. 可用性靠**目录探测**（`/Applications` 与 `~/Applications`），不猜注册表；未安装的目标不出现在菜单
+  3. `launch` 会先检查目录存在，再以分离方式 spawn（不接管子进程输出）
+- 验证：`cargo test -p neohub-platform-macos --lib open_in` → **7 passed**
+  （Finder 用 `-R`、其他用 `-a`+app 名、含空格路径作为单个 argv、探测与文件系统一致、
+  顺序稳定、缺目录被拒、真实 `open -R` 可达）
+  `cargo test --workspace --locked` → **438 passed / 0 failed**；clippy 0
+  本机实际安装：Visual Studio Code 有，Cursor / Sublime 无 —— 探测结果因此只给三项菜单
+- 未解决问题：
+  1. 详情页/右键菜单还没挂 Open In 按钮（模型与启动已就绪）
+  2. AppKit 顶部菜单栏（NSMenu）仍未建
+
