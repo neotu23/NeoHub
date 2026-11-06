@@ -703,3 +703,30 @@
     3. Cmd+W 键位绑定
     4. 打包 `.app` 的 Finder/Dock 激活与事件循环验证 → 阶段 15
 
+### 阶段 13：旧版真实数据与密钥迁移
+- 状态：**开发中**（只读巡检、导入、原子发布、幂等/不覆盖已验证；UI 迁移向导与 `enc1:` 重录流程待做）
+- 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
+- 最近提交：`feat: import legacy databases safely`
+- 实际修改文件：新增 `native/crates/storage/src/import/{mod,legacy_db,manifest,legacy_import}.rs`、
+  `native/crates/storage/tests/migration_atomicity.rs`、`native/docs/MIGRATION.md`；
+  更新 `storage/Cargo.toml`（sha2）、`storage/src/{lib,db}.rs`
+- 验证命令与结果（2026-11-07T05:50Z–06:25Z UTC）：
+  - `cargo test -p neohub-storage --lib import` → **7 passed**
+    （巡检报告版本/行数/未知设置；未知未来迁移版本被记录；WAL 一起复制且源不变；
+    目录发现优先级；清单往返与重复来源识别；清单损坏不致致命）
+  - `cargo test -p neohub-storage --test migration_atomicity` → **6 passed**
+    （首次导入发布整库并暂停自动化；同源重复导入零新增且记为 repeat；**导入后原生改名不被重复导入覆盖**；
+    损坏 JSON 列降级为空而非崩溃；发布失败不破坏既有文件；源库导入前后字节不变）
+  - `cargo test --workspace --locked` → **374 passed / 0 failed**；clippy **0 warnings**；`cargo fmt --all`
+- 与旧版不同之处：
+  1. 导入是"巡检 → 预览 → 导入"三步，预览只含**数量与名称**，不含项目路径/密钥
+  2. 首次导入在 `.import-staging/` 建库，`integrity_check` + `foreign_key_check` 通过后
+     以**文件级 rename** 发布（目录级 rename 在目标目录已存在时会失败，已修正）
+  3. 已存在 id 一律跳过；设置项用 `INSERT OR REPLACE`（单值，旧版意图应生效）
+  4. 导入即强制 `auto_start=0`、`mcp_enabled=0`、`launch_at_login=0`，并在报告中标记
+- 未解决问题及所属阶段：
+  1. **未对真实用户数据执行导入**：计划要求启用前停止旧版、检查端口/锁占用；这属于需要用户
+     明确同意的动作，本次只交付工具与步骤（`native/docs/MIGRATION.md`）
+  2. `enc1:` 密文目前只能"原样保留 + 计数"，重录/旧版 opt-in 导出入口待做
+  3. UI 迁移向导（`ui/src/views/migration.rs`）待做
+  4. 迁移后 `migration.json` 清单尚未接入 UI 展示

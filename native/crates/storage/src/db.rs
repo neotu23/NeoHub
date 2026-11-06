@@ -143,6 +143,12 @@ impl Storage {
         crate::settings::SettingsStore::new(&self.conn)
     }
 
+    /// Consume the wrapper and return the raw connection (used by the import path, which owns
+    /// the connection for the duration of one transaction).
+    pub fn into_connection(self) -> Connection {
+        self.conn
+    }
+
     /// Flush the WAL into the main file so an export/backup taken right after is complete.
     pub fn checkpoint(&self) -> Result<()> {
         self.conn
