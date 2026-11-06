@@ -253,7 +253,8 @@ async fn log_search_and_readiness_updates_work_through_tools() {
         json!({"task_id": task_id, "kind": "log", "regex": "tick"}),
     )
     .await;
-    assert_eq!(updated["task"]["readiness"]["kind"], "log");
+    assert_eq!(updated["readiness"]["kind"], "log");
+    assert_eq!(updated["task"], "run");
     let _ = call(&ctx, ToolName::StopApp, json!({"app_id": app_id})).await;
 }
 
@@ -603,4 +604,85 @@ async fn workspace_tasks_create_one_task_per_package() {
         2,
         "detected workspaces are reported back"
     );
+}
+
+#[tokio::test]
+async fn set_readiness_validates_its_arguments_and_keeps_probes_local() {
+    let harness = Harness::new();
+    let ctx = harness.context();
+    let path = harness.project("probe");
+    let created = call(
+        &ctx,
+        ToolName::AddApp,
+        json!({"path": path, "name": "probe", "script": "dev"}),
+    )
+    .await;
+    assert_eq!(created["name"], "probe");
+
+    // Legacy arguments: app + task (by name) + kind.
+    let ok = call(
+        &ctx,
+        ToolName::SetReadiness,
+        json!({"app": "probe", "task": "dev", "kind": "port", "port": 4455}),
+    )
+    .await;
+    assert_eq!(ok["app"], "probe");
+    assert_eq!(ok["task"], "dev");
+    assert_eq!(ok["readiness"]["kind"], "port");
+    assert!(ok["note"].as_str().unwrap().contains("next start"));
+
+    // log: flags default to "i", and a broken regex is an error rather than a silent no-match.
+    let logged = call(
+        &ctx,
+        ToolName::SetReadiness,
+        json!({"app": "probe", "task": "dev", "kind": "log", "regex": "ready in"}),
+    )
+    .await;
+    assert_eq!(logged["readiness"]["flags"], "i");
+    let bad_regex = call(
+        &ctx,
+        ToolName::SetReadiness,
+        json!({"app": "probe", "task": "dev", "kind": "log", "regex": "([unclosed"}),
+    )
+    .await;
+    assert_eq!(bad_regex["error"]["field"], "regex");
+
+    // http: loopback only, because the app polls this URL itself.
+    let remote = call(
+        &ctx,
+        ToolName::SetReadiness,
+        json!({"app": "probe", "task": "dev", "kind": "http", "url": "https://example.com/health"}),
+    )
+    .await;
+    assert_eq!(remote["error"]["field"], "url");
+    let local = call(
+        &ctx,
+        ToolName::SetReadiness,
+        json!({"app": "probe", "task": "dev", "kind": "http", "url": "http://127.0.0.1:4000/ready"}),
+    )
+    .await;
+    assert_eq!(local["readiness"]["kind"], "http");
+
+    // Missing per-kind fields are named.
+    for (arguments, field) in [
+        (
+            json!({"app": "probe", "task": "dev", "kind": "port"}),
+            "port",
+        ),
+        (
+            json!({"app": "probe", "task": "dev", "kind": "delay"}),
+            "ms",
+        ),
+        (
+            json!({"app": "probe", "task": "dev", "kind": "http"}),
+            "url",
+        ),
+        (
+            json!({"app": "probe", "task": "dev", "kind": "telepathy"}),
+            "kind",
+        ),
+    ] {
+        let response = call(&ctx, ToolName::SetReadiness, arguments.clone()).await;
+        assert_eq!(response["error"]["field"], field, "for {arguments}");
+    }
 }

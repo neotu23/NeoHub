@@ -1136,41 +1136,100 @@ pub async fn dispatch(ctx: &ToolContext, tool: ToolName, args: &Value) -> ToolRe
             Ok(ctx.redactor.scrub_json(&json!(rows)))
         }
         ToolName::SetReadiness => {
-            let task = task_id(args)?;
+            // Legacy shape: `app` plus `task` (id or name). A bare `task_id` still works.
+            let task_id = match opt_field_str(args, "task_id", "task_id") {
+                Some(id) => TaskId::from_existing(id),
+                None => {
+                    let task = require_str(args, "task")?;
+                    let snapshot = ctx
+                        .handle
+                        .request(CoreCommand::GetSnapshot)
+                        .await
+                        .map_err(core_error)?;
+                    let CoreReply::Snapshot(snapshot) = snapshot else {
+                        return Err(ToolError::new("unexpected snapshot reply"));
+                    };
+                    // Scope by app when one is named; otherwise search every app.
+                    let app_filter = match opt_field_str(args, "app", "app_id") {
+                        Some(needle) => Some(resolve_app(&ctx.handle, &needle).await?),
+                        None => None,
+                    };
+                    snapshot
+                        .tasks_by_app
+                        .iter()
+                        .filter(|(app_id, _)| {
+                            app_filter.as_ref().is_none_or(|wanted| *app_id == wanted)
+                        })
+                        .flat_map(|(_, tasks)| tasks.iter())
+                        .find(|candidate| candidate.id.as_str() == task || candidate.name == task)
+                        .map(|candidate| candidate.id.clone())
+                        .ok_or_else(|| ToolError::field("task", format!("找不到任务 {task}")))?
+                }
+            };
+
             let kind = require_str(args, "kind")?;
             let readiness = match kind.as_str() {
                 "none" => ReadinessSignal::None,
-                "port" => ReadinessSignal::Port {
-                    port: opt_u64(args, "port").unwrap_or(0) as u16,
-                    host: opt_str(args, "host"),
-                },
-                "log" => ReadinessSignal::Log {
-                    regex: require_str(args, "regex")?,
-                    flags: opt_str(args, "flags"),
-                },
-                "http" => ReadinessSignal::Http {
-                    url: require_str(args, "url")?,
-                    status: opt_u64(args, "status").map(|value| value as u16),
-                },
+                "port" => {
+                    let port = opt_u64(args, "port")
+                        .ok_or_else(|| ToolError::field("port", "kind \"port\" 需要 `port`"))?;
+                    ReadinessSignal::Port {
+                        port: port as u16,
+                        host: opt_str(args, "host"),
+                    }
+                }
+                "log" => {
+                    let regex = require_str(args, "regex")
+                        .map_err(|_| ToolError::field("regex", "kind \"log\" 需要 `regex`"))?;
+                    // Validate now: a broken pattern would silently never match.
+                    if let Err(error) = regex::Regex::new(&regex) {
+                        return Err(ToolError::field("regex", format!("正则无效：{error}")));
+                    }
+                    ReadinessSignal::Log {
+                        regex,
+                        flags: Some(opt_str(args, "flags").unwrap_or_else(|| "i".to_string())),
+                    }
+                }
+                "http" => {
+                    let url = require_str(args, "url")
+                        .map_err(|_| ToolError::field("url", "kind \"http\" 需要 `url`"))?;
+                    // Loopback only: NeoHub polls this URL from the main process, so a
+                    // non-loopback host would turn a readiness probe into an egress primitive.
+                    let hostname = http_url_hostname(&url)
+                        .ok_or_else(|| ToolError::field("url", format!("URL 无效：{url}")))?;
+                    if !crate::auth::is_loopback_hostname(&hostname) {
+                        return Err(ToolError::field(
+                            "url",
+                            "http readiness url 必须指向 localhost / 127.0.0.1 / [::1]",
+                        ));
+                    }
+                    ReadinessSignal::Http {
+                        url,
+                        status: opt_u64(args, "status").map(|value| value as u16),
+                    }
+                }
                 "exit" => ReadinessSignal::Exit {
                     code: opt_u64(args, "code").map(|value| value as i32),
                 },
-                "delay" => ReadinessSignal::Delay {
-                    ms: opt_u64(args, "ms").unwrap_or(0),
-                },
+                "delay" => {
+                    let ms = opt_u64(args, "ms")
+                        .ok_or_else(|| ToolError::field("ms", "kind \"delay\" 需要 `ms`"))?;
+                    ReadinessSignal::Delay { ms }
+                }
                 other => {
                     return Err(ToolError::field(
                         "kind",
-                        format!("未知的 readiness 类型：{other}"),
+                        format!("不支持的 readiness 类型：{other}"),
                     ));
                 }
             };
+
             let reply = ctx
                 .handle
                 .request(CoreCommand::UpdateTask {
-                    task_id: task.clone(),
+                    task_id: task_id.clone(),
                     input: Box::new(UpdateTaskInput {
-                        readiness: Some(readiness),
+                        readiness: Some(readiness.clone()),
                         ..Default::default()
                     }),
                 })
@@ -1179,7 +1238,13 @@ pub async fn dispatch(ctx: &ToolContext, tool: ToolName, args: &Value) -> ToolRe
             let CoreReply::Task(task) = reply else {
                 return Err(ToolError::new("unexpected update reply"));
             };
-            Ok(json!({"task": task_json(&task)}))
+            let app_name = app_name_for_scope(&ctx.handle, &EnvScope::Task(task_id)).await;
+            Ok(ctx.redactor.scrub_json(&json!({
+                "app": app_name,
+                "task": task.name,
+                "readiness": task.readiness,
+                "note": "Readiness updated. Takes effect on the next start/restart of this task.",
+            })))
         }
         ToolName::StartApp => {
             ctx.handle
@@ -1227,6 +1292,26 @@ pub async fn dispatch(ctx: &ToolContext, tool: ToolName, args: &Value) -> ToolRe
             Ok(json!({"stopped": true}))
         }
     }
+}
+
+/// Hostname of an `http(s)://host[:port]/…` URL, or `None` when it is not a plain HTTP URL.
+fn http_url_hostname(url: &str) -> Option<String> {
+    let (scheme, rest) = url.split_once("://")?;
+    if scheme != "http" && scheme != "https" && scheme != "HTTP" && scheme != "HTTPS" {
+        return None;
+    }
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    if host.is_empty() {
+        return None;
+    }
+    let host = if host.starts_with('[') {
+        // Keep the brackets: the loopback list spells IPv6 as `[::1]`.
+        crate::auth::host_without_port(host).to_string()
+    } else {
+        host.split(':').next().unwrap_or("").to_string()
+    };
+    (!host.is_empty()).then(|| host.to_lowercase())
 }
 
 /// Resolve `app` as an id, exact name or absolute path.

@@ -3922,6 +3922,7 @@ dependencies = [
  "neohub-core",
  "neohub-domain",
  "neohub-storage",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

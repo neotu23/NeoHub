@@ -732,7 +732,7 @@
   4. 迁移后 `migration.json` 清单尚未接入 UI 展示
 
 ### 阶段 14：MCP 全量迁移与协议兼容
-- 状态：**开发中**（22 工具的旧版参数与返回形状全部对齐，含 `workspaceTasks` monorepo；TLS/SSE 待做）
+- 状态：**基本完成**（22 工具的旧版参数与返回形状全部对齐，含 `workspaceTasks` monorepo；TLS/SSE 与错误文案为已知差异）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: port the MCP gate, redaction and tool catalogue`
 - 实际修改文件：新增 `native/crates/mcp/{Cargo.toml,src/{lib,auth,redaction,tools}.rs}`；更新 workspace 成员
@@ -859,10 +859,21 @@
 - 顺手修掉的两个真实缺陷（都是测试抓到的）：
   1. 显式 `tasks` 数组与默认任务同时创建会**重名冲突**导致整个创建失败 → 改为数组优先
   2. `task_json` 漏了 `working_dir_override`，monorepo 任务的工作目录在返回里看不到
-- 仍存在的兼容差异：
-  1. `set_readiness` 的旧版参数集未核对
-  2. 错误消息文案未逐条对齐旧版（只在字段层面一致）
-  3. 可选自签 TLS 与 SSE 未做
+- 第九批完成（2026-11-07T11:45Z–12:15Z UTC）：`set_readiness` 收口，阶段 14 基本完成
+  - 参数对齐：`app` + `task`（id 或名称，可按应用作用域）+ `kind`，`task_id` 保留兼容
+  - 按 kind 校验必填字段（`port`/`regex`/`url`/`ms`）并在缺失时报出**字段名**
+  - `log` 的正则**当场编译校验**（写坏的 pattern 会成为永不匹配的静默黑洞），`flags` 默认 `"i"`
+  - **`http` 的 url 必须 loopback**：NeoHub 自己轮询这个地址，非 loopback 会把就绪探测
+    变成出网原语（SSRF）。这条是旧版有、我先前遗漏的安全约束，已补上并测试
+  - 返回 `{app, task, readiness, note}`；`exit` 作为扩展保留（`oneShot` 任务需要）
+  - 验证：`cargo test -p neohub-mcp` → **36 passed**
+    （新增：按 kind 的必填校验、坏正则、非 loopback url 被拒、loopback 通过、flags 默认 i）
+  - `cargo test --workspace --locked` → **410 passed / 0 failed**；clippy **0 warnings**
+- 阶段 14 剩余已知差异（不影响默认安全姿态，随阶段 16 一并评估）：
+  1. 可选自签 TLS 与 SSE 流式响应未做（默认 loopback + Bearer + 默认关闭已满足计划的安全要求）
+  2. 错误消息文案未逐条照抄旧版（字段层面一致；`interpretedAs`、`note` 等为中文）
+  3. `get_ports` 的 `pid`/`process` 为 `null`（只报占用任务，不猜进程名）
+
 
 
 
