@@ -409,3 +409,33 @@
     2. 完整人工点击闭环（导入→启动→卡片运行→点端口→停止）需要用户桌面会话操作；
        上述 `import_flow` 测试从命令层验证了同一链路
 
+### 阶段 10：项目详情、任务编辑、环境变量与设置
+- 状态：**开发中**（编辑会话/保存屏障/语言包完成并测试；详情与编辑器视图待做）
+- 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
+- 最近提交：`feat: add edit drafts, save barrier and locales`
+- 实际修改文件：新增 `native/crates/ui/src/state/edit_session.rs`、
+  `native/crates/ui/src/i18n.rs`、`native/crates/ui/locales/{en,zh-CN}.json`、
+  `native/crates/ui/tests/editor_save.rs`；更新 `ui/Cargo.toml`（dev-deps）、`state/mod.rs`、`lib.rs`
+- 验证命令与结果（2026-11-06T21:25Z–21:55Z UTC）：
+  - `cargo test -p neohub-ui --test editor_save --locked` → **4 passed**，即计划点名的四个：
+    `close_flushes_pending_edits`、`save_failure_keeps_window_and_input`、
+    `mcp_refresh_preserves_active_edit`、`stale_save_does_not_overwrite_newer_revision`
+    （最后两个用真实 core/SQLite：MCP 侧改名后本地草稿保留并发起冲突；陈旧 revision 的 ack
+    不会清掉更新的编辑，后续 flush 发送新值）
+  - `cargo test -p neohub-ui --lib edit_session` → **7 passed**；`--lib i18n` → **5 passed**
+  - `cargo test --workspace --locked` → **269 passed / 0 failed**
+  - `cargo clippy -p neohub-ui --all-targets --locked` → **0 warnings**；`cargo fmt --all`
+- 与旧版不同之处：
+  1. 修订号语义明确：`Draft::ack(saved, revision)` 只在 revision 等于当前时才清 dirty；
+     否则服务端值成为新 baseline、本地保持 dirty，**不会回退 revision**（初版回退了，被测试抓出）
+  2. 冲突值单独保存（`conflict`），用户可显式 `take_conflict()` 采用对方版本，而不是弹窗覆盖
+  3. 语言包内嵌（`include_str!`）+ 缺 key 回退链，并由测试断言两语言 key 完全对齐
+- 未解决问题及所属阶段：
+  1. 详情页/任务编辑器/环境变量编辑器/设置面板的 GPUI 表单视图 → 本阶段剩余
+     （文本输入需要 `gpui-component` 的 Input，尚未验证其 API）
+  2. 设置面板要覆盖全部 17 项 + db 导出/重置/MCP/登录项/通知/菜单栏 → 依赖阶段 15 的系统集成
+  3. 运行历史视图与崩溃日志入口 → 与详情页一起做
+- 下一项具体动作：先验证 `gpui_component::input` 的输入控件 API（编译一个最小表单），
+  再做 `views/{app_detail,task_editor,settings}.rs`，把 `Draft`/`SaveBarrier` 接进视图。
+
+---

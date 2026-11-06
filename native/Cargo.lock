@@ -3941,6 +3941,7 @@ dependencies = [
  "gpui-kit",
  "neohub-core",
  "neohub-domain",
+ "neohub-storage",
  "serde",
  "serde_json",
  "tempfile",
