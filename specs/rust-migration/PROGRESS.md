@@ -732,7 +732,7 @@
   4. 迁移后 `migration.json` 清单尚未接入 UI 展示
 
 ### 阶段 14：MCP 全量迁移与协议兼容
-- 状态：**开发中**（工具清单/schema、gate 规则、脱敏完成并测试；rmcp 传输层与 dispatch 待做）
+- 状态：**开发中**（22 工具定义 + dispatch + gate + 脱敏完成并测试；rmcp 传输层待做）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: port the MCP gate, redaction and tool catalogue`
 - 实际修改文件：新增 `native/crates/mcp/{Cargo.toml,src/{lib,auth,redaction,tools}.rs}`；更新 workspace 成员
@@ -757,3 +757,24 @@
      命令，再逐个把工具接到 `CoreHandle`
   3. 兼容性 golden cases（对照旧版返回 JSON）→ 随 dispatch 一起做
   4. 真实 MCP 客户端验收（initialize → tools/list → tools/call）→ 随传输层一起做
+
+- 第二批完成（2026-11-07T07:05Z–07:40Z UTC）：
+  - core 补齐 `UpdateApp` / `RemoveApp` / `ListNodeVersions` 命令
+    （`RemoveApp` 在任一任务运行时拒绝，避免工具调用把运行中的栈变成孤儿）
+  - `mcp/src/dispatch.rs`：22 个工具全部接到 `CoreHandle`，与 UI 走**同一条命令路径**；
+    参数从不可信 JSON 严格读取（必填/枚举/类型），错误返回 `{field, message}` 便于客户端定位
+  - 关键语义：`list_env_vars` 对秘密只回 `value: null`；`set_env_var` 读-改-写保证掩码行不被覆盖；
+    `get_ports` 区分 `confirmed`/`hinted`；`set_readiness` 不改命令即可更新探测
+  - 验证：`cargo test -p neohub-mcp --test compatibility` → **5 passed**
+    （add→list→get；秘密不回传文本；日志/端口来自运行中的任务且运行中拒绝 remove_app；
+    日志搜索与 readiness 更新；非法参数返回字段错误）
+    `cargo test -p neohub-mcp` → **22 passed**；`cargo test --workspace --locked` → **396 passed / 0 failed**；
+    clippy **0 warnings**
+  - 修掉的一个真实缺陷：`get_ports` 的过滤条件写反（给了 task_id 反而把该任务排除），
+    测试直接抓到
+  - 未解决问题：
+    1. **rmcp Streamable HTTP 传输层**（默认 6872、Bearer、可选自签 TLS）仍未接入
+    2. 与旧版返回 JSON 的 golden 对照用例
+    3. 真实 MCP 客户端验收（initialize → tools/list → tools/call）与 Token 轮换实测
+    4. MCP 修改后窗口/菜单栏事件（`CatalogChanged`）尚未在 dispatch 后发出
+

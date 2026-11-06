@@ -142,7 +142,7 @@
 | 20 | `restart_app` | 同上 | 已验证 | 同上 | 未开始 |
 | 21 | `start_task` | 同上 | 已验证 | 同上 | 未开始 |
 | 22 | `stop_task` | 同上 | 已验证 | 同上 | 未开始 |
-| 23 | Streamable HTTP `/mcp` 端点、loopback + Host/Origin 校验、Bearer Token、可选 HTTPS（自签证书） | `McpService.ts`, `gate.ts`, `tls.ts`, `token.ts` | 已验证（`gate.test.ts` 10 例、`tls.test.ts` 3 例） | `mcp/src/{server,auth,tls}.rs`| 部分（22 工具清单/schema 与 gate 规则（loopback/Host/Origin/常量时间 Token）已实现并测试；rmcp Streamable HTTP 服务与 dispatch 待做） |
+| 23 | Streamable HTTP `/mcp` 端点、loopback + Host/Origin 校验、Bearer Token、可选 HTTPS（自签证书） | `McpService.ts`, `gate.ts`, `tls.ts`, `token.ts` | 已验证（`gate.test.ts` 10 例、`tls.test.ts` 3 例） | `mcp/src/{server,auth,tls}.rs`| 部分（22 工具定义 + dispatch 全部实现并测试；gate 规则完成；rmcp Streamable HTTP 传输层待做） |
 | 24 | 脱敏：secret/Token 不进日志尾、搜索结果与错误 | `hygiene.ts` | 已验证（`hygiene.test.ts` 9 例） | `mcp/src/redaction.rs`| 已验证（`Redactor`：已知 secret 字面量、`enc1:`/`nhk1:` 密文、`Bearer` 头、JSON 递归；长 secret 优先避免残留片段） |
 
 ## 11. 数据库与迁移

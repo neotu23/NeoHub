@@ -771,6 +771,42 @@ impl CoreService {
         Ok(settings)
     }
 
+    /// Update an app through the catalog (validation lives there).
+    pub fn update_app(
+        &self,
+        app_id: &AppId,
+        input: crate::catalog::UpdateAppInput,
+    ) -> CoreResult<App> {
+        self.with_storage(|storage| {
+            crate::catalog::AppCatalog::new(storage).update_app(app_id, input)
+        })
+    }
+
+    /// Remove an app registration. Refused while any task of it is live, so a running stack
+    /// cannot be orphaned by a tool call.
+    pub fn remove_app(&self, app_id: &AppId) -> CoreResult<()> {
+        let tasks = self.with_storage(|storage| Ok(storage.catalog().list_tasks(app_id)?))?;
+        if let Some(live) = tasks
+            .iter()
+            .find(|task| self.runner.state_of(&task.id).is_live())
+        {
+            return Err(DomainError::AppIsLive {
+                state: self.runner.state_of(&live.id).as_str(),
+            }
+            .into());
+        }
+        self.ready_flags
+            .lock()
+            .expect("ready flags")
+            .retain(|task_id, _| !tasks.iter().any(|task| &task.id == task_id));
+        self.with_storage(|storage| Ok(storage.catalog().remove_app(app_id)?))
+    }
+
+    /// Every Node installation the resolver knows about (highest first).
+    pub fn node_versions(&self) -> Vec<crate::environment::NodeInstallation> {
+        self.node_resolver.list()
+    }
+
     /// Task mutations always go through the catalog so validation stays in one place.
     pub fn add_task(
         &self,
@@ -1182,6 +1218,17 @@ impl CoreHandle {
                         message: err.to_string(),
                     })?;
                 Ok(CoreReply::Ack)
+            }
+            CoreCommand::UpdateApp { app_id, input } => {
+                let app = self.service.update_app(&app_id, *input)?;
+                Ok(CoreReply::App(Box::new(app)))
+            }
+            CoreCommand::RemoveApp { app_id } => {
+                self.service.remove_app(&app_id)?;
+                Ok(CoreReply::Ack)
+            }
+            CoreCommand::ListNodeVersions => {
+                Ok(CoreReply::NodeVersions(self.service.node_versions()))
             }
             CoreCommand::AddTask { app_id, input } => {
                 let task = self.service.add_task(&app_id, *input)?;

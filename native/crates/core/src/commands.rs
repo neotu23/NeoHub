@@ -48,6 +48,17 @@ pub enum CoreCommand {
     GetLogs {
         task_id: TaskId,
     },
+    /// App-level update (identity fields are not patchable).
+    UpdateApp {
+        app_id: AppId,
+        input: Box<crate::catalog::UpdateAppInput>,
+    },
+    /// Remove an app registration. Refused while any of its tasks is live.
+    RemoveApp {
+        app_id: AppId,
+    },
+    /// Node installations discovered on this machine.
+    ListNodeVersions,
     /// Task CRUD through the command surface (the UI never touches the catalog directly).
     AddTask {
         app_id: AppId,
@@ -122,6 +133,7 @@ pub enum CoreReply {
     Settings(Box<neohub_domain::Settings>),
     EnvVars(Vec<crate::service::EnvVarView>),
     RunHistory(Vec<neohub_domain::RunHistoryRow>),
+    NodeVersions(Vec<crate::environment::NodeInstallation>),
     LogBootstrap(LogSubscriptionOutcome),
     LogMatches(Vec<(TaskId, LineMatch)>),
     /// Absolute path written by `ExportLogs`.
