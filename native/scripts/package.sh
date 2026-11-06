@@ -58,6 +58,15 @@ cat > "$APP/Contents/Info.plist" <<PLIST
        automatic "quit when last window closes" treatment. -->
   <key>NSAppSleepDisabled</key><false/>
   <key>NSHumanReadableCopyright</key><string>Copyright © 2026 Jainath Ponnala</string>
+  <!-- neohub:// links. Registering the scheme is what makes the system route them here; the
+       Apple Event that carries the URL is handled in the app. -->
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>app.neohub.desktop</string>
+      <key>CFBundleURLSchemes</key><array><string>neohub</string></array>
+    </dict>
+  </array>
 </dict>
 </plist>
 PLIST

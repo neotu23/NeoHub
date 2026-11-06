@@ -366,6 +366,39 @@ impl HostBridge {
         });
     }
 
+    /// Apply a `neohub://` link: select the app it names (and its path, if given).
+    ///
+    /// A link may only *select*. It cannot start anything by itself: a URL arriving from a
+    /// browser is not consent to run someone's dev server.
+    pub fn apply_deep_link(&self, link: neohub_platform_macos::deep_link::DeepLink) {
+        use neohub_platform_macos::deep_link::DeepLink;
+        let mut store = self.store.lock().expect("store lock");
+        // Resolve to an app id first, then select: the session owns navigation.
+        let target = match &link {
+            DeepLink::Open { app_id, path } => store
+                .apps()
+                .into_iter()
+                .find(|app| {
+                    app_id
+                        .as_deref()
+                        .is_some_and(|wanted| app.id.as_str() == wanted)
+                        || path.as_deref().is_some_and(|wanted| app.path == wanted)
+                })
+                .map(|app| app.id),
+            DeepLink::Start { .. } => None,
+        };
+        if let Some(app_id) = target {
+            store.session_mut().select_app(app_id, None);
+        }
+        match link {
+            DeepLink::Open { .. } => {}
+            DeepLink::Start { .. } => {
+                // Deliberately ignored: see the note above.
+                eprintln!("[ui] start links are not honoured; select the app instead");
+            }
+        }
+    }
+
     /// Ask GitHub whether a newer release exists (blocking call, off the UI thread).
     pub fn check_for_updates(&self) {
         let sink = self.reply_sink.clone();

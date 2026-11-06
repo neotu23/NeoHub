@@ -14,6 +14,7 @@ use neohub_desktop::app_host::{ActivationWatcher, SharedHost, open_main_window, 
 use neohub_desktop::session_lock::{LockOutcome, SessionLock};
 use neohub_desktop::window_session::AppHost;
 use neohub_platform_macos::app_menu;
+use neohub_platform_macos::deep_link;
 use neohub_platform_macos::log_file;
 use neohub_platform_macos::login_item;
 use neohub_platform_macos::tray::{TrayAction, build_menu};
@@ -69,6 +70,13 @@ fn main() {
     log_file::install_panic_hook();
     log_file::log("host", "NeoHub starting");
 
+    // A link can arrive as an argument (e.g. `open -a NeoHub --args neohub://open?id=…`).
+    // The Apple Event path is not wired yet; see PROGRESS.
+    let requested = deep_link::from_args(std::env::args());
+    if let Some(link) = &requested {
+        log_file::log("host", &format!("deep link requested: {link:?}"));
+    }
+
     let data_dir = DataDir::from_args(std::env::args()).expect("resolve data dir");
     log_file::log("host", &format!("data dir: {}", data_dir.path().display()));
 
@@ -101,6 +109,10 @@ fn main() {
     let host = Arc::new(Mutex::new(AppHost::new(service.clone(), data_dir.path())));
     let bridge = HostBridge::new(runtime.clone(), service, data_dir.path().to_path_buf());
     let shared = SharedHost::new(host, bridge);
+    // The first window applies the link's selection once the snapshot is in.
+    if let Some(link) = requested.clone() {
+        shared.bridge.apply_deep_link(link);
+    }
     let mut watcher = ActivationWatcher::new(data_dir.path());
 
     gpui_kit::application().run(move |cx| {

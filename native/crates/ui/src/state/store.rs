@@ -681,6 +681,14 @@ impl UiStore {
             .cloned()
     }
 
+    /// Apps from the last snapshot (empty before the first one arrives).
+    pub fn apps(&self) -> Vec<App> {
+        self.snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.apps.clone())
+            .unwrap_or_default()
+    }
+
     pub fn selected_app(&self) -> Option<&App> {
         let snapshot = self.snapshot.as_ref()?;
         let app_id = self.session.selected_app_id.as_ref()?;

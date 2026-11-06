@@ -1273,3 +1273,31 @@
   2. 「设置…」目前只把窗口带到前台，未直接把设置面板打开（需要向视图派发 GPUI action）
   3. 没有「编辑」菜单（文本框自己处理按键，标准编辑项会与之冲突）
 
+### S6 深链接（解析与注册）
+- 状态：**部分**（解析 + scheme 注册 + argv 路径可用；Apple Event 接收未接）
+- 最近提交：`feat: parse neohub:// links`
+- 实际修改文件：新增 `platform-macos/src/deep_link.rs`；更新 `platform-macos/src/lib.rs`、
+  `scripts/package.sh`（`CFBundleURLTypes`）、`desktop/src/main.rs`、`ui/src/views/shell.rs`
+  （`apply_deep_link`）、`ui/src/state/store.rs`（`apps()`）
+- 已实现：
+  1. `neohub://open?id=<id>` / `neohub://open?path=<绝对路径>` / `neohub://start?id=<id>`
+     解析，含百分号解码与 `+` → 空格
+  2. **把外来输入当敌意输入**：id 只允许字母数字和连字符（`../../etc/passwd`、含空格的 id 一律丢弃）；
+     path 必须绝对且不含 `..` —— 链接不能把人指向项目目录之外
+  3. `Info.plist` 注册 `neohub` scheme（已用 `plutil -p` 确认写进包）
+  4. 通过 argv 传入的链接（`open -a NeoHub --args neohub://…`）会被解析、记日志并用来**选中**应用
+- **明确未做**：`kAEGetURL` Apple Event 接收（需要 `NSAppleEventManager` handler 与 ObjC target）。
+  所以从浏览器点 `neohub://` 只会激活应用，**不会跳到具体项目**。这条写在模块文档与本文里，
+  不让链接看起来能用。
+- 安全决定：链接只能**选中**，不能启动。来自浏览器的 URL 不构成"跑某人的 dev server"的授权。
+- 验证：`cargo test -p neohub-platform-macos --lib deep_link` → **10 passed**
+  （id/路径/组合、旧 scheme 忽略、未知 host、非法 id、路径穿越与相对路径被拒、空格与中文路径、
+  argv 取第一个链接、无链接时无动作）
+  `cargo test --workspace --locked` → **475 passed / 0 failed**；clippy 0
+  打包后 `plutil -p` 确认 `CFBundleURLSchemes = [neohub]`；带
+  `neohub://open?id=demo` 启动，日志出现
+  `deep link requested: Open { app_id: Some("demo"), path: None }`
+- 未解决问题：
+  1. Apple Event 接收未接（上面那条）
+  2. 选中发生在第一帧快照之前，若快照还没到则本次不生效（不排队重试）
+
