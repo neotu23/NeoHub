@@ -257,11 +257,57 @@ pub async fn dispatch(ctx: &ToolContext, tool: ToolName, args: &Value) -> ToolRe
                 .get(&app.id)
                 .cloned()
                 .unwrap_or_default();
-            Ok(ctx.redactor.scrub_json(&json!({
-                "app": app,
-                "tasks": tasks.iter().map(task_json).collect::<Vec<_>>(),
-                "state": snapshot.app_states.get(&app.id),
-            })))
+            let runs_limit = opt_field_u64(args, "runs_limit", "runs_limit").unwrap_or(5) as u32;
+            let runs = match ctx
+                .handle
+                .request(CoreCommand::ListRunHistory {
+                    app_id: app.id.clone(),
+                    limit: Some(runs_limit),
+                })
+                .await
+            {
+                Ok(CoreReply::RunHistory(rows)) => rows
+                    .into_iter()
+                    .map(|row| {
+                        json!({
+                            "task": row.task_name,
+                            "script": row.script,
+                            "customCommand": row.custom_command,
+                            "startedAt": row.started_at,
+                            "endedAt": row.ended_at,
+                            "exitCode": row.exit_code,
+                            "wasKilledByUser": row.was_killed_by_user,
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+                _ => Vec::new(),
+            };
+            // `.env` files that exist next to the project (names only — never their contents).
+            let env_files: Vec<String> =
+                neohub_core::environment::detect::find_env_files(std::path::Path::new(&app.path));
+            let ports = app_ports(&snapshot, &app.id);
+            let mut brief = app_brief(app);
+            if let Some(map) = brief.as_object_mut() {
+                map.insert(
+                    "state".into(),
+                    json!(snapshot.app_states.get(&app.id).map(|state| state.as_str())),
+                );
+                map.insert("ports".into(), json!(ports));
+                map.insert("nodeVersionPref".into(), json!(app.node_version_pref));
+                map.insert(
+                    "autoRestartOnChange".into(),
+                    json!(app.auto_restart_on_change),
+                );
+                map.insert("watchGlobs".into(), json!(app.watch_globs));
+                map.insert("portHint".into(), json!(app.port_hint));
+                map.insert(
+                    "tasks".into(),
+                    json!(tasks.iter().map(task_json).collect::<Vec<_>>()),
+                );
+                map.insert("envFiles".into(), json!(env_files));
+                map.insert("recentRuns".into(), json!(runs));
+            }
+            Ok(ctx.redactor.scrub_json(&brief))
         }
         ToolName::ListRunning => {
             let snapshot = ctx
@@ -313,23 +359,108 @@ pub async fn dispatch(ctx: &ToolContext, tool: ToolName, args: &Value) -> ToolRe
             })))
         }
         ToolName::GetLogs => {
-            let task = task_id(args)?;
-            let lines = opt_u64(args, "lines").unwrap_or(200) as usize;
-            let reply = ctx
-                .handle
-                .request(CoreCommand::GetTerminalText {
-                    task_id: task.clone(),
-                })
-                .await
-                .map_err(core_error)?;
-            let CoreReply::Logs(text) = reply else {
-                return Err(ToolError::new("unexpected logs reply"));
+            let lines = opt_u64(args, "lines").unwrap_or(100).clamp(1, 1000) as usize;
+            // Legacy shape: `app` (+ optional `task`); a bare `task_id` still works.
+            let target_tasks: Vec<(String, TaskId)> = if let Some(task_id) =
+                opt_str(args, "task_id")
+            {
+                vec![(task_id.clone(), TaskId::from_existing(task_id))]
+            } else {
+                let needle = require_str(args, "app")?;
+                let app_id = resolve_app(&ctx.handle, &needle).await?;
+                let snapshot = ctx
+                    .handle
+                    .request(CoreCommand::GetSnapshot)
+                    .await
+                    .map_err(core_error)?;
+                let CoreReply::Snapshot(snapshot) = snapshot else {
+                    return Err(ToolError::new("unexpected snapshot reply"));
+                };
+                let tasks = snapshot
+                    .tasks_by_app
+                    .get(&app_id)
+                    .cloned()
+                    .unwrap_or_default();
+                match opt_str(args, "task") {
+                    Some(wanted) => tasks
+                        .iter()
+                        .find(|task| task.id.as_str() == wanted || task.name == wanted)
+                        .map(|task| vec![(task.name.clone(), task.id.clone())])
+                        .ok_or_else(|| {
+                            ToolError::field("task", format!("该应用下没有名为 {wanted} 的任务"))
+                        })?,
+                    None => tasks
+                        .iter()
+                        .map(|task| (task.name.clone(), task.id.clone()))
+                        .collect(),
+                }
             };
-            let tail: Vec<&str> = text.lines().rev().take(lines).collect();
-            let tail: Vec<&str> = tail.into_iter().rev().collect();
-            Ok(ctx.redactor.scrub_json(
-                &json!({"task_id": task, "lines": tail.len(), "text": tail.join("\n")}),
-            ))
+            let app_name = app_name_for_scope(
+                &ctx.handle,
+                &EnvScope::Task(
+                    target_tasks
+                        .first()
+                        .map(|(_, id)| id.clone())
+                        .ok_or_else(|| ToolError::field("app", "该应用没有任务"))?,
+                ),
+            )
+            .await;
+
+            let mut sections: Vec<String> = Vec::new();
+            let mut meta: Vec<Value> = Vec::new();
+            for (task_name, task_id) in &target_tasks {
+                let state = ctx
+                    .handle
+                    .request(CoreCommand::GetSnapshot)
+                    .await
+                    .ok()
+                    .and_then(|reply| match reply {
+                        CoreReply::Snapshot(snapshot) => Some(
+                            snapshot
+                                .running_tasks
+                                .iter()
+                                .find(|task| &task.task_id == task_id)
+                                .map(|task| (task.state.as_str().to_string(), true))
+                                .unwrap_or(("idle".to_string(), false)),
+                        ),
+                        _ => None,
+                    })
+                    .unwrap_or(("idle".to_string(), false));
+                let text = match ctx
+                    .handle
+                    .request(CoreCommand::GetTerminalText {
+                        task_id: task_id.clone(),
+                    })
+                    .await
+                {
+                    Ok(CoreReply::Logs(text)) => text,
+                    _ => String::new(),
+                };
+                let tail: Vec<&str> = text.lines().rev().take(lines).collect();
+                let tail: Vec<&str> = tail.into_iter().rev().collect();
+                let cleaned = tail.join("\n");
+                meta.push(json!({
+                    "task": task_name,
+                    "live": state.1,
+                    "state": state.0,
+                    "hasOutput": !cleaned.trim().is_empty(),
+                }));
+                if target_tasks.len() > 1 {
+                    sections.push(format!("=== {task_name} ({}) ===\n{cleaned}", state.0));
+                } else {
+                    sections.push(cleaned);
+                }
+            }
+            let header = json!({
+                "app": app_name,
+                "linesPerTask": lines,
+                "tasks": meta,
+            });
+            let body = sections.join("\n\n");
+            Ok(ctx.redactor.scrub_json(&json!({
+                "header": header,
+                "text": body,
+            })))
         }
         ToolName::SearchLogs => {
             let query = require_str(args, "query")?;
@@ -448,25 +579,73 @@ pub async fn dispatch(ctx: &ToolContext, tool: ToolName, args: &Value) -> ToolRe
             let CoreReply::Snapshot(snapshot) = snapshot else {
                 return Err(ToolError::new("unexpected snapshot reply"));
             };
-            let filter = opt_str(args, "task_id");
-            let ports: Vec<Value> = snapshot
-                .task_ports
-                .iter()
-                // Keep the requested task when a filter is given; otherwise report all.
-                .filter(|(task, _)| match filter.as_deref() {
-                    Some(wanted) => task.as_str() == wanted,
-                    None => true,
-                })
-                .map(|(task, sample)| {
-                    json!({
-                        "task_id": task,
-                        // Confirmed means a real LISTEN socket; hinted is only a URL in the log.
-                        "confirmed": sample.confirmed,
-                        "hinted": sample.hinted,
+            let wanted = opt_u64(args, "port").map(|value| value as u16);
+            let mut by_app: Vec<Value> = Vec::new();
+            for app in &snapshot.apps {
+                let ports = app_ports(&snapshot, &app.id);
+                if ports.is_empty() {
+                    continue;
+                }
+                if wanted.is_some_and(|wanted| !ports.contains(&wanted)) {
+                    continue;
+                }
+                let tasks = snapshot
+                    .tasks_by_app
+                    .get(&app.id)
+                    .cloned()
+                    .unwrap_or_default();
+                let details: Vec<Value> = ports
+                    .iter()
+                    .map(|port| {
+                        let owner = tasks.iter().find(|task| {
+                            snapshot
+                                .task_ports
+                                .get(&task.id)
+                                .map(|sample| sample.confirmed.contains(port))
+                                .unwrap_or(false)
+                        });
+                        json!({
+                            "port": port,
+                            // pid/process need the OS socket table; NeoHub reports the task that
+                            // owns the port and leaves the process fields null rather than guessing.
+                            "pid": Value::Null,
+                            "process": Value::Null,
+                            "task": owner.map(|task| task.name.clone()).unwrap_or_default(),
+                        })
                     })
-                })
-                .collect();
-            Ok(ctx.redactor.scrub_json(&json!(ports)))
+                    .collect();
+                by_app.push(json!({
+                    "app": app.name,
+                    "ports": ports,
+                    "portDetails": details,
+                }));
+            }
+            if let Some(wanted) = wanted {
+                // Prefer a confirmed owner: a transient log hint must not win over a real socket.
+                let claim = by_app.iter().find_map(|entry| {
+                    entry["portDetails"]
+                        .as_array()
+                        .and_then(|details| {
+                            details
+                                .iter()
+                                .find(|detail| detail["port"].as_u64() == Some(wanted as u64))
+                        })
+                        .map(|detail| (entry["app"].clone(), detail["task"].clone()))
+                });
+                let note = if by_app.is_empty() {
+                    Some("No task tracked by NeoHub is listening on that port.")
+                } else {
+                    None
+                };
+                return Ok(ctx.redactor.scrub_json(&json!({
+                    "port": wanted,
+                    "owner": claim.as_ref().map(|(app, _)| app.clone()).unwrap_or(Value::Null),
+                    "task": claim.map(|(_, task)| task).unwrap_or(Value::Null),
+                    "process": Value::Null,
+                    "note": note,
+                })));
+            }
+            Ok(ctx.redactor.scrub_json(&json!({"apps": by_app})))
         }
         ToolName::ScanFolder => {
             let dir = require_str(args, "dir")?;

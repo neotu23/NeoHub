@@ -732,7 +732,7 @@
   4. 迁移后 `migration.json` 清单尚未接入 UI 展示
 
 ### 阶段 14：MCP 全量迁移与协议兼容
-- 状态：**开发中**（22 工具 + dispatch + gate + 脱敏 + HTTP 端点 + 变更广播 + 读写工具参数/形状基本对齐；`get_logs`/`get_ports`/`add_app` 与 TLS/SSE 待对齐）
+- 状态：**开发中**（22 工具全部对齐旧版参数与返回形状；`add_app` 的 `workspaceTasks` 与 TLS/SSE 待做）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: port the MCP gate, redaction and tool catalogue`
 - 实际修改文件：新增 `native/crates/mcp/{Cargo.toml,src/{lib,auth,redaction,tools}.rs}`；更新 workspace 成员
@@ -833,13 +833,25 @@
     强制 **`script` 与 `command` 二选一**；`dependsOn` 可按任务名解析；`oneShot` 默认 readiness = 退出码 0
   - snake_case 全部保留为别名（`opt_field` 帮助函数），旧客户端与新客户端都能用
   - 验证：`cargo test -p neohub-mcp` → **32 passed**；`cargo test --workspace --locked` → **406 passed**；clippy 0
-- 仍存在的兼容差异（需继续对齐 `tools.ts`）：
-  1. `get_app` 尚未返回 `.env` 发现结果与 `recentRuns`（run history）、`runs_limit` 参数
-  2. `get_logs` 仍是 `{task_id, lines}` + 单段文本；旧版是 `{app, task?, lines}` + 分任务段落 + `{app, linesPerTask, tasks}`
-  3. `get_ports` 仍是 `{task_id, confirmed, hinted}` 数组；旧版是 `{apps:[{app, ports, portDetails}]}` 或按 `port` 查所有者
-  4. `add_app` 参数集未对齐（旧版 `path/name/script/command/workspaceTasks/autoStart`）；`workspaceTasks`（monorepo 一包一任务）尚未实现
-  5. `set_readiness` 的旧版参数集未核对
-  6. 错误消息文案未逐条对齐旧版（只在字段层面一致）
+- 第七批完成（2026-11-07T10:25Z–11:00Z UTC）：读取类详情工具收口
+  - `get_app` → 直接返回 `appBrief` + `state`/`ports`/`nodeVersionPref`/`autoRestartOnChange`/`watchGlobs`/
+    `portHint`/`tasks`/`envFiles`/`recentRuns`，支持 `runs_limit`（默认 5）；
+    `envFiles` 只列**文件名**（`find_env_files`），不读内容
+  - `get_logs` → 参数 `{app, task?, lines}`（`task_id` 保留兼容）；返回 `{header:{app, linesPerTask, tasks:[{task,live,state,hasOutput}]}, text}`，
+    多任务时每段带 `=== 名称 (状态) ===` 头，单任务不带
+  - `get_ports` → `{apps:[{app, ports, portDetails:[{port, pid, process, task}]}]}`，或传 `port` 得到
+    `{port, owner, task, process, note}`（优先真实 socket，不被日志猜测盖过）
+    —— `pid`/`process` 明确为 `null`：NeoHub 只报**哪个任务**占用，不去猜进程名
+  - 验证：`cargo test -p neohub-mcp` → **33 passed**
+    （新增：`get_logs` 分节 + 单任务无节头 + `get_ports` 按应用分组）
+  - `cargo test --workspace --locked` → **407 passed / 0 failed**；clippy **0 warnings**
+- 仍存在的兼容差异：
+  1. `add_app` 参数集未对齐（旧版 `path/name/script/command/workspaceTasks/autoStart`）；
+     `workspaceTasks`（monorepo 一包一任务）尚未实现，需要 core 的 workspace 探测
+  2. `set_readiness` 的旧版参数集未核对
+  3. 错误消息文案未逐条对齐旧版（只在字段层面一致）
+  4. 可选自签 TLS 与 SSE 未做
+
 
 
 

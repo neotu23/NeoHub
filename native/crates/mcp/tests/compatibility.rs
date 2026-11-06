@@ -76,8 +76,11 @@ async fn add_app_then_list_and_get_it_through_the_tool_layer() {
     assert_eq!(listed["apps"][0]["name"], "demo");
 
     let got = call(&ctx, ToolName::GetApp, json!({"app_id": app_id})).await;
-    assert_eq!(got["app"]["name"], "demo");
+    assert_eq!(got["name"], "demo");
     assert_eq!(got["tasks"].as_array().unwrap().len(), 1);
+    assert_eq!(got["ports"].as_array().unwrap().len(), 0);
+    assert!(got["envFiles"].is_array(), "env file names are listed");
+    assert!(got["recentRuns"].is_array());
 
     let overview = call(&ctx, ToolName::GetOverview, json!({})).await;
     assert_eq!(overview["appCount"], 1);
@@ -142,7 +145,7 @@ async fn logs_and_ports_come_from_the_running_task() {
 
     let running = call(&ctx, ToolName::ListRunning, json!({})).await;
     assert_eq!(running["count"], 1);
-    let task_id = running["running"][0]["taskId"]
+    let _task_id = running["running"][0]["taskId"]
         .as_str()
         .unwrap()
         .to_string();
@@ -150,17 +153,9 @@ async fn logs_and_ports_come_from_the_running_task() {
     // Ports: the listener is real, so it must show up as confirmed.
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
-        let ports = call(&ctx, ToolName::GetPorts, json!({"task_id": task_id})).await;
-        let confirmed = &ports[0]["confirmed"];
-        if confirmed
-            .as_array()
-            .map(|items| {
-                items
-                    .iter()
-                    .any(|value| value.as_u64() == Some(port as u64))
-            })
-            .unwrap_or(false)
-        {
+        // Look the port up by number: the legacy tool answers with its owner.
+        let ports = call(&ctx, ToolName::GetPorts, json!({"port": port})).await;
+        if ports["owner"].as_str().is_some() {
             break;
         }
         assert!(Instant::now() < deadline, "port never confirmed: {ports}");
@@ -168,10 +163,20 @@ async fn logs_and_ports_come_from_the_running_task() {
     }
 
     // A running app cannot be removed: that would orphan the process.
-    let removed = call(&ctx, ToolName::RemoveApp, json!({"app_id": app_id})).await;
+    let removed = call(
+        &ctx,
+        ToolName::RemoveApp,
+        json!({"app_id": app_id, "confirm": true}),
+    )
+    .await;
     assert!(
         removed.get("error").is_some(),
         "remove while running must fail"
+    );
+    assert_ne!(
+        removed["error"]["field"].as_str(),
+        Some("confirm"),
+        "the rejection must be about the live app, not the missing confirmation"
     );
 
     let stopped = call(&ctx, ToolName::StopApp, json!({"app_id": app_id})).await;
@@ -360,10 +365,7 @@ async fn read_tools_return_the_legacy_field_names() {
         json!({"path": app["path"]}),
     ] {
         let got = call(&ctx, ToolName::GetApp, argument.clone()).await;
-        assert_eq!(
-            got["app"]["name"], "legacy",
-            "resolution failed for {argument}"
-        );
+        assert_eq!(got["name"], "legacy", "resolution failed for {argument}");
     }
 }
 
@@ -439,4 +441,69 @@ async fn mutating_tools_accept_the_legacy_argument_names() {
     )
     .await;
     assert_eq!(confirmed["removed"], "legacy");
+}
+
+#[tokio::test]
+async fn get_logs_splits_per_task_and_get_ports_groups_by_app() {
+    let harness = Harness::new();
+    let ctx = harness.context();
+    let path = harness.project("detail");
+    let command = format!("sh {}", fixture("steady-log.sh").display());
+    let created = call(
+        &ctx,
+        ToolName::AddApp,
+        json!({"path": path, "name": "detail",
+               "tasks": [{"name": "alpha", "command": command}, {"name": "beta", "command": command}]}),
+    )
+    .await;
+    let app_id = created["app"]["id"].as_str().unwrap().to_string();
+    call(&ctx, ToolName::StartApp, json!({"app_id": app_id})).await;
+
+    // Wait for both tasks to emit, then read the app-level logs.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let logs = call(
+            &ctx,
+            ToolName::GetLogs,
+            json!({"app": "detail", "lines": 20}),
+        )
+        .await;
+        let tasks = logs["header"]["tasks"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if tasks.len() == 2 && tasks.iter().all(|task| task["hasOutput"] == true) {
+            assert_eq!(logs["header"]["linesPerTask"], 20);
+            let text = logs["text"].as_str().unwrap();
+            assert!(text.contains("=== alpha ("), "per-task sections: {text}");
+            assert!(text.contains("=== beta ("), "per-task sections: {text}");
+            break;
+        }
+        assert!(Instant::now() < deadline, "logs not ready: {logs}");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    // A single task can be selected by name.
+    let one = call(
+        &ctx,
+        ToolName::GetLogs,
+        json!({"app": "detail", "task": "beta", "lines": 5}),
+    )
+    .await;
+    assert_eq!(one["header"]["tasks"].as_array().unwrap().len(), 1);
+    assert_eq!(one["header"]["tasks"][0]["task"], "beta");
+    assert!(
+        !one["text"].as_str().unwrap().contains("=== alpha"),
+        "a single task carries no section header"
+    );
+
+    // get_ports groups by app.
+    let ports = call(&ctx, ToolName::GetPorts, json!({})).await;
+    let apps = ports["apps"].as_array().expect("apps array");
+    assert!(
+        apps.iter().all(|entry| entry["app"].is_string()),
+        "every group names its app: {ports}"
+    );
+
+    let _ = call(&ctx, ToolName::StopApp, json!({"app_id": app_id})).await;
 }
