@@ -43,6 +43,7 @@ enum HostUpdate {
     ),
     EnvError(String),
     Terminal(TaskId, String),
+    LogMatches(Vec<(TaskId, usize, String)>),
     Exported(std::path::PathBuf),
     ExportError(String),
     Error(String),
@@ -190,6 +191,31 @@ impl HostBridge {
     /// Where exported logs are written.
     pub fn logs_dir(&self) -> PathBuf {
         self.data_dir.join("logs")
+    }
+
+    /// Search every retained task's logs.
+    pub fn search_logs(&self, query: String) {
+        let handle = self.handle.clone();
+        let sink = self.reply_sink.clone();
+        self.runtime.spawn(async move {
+            let reply = handle
+                .request(CoreCommand::SearchLogs {
+                    task_id: None,
+                    query,
+                    options: neohub_core::logs::SearchOptions::default(),
+                })
+                .await;
+            let message = match reply {
+                Ok(CoreReply::LogMatches(hits)) => HostUpdate::LogMatches(
+                    hits.into_iter()
+                        .map(|(task_id, hit)| (task_id, hit.line_no, hit.line))
+                        .collect(),
+                ),
+                Ok(_) => HostUpdate::ExportError("unexpected search reply".into()),
+                Err(err) => HostUpdate::ExportError(err.to_string()),
+            };
+            let _ = sink.send(message);
+        });
     }
 
     /// Load one task's parsed terminal text.
@@ -454,6 +480,10 @@ impl HostBridge {
                         store.set_terminal_text(task_id, text);
                         changed = true;
                     }
+                    HostUpdate::LogMatches(results) => {
+                        store.set_search_results(results);
+                        changed = true;
+                    }
                     HostUpdate::Exported(path) => {
                         eprintln!("[ui] exported logs to {}", path.display());
                         changed = true;
@@ -558,6 +588,9 @@ pub struct ShellView {
     terminal_height: usize,
     /// Task the rendered terminal belongs to (avoids rebuilding every frame).
     terminal_task: Option<TaskId>,
+    /// Global log search input.
+    search_input: TextField,
+    log_search_focus: FocusHandle,
 }
 
 impl ShellView {
@@ -566,6 +599,7 @@ impl ShellView {
         let editor_focus = cx.focus_handle();
         let settings_focus = cx.focus_handle();
         let env_focus = cx.focus_handle();
+        let log_search_focus = cx.focus_handle();
         ShellView {
             bridge,
             search: TextField::new(""),
@@ -585,6 +619,8 @@ impl ShellView {
             terminal_follow: true,
             terminal_height: 16,
             terminal_task: None,
+            search_input: TextField::new(""),
+            log_search_focus,
         }
     }
 
@@ -928,6 +964,30 @@ impl Render for ShellView {
                         .child(format!("端口 {}", totals.ports)),
                 )
                 .child({
+                    let entity = cx.entity().downgrade();
+                    let focus = self.log_search_focus.clone();
+                    div()
+                        .id("nav-log-search")
+                        .px(px(metrics::PAD_3))
+                        .py(px(metrics::GAP_1))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(palette.bg_elevated)
+                        .text_size(px(metrics::TEXT_SM))
+                        .cursor_pointer()
+                        .child("搜索日志")
+                        .on_click(move |_, window, cx| {
+                            let _ = entity.update(cx, |this, cx| {
+                                this.bridge
+                                    .store
+                                    .lock()
+                                    .expect("store lock")
+                                    .open_search("");
+                                window.focus(&focus, cx);
+                                cx.notify();
+                            });
+                        })
+                })
+                .child({
                     let bridge = self.bridge.clone();
                     let entity = cx.entity().downgrade();
                     div()
@@ -971,7 +1031,197 @@ impl Render for ShellView {
             self.bridge.load_history(app_id);
         }
 
-        if let Some(panel) = self.settings.as_mut() {
+        let search_state = {
+            let store = self.bridge.store.lock().expect("store lock");
+            store.search().clone()
+        };
+        if search_state.open {
+            let mut panel = div()
+                .flex()
+                .flex_col()
+                .gap(px(metrics::GAP_2))
+                .p(px(metrics::PAD_4))
+                .rounded(px(metrics::RADIUS_LG))
+                .border_1()
+                .border_color(palette.border)
+                .bg(palette.bg_surface)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(
+                            div()
+                                .text_size(px(metrics::TEXT_BASE))
+                                .child("全局日志搜索"),
+                        )
+                        .child({
+                            let entity = cx.entity().downgrade();
+                            div()
+                                .id("log-search-close")
+                                .px(px(metrics::PAD_2))
+                                .rounded(px(metrics::RADIUS_MD))
+                                .bg(palette.bg_elevated)
+                                .text_size(px(metrics::TEXT_XS))
+                                .cursor_pointer()
+                                .child("关闭")
+                                .on_click(move |_, _, cx| {
+                                    let _ = entity.update(cx, |this, cx| {
+                                        this.bridge
+                                            .store
+                                            .lock()
+                                            .expect("store lock")
+                                            .close_search();
+                                        cx.notify();
+                                    });
+                                })
+                        }),
+                );
+
+            let mut input_row = div().flex().items_center().gap(px(metrics::GAP_2));
+            {
+                let entity = cx.entity().downgrade();
+                let focus = self.search_focus.clone();
+                input_row = input_row.child(
+                    div()
+                        .id("log-search-input")
+                        .track_focus(&self.log_search_focus)
+                        .px(px(metrics::PAD_2))
+                        .py(px(1.0))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .border_1()
+                        .border_color(palette.border)
+                        .bg(palette.bg_base)
+                        .text_size(px(metrics::TEXT_SM))
+                        .cursor_pointer()
+                        .child(if self.search_input.text().is_empty() {
+                            "输入关键字…".to_string()
+                        } else {
+                            self.search_input.text().to_string()
+                        })
+                        .on_click(move |_, window, cx| {
+                            window.focus(&focus, cx);
+                            let _ = entity.update(cx, |_, cx| cx.notify());
+                        }),
+                );
+            }
+            {
+                let bridge = self.bridge.clone();
+                let entity = cx.entity().downgrade();
+                input_row = input_row.child(
+                    div()
+                        .id("log-search-run")
+                        .px(px(metrics::PAD_3))
+                        .py(px(1.0))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(palette.accent)
+                        .text_color(palette.accent_fg)
+                        .text_size(px(metrics::TEXT_SM))
+                        .cursor_pointer()
+                        .child("搜索")
+                        .on_click(move |_, _, cx| {
+                            let _ = entity.update(cx, |this, cx| {
+                                let query = this.search_input.text().to_string();
+                                this.bridge
+                                    .store
+                                    .lock()
+                                    .expect("store lock")
+                                    .open_search(query.clone());
+                                bridge.search_logs(query);
+                                cx.notify();
+                            });
+                        }),
+                );
+            }
+            panel = panel.child(input_row);
+
+            if search_state.busy {
+                panel = panel.child(
+                    div()
+                        .text_size(px(metrics::TEXT_XS))
+                        .text_color(palette.fg_muted)
+                        .child("搜索中…"),
+                );
+            } else if search_state.results.is_empty() {
+                panel = panel.child(
+                    div()
+                        .text_size(px(metrics::TEXT_XS))
+                        .text_color(palette.fg_muted)
+                        .child("没有匹配（已退出但未淘汰的日志同样会被搜索）"),
+                );
+            }
+
+            for (task_id, line_no, line) in search_state.results.iter().take(50) {
+                let (app_name, task_name) = {
+                    let store = self.bridge.store.lock().expect("store lock");
+                    store.labels_for(task_id)
+                };
+                let entity = cx.entity().downgrade();
+                let task_id = task_id.clone();
+                panel = panel.child(
+                    div()
+                        .id(format!("log-hit-{task_id}-{line_no}"))
+                        .flex()
+                        .flex_col()
+                        .px(px(metrics::PAD_2))
+                        .py(px(1.0))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(palette.bg_base)
+                        .text_size(px(metrics::TEXT_XS))
+                        .cursor_pointer()
+                        .child(
+                            div()
+                                .text_color(palette.fg_subtle)
+                                .child(format!("{app_name} / {task_name} · 第 {line_no} 行")),
+                        )
+                        .child(div().text_color(palette.fg).child(line.clone()))
+                        .on_click(move |_, _, cx| {
+                            let _ = entity.update(cx, |this, cx| {
+                                let app_id = {
+                                    let store = this.bridge.store.lock().expect("store lock");
+                                    store.locate_task(&task_id)
+                                };
+                                if let Some(app_id) = app_id {
+                                    this.bridge.with_session(|session| {
+                                        session.select_app(app_id.clone(), Some(task_id.clone()))
+                                    });
+                                    this.history_requested = None;
+                                    this.terminal = None;
+                                    this.terminal_task = None;
+                                }
+                                this.bridge.store.lock().expect("store lock").close_search();
+                                cx.notify();
+                            });
+                        }),
+                );
+            }
+
+            panel = panel.on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                let characters = event.keystroke.key_char.as_deref();
+                match this
+                    .search_input
+                    .apply_key(&event.keystroke.key, characters)
+                {
+                    KeyOutcome::Changed => cx.notify(),
+                    KeyOutcome::Escape => {
+                        this.bridge.store.lock().expect("store lock").close_search();
+                        cx.notify();
+                    }
+                    KeyOutcome::Submit => {
+                        let query = this.search_input.text().to_string();
+                        this.bridge
+                            .store
+                            .lock()
+                            .expect("store lock")
+                            .open_search(query.clone());
+                        this.bridge.search_logs(query);
+                        cx.notify();
+                    }
+                    KeyOutcome::Ignored => {}
+                }
+            }));
+            main = main.child(panel);
+        } else if let Some(panel) = self.settings.as_mut() {
             let draft = panel.draft().clone();
             let dirty = panel.is_dirty();
             let mut body = div()

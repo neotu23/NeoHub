@@ -96,6 +96,19 @@ pub struct UiStore {
     history: BTreeMap<AppId, Vec<RunHistoryRow>>,
     /// Parsed terminal text per task (readable, escapes already consumed).
     terminal_text: BTreeMap<TaskId, String>,
+    /// Global log search state (cross-task).
+    search: SearchState,
+}
+
+/// Cross-task log search: the query, its matches and whether a search is running.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SearchState {
+    pub open: bool,
+    pub query: String,
+    pub busy: bool,
+    pub error: Option<String>,
+    /// Matches as (task, line number, line text).
+    pub results: Vec<(TaskId, usize, String)>,
 }
 
 impl UiStore {
@@ -109,6 +122,7 @@ impl UiStore {
             import: ImportState::default(),
             history: BTreeMap::new(),
             terminal_text: BTreeMap::new(),
+            search: SearchState::default(),
         }
     }
 
@@ -162,6 +176,62 @@ impl UiStore {
                     .insert(task.app_id.clone(), vec![task]);
             }
         }
+    }
+
+    pub fn search(&self) -> &SearchState {
+        &self.search
+    }
+
+    pub fn open_search(&mut self, query: impl Into<String>) {
+        self.search.open = true;
+        self.search.query = query.into();
+        self.search.busy = true;
+        self.search.error = None;
+        self.search.results.clear();
+    }
+
+    pub fn close_search(&mut self) {
+        self.search = SearchState::default();
+    }
+
+    pub fn set_search_results(&mut self, results: Vec<(TaskId, usize, String)>) {
+        self.search.busy = false;
+        self.search.error = None;
+        self.search.results = results;
+    }
+
+    pub fn set_search_error(&mut self, message: impl Into<String>) {
+        self.search.busy = false;
+        self.search.error = Some(message.into());
+    }
+
+    /// Which app owns a task (used when a search hit is clicked).
+    pub fn locate_task(&self, task_id: &TaskId) -> Option<AppId> {
+        let snapshot = self.snapshot.as_ref()?;
+        snapshot
+            .tasks_by_app
+            .iter()
+            .find(|(_, tasks)| tasks.iter().any(|task| &task.id == task_id))
+            .map(|(app_id, _)| app_id.clone())
+    }
+
+    /// Names of an app and a task, for the result rows.
+    pub fn labels_for(&self, task_id: &TaskId) -> (String, String) {
+        let Some(snapshot) = self.snapshot.as_ref() else {
+            return (String::new(), String::new());
+        };
+        for (app_id, tasks) in &snapshot.tasks_by_app {
+            if let Some(task) = tasks.iter().find(|task| &task.id == task_id) {
+                let app_name = snapshot
+                    .apps
+                    .iter()
+                    .find(|app| &app.id == app_id)
+                    .map(|app| app.name.clone())
+                    .unwrap_or_default();
+                return (app_name, task.name.clone());
+            }
+        }
+        (String::new(), String::new())
     }
 
     pub fn set_terminal_text(&mut self, task_id: TaskId, text: String) {

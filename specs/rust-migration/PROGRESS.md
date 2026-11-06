@@ -560,7 +560,7 @@
     3. db danger zone（导出/重置）→ 阶段 15
 
 ### 阶段 11：原生终端、日志搜索与导出
-- 状态：**开发中**（终端视图/选择/搜索 + 渲染 + SGR 颜色 + 导出完成；全局搜索视图待做）
+- 状态：**已验证**（终端视图/选择/搜索、彩色渲染、导出、全局日志搜索面板全部完成；等宽字体与刷新合批为已知差异）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: add the native terminal view, selection and search`
 - 实际修改文件：新增 `native/crates/ui/src/terminal/{mod,view,selection,search}.rs`、
@@ -613,4 +613,16 @@
     1. 等宽字体尚未指定（GPUI 字体族设置待验证）
     2. 全局日志搜索视图（跨任务定位 + 点击跳转）仍待做
     3. 33 ms/16 KiB 合批与可见性门控（阶段 9 起的遗留项）
+
+- 第四批完成（2026-11-07T03:20Z–03:45Z UTC）：
+  - `UiStore::SearchState`（open/query/busy/error/results）+ `locate_task`/`labels_for`
+  - `HostBridge::search_logs`（全局 `SearchLogs { task_id: None }`）→ `HostUpdate::LogMatches`
+  - 顶栏「搜索日志」打开面板：输入框（回车即搜、Esc 关闭）、结果按
+    `应用 / 任务 · 第 N 行` + 命中行显示，点击结果**跳转到该项目与任务 tab**并关闭面板
+  - 验证：`cargo test --workspace --locked` → **343 passed / 0 failed**；clippy **0 warnings**；
+    `cargo fmt --all`；实机启动 7 s 无 stderr
+  - 未解决问题（已知差异，非阻塞）：
+    1. 等宽字体尚未指定
+    2. 日志刷新合批（33 ms / 16 KiB）与"仅可见任务推送"门控仍未做
+    3. 快捷键 ⌘⇧F/⌘K 的键位绑定待阶段 12 与菜单一起接
 
