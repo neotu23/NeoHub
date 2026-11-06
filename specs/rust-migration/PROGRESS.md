@@ -410,7 +410,7 @@
        上述 `import_flow` 测试从命令层验证了同一链路
 
 ### 阶段 10：项目详情、任务编辑、环境变量与设置
-- 状态：**开发中**（详情页 + 任务编辑器（模型与视图）完成；设置面板与环境变量编辑器待做）
+- 状态：**开发中**（详情页 + 任务编辑器完成；设置命令面与表单模型完成，面板视图与环境变量编辑器待做）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: add edit drafts, save barrier and locales`
 - 实际修改文件：新增 `native/crates/ui/src/state/edit_session.rs`、
@@ -498,4 +498,21 @@
        IME/退格/光标移动，本会话无法做点击验证
     2. 设置面板（17 项 + db 导出/重置/登录项/通知/菜单栏）与环境变量编辑器仍是本阶段剩余
     3. 任务依赖编辑与重排 UI 尚未提供（命令层已具备）
+
+- 第六批完成（2026-11-07T00:00Z–00:25Z UTC）：
+  - core：`GetSettings`/`UpdateSettings` 命令；`CoreEventKind::SettingsChanged`；
+    `CoreService::{settings, update_settings}`（应用 patch → 落库 → 广播）
+  - ui：`SettingsForm`（17 项全覆盖）：`patch()` 只携带改动字段；数值项经 domain patch 的同一套
+    clamp（刷新下限 200 ms、就绪超时下限 1000 ms、MCP 端口 <1024 直接拒绝且不改动草稿）；
+    脏状态下忽略外部刷新；`pending_native_fields()` 明确列出"已存储但需阶段 12/14/15 才生效"的项
+    （登录启动 / 菜单栏 / 通知 / MCP），不假装它们已经工作
+  - 验证：`cargo test -p neohub-ui --lib settings_form` → **8 passed**；
+    `cargo test -p neohub-core --test settings_cmd` → **3 passed**
+    （命令往返 + 落库 + 重启后仍生效 + `SettingsChanged` 事件；越界值由 core 兜底 clamp；
+    未知字段 `serde` 解析即报错）；`cargo test --workspace --locked` → **299 passed / 0 failed**；
+    clippy **0 warnings**
+  - 未解决问题：
+    1. 设置面板的**视图**尚未渲染（模型与命令已就绪）
+    2. 依赖系统集成的四项（登录启动/菜单栏/通知/MCP）只存储与展示，实际生效在阶段 12/14/15
+    3. 环境变量编辑器（三层 + 秘密遮挡 + 掩码不回写）仍待做
 

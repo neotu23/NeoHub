@@ -299,6 +299,11 @@ impl UiStore {
                 }
                 true
             }
+            CoreEventKind::SettingsChanged(settings) => {
+                snapshot.settings = *settings;
+                snapshot.revision = event.revision;
+                true
+            }
             CoreEventKind::ResyncRequired { .. } => true,
             CoreEventKind::CatalogChanged => true,
         }

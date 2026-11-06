@@ -664,6 +664,27 @@ impl CoreService {
         })
     }
 
+    /// Read the current settings.
+    pub fn settings(&self) -> CoreResult<neohub_domain::Settings> {
+        self.with_storage(|storage| Ok(storage.settings().load()?))
+    }
+
+    /// Apply a settings patch, persist it, and tell subscribers.
+    pub fn update_settings(
+        &self,
+        patch: &neohub_domain::SettingsPatch,
+    ) -> CoreResult<neohub_domain::Settings> {
+        let mut settings = self.settings()?;
+        settings.apply(patch);
+        self.with_storage(|storage| Ok(storage.settings().save(&settings)?))?;
+        let revision = self.bump_revision();
+        let _ = self.events.send(CoreEvent {
+            revision,
+            kind: CoreEventKind::SettingsChanged(Box::new(settings.clone())),
+        });
+        Ok(settings)
+    }
+
     /// Task mutations always go through the catalog so validation stays in one place.
     pub fn add_task(
         &self,
@@ -989,6 +1010,14 @@ impl CoreHandle {
     pub async fn request(&self, command: CoreCommand) -> CoreResult<CoreReply> {
         match command {
             CoreCommand::GetSnapshot => Ok(CoreReply::Snapshot(Box::new(self.service.snapshot()?))),
+            CoreCommand::GetSettings => {
+                let settings = self.service.settings()?;
+                Ok(CoreReply::Settings(Box::new(settings)))
+            }
+            CoreCommand::UpdateSettings { patch } => {
+                let settings = self.service.update_settings(&patch)?;
+                Ok(CoreReply::Settings(Box::new(settings)))
+            }
             CoreCommand::ScanFolder { dir } => {
                 let candidates = self.service.scan_folder(&dir)?;
                 Ok(CoreReply::ImportCandidates(candidates))

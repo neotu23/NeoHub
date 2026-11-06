@@ -38,6 +38,8 @@ pub enum CoreEventKind {
         confirmed: Vec<u16>,
         hinted: Vec<u16>,
     },
+    /// Settings were written (by the UI or by MCP); subscribers should re-read them.
+    SettingsChanged(Box<neohub_domain::Settings>),
     /// Catalog rows changed (app/task/env edited through the same command path).
     CatalogChanged,
     /// The subscriber missed events; take a fresh snapshot and continue after it.

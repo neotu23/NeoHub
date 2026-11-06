@@ -9,6 +9,12 @@ use std::path::PathBuf;
 #[derive(Clone, Debug)]
 pub enum CoreCommand {
     GetSnapshot,
+    /// Current settings.
+    GetSettings,
+    /// Patch settings; only the named fields change, unknown fields are rejected by the type.
+    UpdateSettings {
+        patch: neohub_domain::SettingsPatch,
+    },
     /// Shallow scan of a folder for importable projects.
     ScanFolder {
         dir: PathBuf,
@@ -93,6 +99,7 @@ pub enum CoreReply {
     ImportCandidates(Vec<crate::environment::ImportCandidate>),
     App(Box<App>),
     Task(Box<Task>),
+    Settings(Box<neohub_domain::Settings>),
     RunHistory(Vec<neohub_domain::RunHistoryRow>),
     LogBootstrap(LogSubscriptionOutcome),
     LogMatches(Vec<(TaskId, LineMatch)>),
