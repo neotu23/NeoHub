@@ -49,15 +49,15 @@
 
 | # | 功能 | 旧版源码依据 | 旧版基线 | Rust 目标 | Rust 状态 |
 |---|---|---|---|---|---|
-| L1 | 主进程有界日志环：每任务 5 MiB / `log_ring_size` 行、全局 100 MiB、退出后淘汰 | `LogBuffer.ts` | 已验证（`LogBuffer.test.ts`） | `core/src/logs/buffer.rs` | 未开始 |
-| L2 | 可见性订阅 `task:subscribeLogs/unsubscribeLogs`，只为可见任务推送 | `ipc/index.ts` | 部分 | `core/src/logs/subscription.rs` | 未开始 |
+| L1 | 主进程有界日志环：每任务 5 MiB / `log_ring_size` 行、全局 100 MiB、退出后淘汰 | `LogBuffer.ts` | 已验证（`LogBuffer.test.ts`） | `core/src/logs/buffer.rs`| 已验证（每任务 5 MiB / 全局 100 MiB / 单 chunk 10 KiB / 退出 10 分钟淘汰，按真实 UTF-8 字节计） |
+| L2 | 可见性订阅 `task:subscribeLogs/unsubscribeLogs`，只为可见任务推送 | `ipc/index.ts` | 部分 | `core/src/logs/subscription.rs`| 部分（`bootstrap_logs` + 事件流已实现，脱离订阅仍采集；"只为可见任务推送" 的门控随 UI 在阶段 11 接） |
 | L3 | 合批推送 ~30 Hz / 16 KiB | `ipc/index.ts` | 部分 | `core/src/logs/buffer.rs` | 未开始 |
-| L4 | 读取/尾读/清空缓冲 `readBuffer`/`tailBuffer`/`clearBuffer` | `ipc/index.ts` | 部分 | `core/src/logs/` | 未开始 |
-| L5 | 跨任务全局日志搜索 `logs:searchAll`（正则 + limit） | `mcp/tools.ts`, `GlobalLogSearch.tsx` | 部分 | `core/src/logs/search.rs` | 未开始 |
+| L4 | 读取/尾读/清空缓冲 `readBuffer`/`tailBuffer`/`clearBuffer` | `ipc/index.ts` | 部分 | `core/src/logs/`| 已验证（`GetLogs`/`ClearLogs`/`BootstrapLogs` 命令；清空不影响进程） |
+| L5 | 跨任务全局日志搜索 `logs:searchAll`（正则 + limit） | `mcp/tools.ts`, `GlobalLogSearch.tsx` | 部分 | `core/src/logs/search.rs`| 已验证（`SearchLogs` 支持单任务与全局，字面量/正则/大小写/limit，非法正则报错） |
 | L6 | 单任务日志过滤视图（虚拟化 + 高亮 + 行号） | `LogSearchView.tsx` | 部分 | `ui/src/views/log_search.rs` | 未开始 |
-| L7 | 终端渲染：ANSI 16/256/真彩、CR 覆写、滚动历史、自动跟随、选择复制、字号 | `LogTerminal.tsx`（xterm 6） | 部分（截图） | `ui/src/terminal/` | 未开始 |
+| L7 | 终端渲染：ANSI 16/256/真彩、CR 覆写、滚动历史、自动跟随、选择复制、字号 | `LogTerminal.tsx`（xterm 6） | 部分（截图） | `ui/src/terminal/`| 部分（`vte` 解析 + 网格/scrollback/宽字符/CR 覆写/清行/光标移动已实现并测试；GPUI 绘制在阶段 11） |
 | L8 | 日志复制/保存导出 | `AppDetail.tsx` | 部分 | `ui/src/terminal/` | 未开始 |
-| L9 | 崩溃日志钉住最后 200 行 + 重启入口 + 端口冲突提示 | `CrashPin.tsx` | 部分 | `ui/src/views/app_detail.rs` | 未开始 |
+| L9 | 崩溃日志钉住最后 200 行 + 重启入口 + 端口冲突提示 | `CrashPin.tsx` | 部分 | `ui/src/views/app_detail.rs`| 部分（崩溃/退出后日志仍可搜索查看，10 分钟后淘汰；崩溃钉住入口随 UI） |
 
 ## 5. 环境变量与密钥
 

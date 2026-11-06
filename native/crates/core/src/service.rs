@@ -440,6 +440,15 @@ impl CoreService {
         Ok(())
     }
 
+    /// Global search across every retained task.
+    pub fn search_logs_all(
+        &self,
+        query: &str,
+        options: &crate::logs::SearchOptions,
+    ) -> Result<Vec<(TaskId, crate::logs::LineMatch)>, crate::logs::LogError> {
+        self.runner.search_logs_all(query, options)
+    }
+
     fn finish_history(
         &self,
         task_id: &TaskId,

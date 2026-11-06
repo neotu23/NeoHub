@@ -18,9 +18,10 @@ use super::process_tree::{
     DEFAULT_GRACE, TerminationOutcome, current_process_group, terminate_group,
 };
 use super::spawn_spec::{SpawnSpec, resize_grid};
+use crate::logs::{LogCursor, LogStore, LogSubscriptionOutcome, SearchOptions};
 use neohub_domain::{AppId, ProcessState, RunId, TaskId};
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::io::Read;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -102,29 +103,6 @@ struct LiveTask {
     started_at: i64,
     command: String,
     master: Mutex<Box<dyn MasterPty + Send>>,
-    /// Bytes captured before the reader thread started emitting (kept for inspection).
-    _logs: Arc<Mutex<LogRing>>,
-}
-
-#[derive(Default)]
-struct LogRing {
-    bytes: VecDeque<u8>,
-    seq: u64,
-}
-
-impl LogRing {
-    fn push(&mut self, chunk: &[u8]) -> u64 {
-        self.seq += 1;
-        self.bytes.extend(chunk.iter().copied());
-        while self.bytes.len() > LOG_BUDGET_BYTES {
-            self.bytes.pop_front();
-        }
-        self.seq
-    }
-
-    fn snapshot(&self) -> String {
-        String::from_utf8_lossy(&self.bytes.iter().copied().collect::<Vec<u8>>()).into_owned()
-    }
 }
 
 struct Slot {
@@ -133,7 +111,6 @@ struct Slot {
     op: Arc<tokio::sync::Mutex<()>>,
     live: Option<LiveTask>,
     last_exit: Option<ExitInfo>,
-    logs: Arc<Mutex<LogRing>>,
     /// Set while a user-initiated stop is in progress, so the exit is attributed correctly.
     stopping_by_user: bool,
 }
@@ -146,7 +123,6 @@ impl Slot {
             op: Arc::new(tokio::sync::Mutex::new(())),
             live: None,
             last_exit: None,
-            logs: Arc::new(Mutex::new(LogRing::default())),
             stopping_by_user: false,
         }
     }
@@ -158,6 +134,8 @@ struct Inner {
     shutting_down: Mutex<bool>,
     revision: AtomicU64,
     grace: Duration,
+    /// Bounded logs + parsed terminal state, shared by every task.
+    logs: Mutex<LogStore>,
 }
 
 /// Owns every live task process.
@@ -181,6 +159,7 @@ impl TaskRunner {
                 shutting_down: Mutex::new(false),
                 revision: AtomicU64::new(0),
                 grace,
+                logs: Mutex::new(LogStore::new()),
             }),
         }
     }
@@ -232,15 +211,73 @@ impl TaskRunner {
             .and_then(|slot| slot.last_exit.clone())
     }
 
-    /// Raw log tail for one task (bounded).
+    /// Retained raw text for one task (bounded).
     pub fn logs_of(&self, task_id: &TaskId) -> String {
         self.inner
-            .slots
+            .logs
             .lock()
-            .expect("runner lock")
-            .get(task_id)
-            .map(|slot| slot.logs.lock().expect("log lock").snapshot())
+            .expect("logs lock")
+            .raw_text(task_id)
             .unwrap_or_default()
+    }
+
+    /// Take a subscription bootstrap (terminal + cursor + bounded raw tail).
+    pub fn bootstrap_logs(
+        &self,
+        task_id: &TaskId,
+        after: Option<&LogCursor>,
+    ) -> Option<LogSubscriptionOutcome> {
+        self.inner
+            .logs
+            .lock()
+            .expect("logs lock")
+            .bootstrap(task_id, after)
+    }
+
+    /// Search the retained raw text of one task.
+    pub fn search_logs(
+        &self,
+        task_id: &TaskId,
+        query: &str,
+        options: &SearchOptions,
+    ) -> Result<Vec<crate::logs::LineMatch>, crate::logs::LogError> {
+        self.inner
+            .logs
+            .lock()
+            .expect("logs lock")
+            .search_task(task_id, query, options)
+    }
+
+    /// Search every retained task (global log search).
+    pub fn search_logs_all(
+        &self,
+        query: &str,
+        options: &SearchOptions,
+    ) -> Result<Vec<(TaskId, crate::logs::LineMatch)>, crate::logs::LogError> {
+        self.inner
+            .logs
+            .lock()
+            .expect("logs lock")
+            .search_all(query, options)
+    }
+
+    /// Drop one task's logs (never touches the process).
+    pub fn clear_logs(&self, task_id: &TaskId) -> bool {
+        self.inner.logs.lock().expect("logs lock").clear(task_id)
+    }
+
+    /// Evict logs of tasks that exited longer than the retention window ago.
+    pub fn evict_expired_logs(&self, now_ms: i64) -> usize {
+        self.inner
+            .logs
+            .lock()
+            .expect("logs lock")
+            .evict_expired(now_ms)
+    }
+
+    /// Reported log memory usage ("bounded" is measurable, not asserted).
+    pub fn log_usage(&self) -> crate::logs::LogUsage {
+        self.inner.logs.lock().expect("logs lock").usage()
     }
 
     /// Start one task from a fully resolved spec.
@@ -274,7 +311,6 @@ impl TaskRunner {
             slot.state = ProcessState::Starting;
             slot.last_exit = None;
             slot.generation += 1;
-            slot.logs.lock().expect("log lock").bytes.clear();
         }
         let generation = {
             let slots = self.inner.slots.lock().expect("runner lock");
@@ -336,7 +372,7 @@ impl TaskRunner {
             return Err(RunnerError::ShuttingDown);
         }
 
-        let logs = {
+        {
             let mut slots = self.inner.slots.lock().expect("runner lock");
             let slot = slots.get_mut(&task_id).expect("slot exists");
             slot.state = ProcessState::Running;
@@ -348,10 +384,8 @@ impl TaskRunner {
                 started_at,
                 command: command.clone(),
                 master: Mutex::new(master),
-                _logs: slot.logs.clone(),
             });
-            slot.logs.clone()
-        };
+        }
         self.emit_status(
             &task_id,
             &app_id,
@@ -366,7 +400,6 @@ impl TaskRunner {
             let inner = self.inner.clone();
             let task_id = task_id.clone();
             let run_id = run_id.clone();
-            let logs = logs.clone();
             std::thread::Builder::new()
                 .name(format!("pty-read-{}", task_id))
                 .spawn(move || {
@@ -377,15 +410,20 @@ impl TaskRunner {
                             Ok(0) => break,
                             Ok(n) => {
                                 let chunk = &buffer[..n];
-                                let seq = logs.lock().expect("log lock").push(chunk);
-                                // A lagging subscriber gets Lagged from broadcast; the
-                                // lifecycle events are never dropped silently.
-                                let _ = inner.events.send(RunnerEvent::Log {
-                                    task_id: task_id.clone(),
-                                    run_id: run_id.clone(),
-                                    seq,
-                                    bytes: chunk.to_vec(),
-                                });
+                                // Bound the work per lock hold: split into <=10 KiB events.
+                                let outcome = inner
+                                    .logs
+                                    .lock()
+                                    .expect("logs lock")
+                                    .append(&task_id, &run_id, chunk);
+                                for (seq, bytes) in outcome.chunks {
+                                    let _ = inner.events.send(RunnerEvent::Log {
+                                        task_id: task_id.clone(),
+                                        run_id: run_id.clone(),
+                                        seq,
+                                        bytes,
+                                    });
+                                }
                             }
                             Err(_) => break,
                         }
@@ -543,6 +581,11 @@ impl TaskRunner {
             return Ok(()); // resizing a task that is not running is a no-op, not an error
         };
         let master = live.master.lock().expect("master lock");
+        self.inner
+            .logs
+            .lock()
+            .expect("logs lock")
+            .resize(task_id, cols, rows);
         master
             .resize(PtySize {
                 rows,
@@ -672,6 +715,11 @@ fn settle_exit(
         slot.live = None;
         emit = Some(slot.state);
     }
+    inner
+        .logs
+        .lock()
+        .expect("logs lock")
+        .mark_exited(task_id, neohub_storage::db::now_ms());
     if let Some(state) = emit {
         inner.revision.fetch_add(1, Ordering::SeqCst);
         let _ = inner.events.send(RunnerEvent::Status {

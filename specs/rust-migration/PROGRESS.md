@@ -246,3 +246,35 @@
   - 残留进程检查：`pgrep -f test-fixtures/process` 为空
 
 ---
+
+### 阶段 6：有界日志、终端状态与订阅恢复
+- 状态：**已验证**（日志存储/终端状态/订阅引导/搜索全部完成；逐帧合批与 UI 渲染在阶段 11）
+- 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
+- 最近提交：`feat: add bounded logs and recoverable terminal streams`
+- 实际修改文件：新增 `native/crates/core/src/logs/{mod,buffer,terminal_state,subscription,search}.rs`、
+  `native/crates/core/tests/log_stream.rs`、`native/test-fixtures/process/numbered-output.sh`；
+  修改 `process/runner.rs`（日志后端换成 `LogStore`，新增 bootstrap/search/clear/eviction/usage 接口）、
+  `commands.rs`（`BootstrapLogs`/`SearchLogs`/`ClearLogs`）、`service.rs`（转发 + 全局搜索）、`Cargo.toml`
+- 验证命令与结果（2026-11-06T16:40Z–17:20Z UTC）：
+  - `cargo test -p neohub-core --test log_stream --locked` → **6 passed**
+    （1000 条编号输出"先订阅后挂载"：无重复、无缺口；旧 run 游标返回 `ResetRequired`；
+    丢弃订阅后 PTY 继续采集；退出任务仍可搜索；清空日志不影响运行中的进程；
+    全局/单任务预算与截断上报）
+  - `cargo test -p neohub-core --lib logs` → **27 passed**（终端状态 10：跨 chunk UTF-8/ANSI、
+    宽字符、CR 覆写、清行/清屏、光标移动、超长行换行、scrollback 上限与截断；缓冲区 11；搜索 6）
+  - `cargo test --workspace --locked` → **170 passed / 0 failed**
+  - `cargo clippy -p neohub-core --all-targets --locked` → **0 warnings**；`cargo fmt --all` 已执行
+  - 残留进程检查：`pgrep -f test-fixtures/process` 为空
+- 与旧版不同之处：
+  1. ANSI 解析使用维护中的 `vte` 0.15（Alacritty/Zed 同款解析器），网格与 scrollback 自实现；
+     **没有**用正则剥 ANSI。计划中的候选 `alacritty_terminal` 需要整棵 Term/Grid/Handler 栈，
+     体积与 API 成本更高——此处选择 vte 并在依赖文档记录（阶段 16 复核）
+  2. 预算按真实 UTF-8 字节计算（旧版按 JS 字符串长度近似），差异已按计划记入兼容说明
+  3. 终端快照携带 `parsed_bytes`（解析位置），重开窗口只取快照，绝不重放截断的 ANSI 片段
+  4. 每个事件 ≤10 KiB，序列号按 run 递增；run 变化时序号重置并向旧游标返回 `ResetRequired`
+- 未解决问题及所属阶段：
+  1. 界面刷新合批（约 33 ms / 16 KiB）与"仅可见任务推送"门控 → 阶段 11（需要 UI 订阅模型）
+  2. 日志导出命令（原始文件 vs 可读文本的区别）→ 阶段 11
+  3. 全局 100 MiB 预算在真实长跑任务上的高水位验证 → 阶段 16 压测
+
+---

@@ -1,5 +1,6 @@
 //! The single business command surface. UI and MCP both call through here.
 
+use crate::logs::{LineMatch, LogSubscriptionOutcome};
 use crate::process::runner::RunningTaskInfo;
 use crate::snapshot::CoreSnapshot;
 use neohub_domain::{AppId, TaskId};
@@ -34,5 +35,7 @@ pub enum CoreReply {
     Snapshot(Box<CoreSnapshot>),
     Started(Box<RunningTaskInfo>),
     Logs(String),
+    LogBootstrap(LogSubscriptionOutcome),
+    LogMatches(Vec<(TaskId, LineMatch)>),
     Ack,
 }
