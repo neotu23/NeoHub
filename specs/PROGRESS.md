@@ -13,6 +13,16 @@ Legend:
 
 Last sync: **2026-07-10** (MCP server field-feedback rounds closed; 1.2.0 release prep).
 
+> **Rust + GPUI rewrite（2026-11-06 起）**：`rewrite/rust-gpui` 分支正在把客户端重建为
+> Rust + GPUI，计划见 `docs/superpowers/plans/2026-11-06-neohub-rust-gpui-deepseek.md`。
+> 本文件继续描述 **Electron 稳定版**的构建状态；Rust 侧的逐项进度与功能对照另见
+> [`rust-migration/PROGRESS.md`](rust-migration/PROGRESS.md)、
+> [`rust-migration/FEATURE-PARITY.md`](rust-migration/FEATURE-PARITY.md)、
+> [`rust-migration/BASELINE.md`](rust-migration/BASELINE.md)。
+> 提醒：本矩阵自 2026-07-10 未再同步，矩阵之外的后续改动（rebrand → NeoHub、菜单栏常驻、
+> 面板销毁重建、批量导入、全局日志搜索、崩溃/就绪通知、登录启动、每应用 autoStart）
+> 已在代码中存在——迁移以源码为准，不按本矩阵删功能。
+
 ---
 
 ## Phases
