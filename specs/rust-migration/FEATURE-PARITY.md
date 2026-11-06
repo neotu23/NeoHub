@@ -70,7 +70,7 @@
 | E5 | 秘密值加密存储（Electron `safeStorage` → `enc1:` 前缀） | `EnvStore.ts` | 部分（依赖 Keychain，未在测试中断言解密） | `storage/src/secrets.rs` + `platform-macos/src/keychain.rs` | 已验证（`nhk1:` + AES-256-GCM，master key 在 login Keychain；真实 round-trip 实测通过；启动来源头待接） |
 | E6 | 密钥不可用时报 `SecretUnavailable` 并阻止受影响任务启动 | 计划要求（旧版行为需在阶段 4 复核） | **待复核** | `core/src/environment/` | 部分（`read_secret_value` 明确拒绝 `enc1:` 并报告 Locked/Corrupt；启动流程拦截待接） |
 | E7 | 环境变量编辑 UI：三 tab、启用开关、秘密遮挡、备注、批量粘贴、合并预览 | `EnvEditor.tsx` | 部分（截图 missing，见 BASELINE §5） | `ui/src/views/env_editor.rs` | 未开始 |
-| E8 | `.env` 文件变化推送 `env:fileChanged` + 横幅 | `EnvFileWatcher.ts` | 部分 | `core/src/watch/environment.rs` | 未开始 |
+| E8 | `.env` 文件变化推送 `env:fileChanged` + 横幅 | `EnvFileWatcher.ts` | 部分 | `core/src/watch/environment.rs`| 已验证（notify 非递归监听 `.env*`，去抖 250 ms，非 `.env` 文件不产生事件） |
 
 ## 6. Node 环境与 PATH
 
@@ -95,10 +95,10 @@
 
 | # | 功能 | 旧版源码依据 | 旧版基线 | Rust 目标 | Rust 状态 |
 |---|---|---|---|---|---|
-| M1 | CPU/内存采样 `task:stats`（pidusage 1 Hz，批量 1 fork/tick） | `StatsMonitor.ts` | 部分（截图 sparkline） | `core/src/monitor/stats.rs` | 未开始 |
-| M2 | 端口探测 `task:ports`：`lsof` 进程表 + stdout 提示，3 次未确认淘汰 | `PortDetector.ts` | 已验证（`PortDetector.test.ts` 7 例） | `core/src/monitor/ports.rs` | 未开始 |
-| M3 | confirmed owner 与"仅日志提示"的端口区分 | `PortDetector.ts`, `PortChip.tsx` | 已验证 | `core/src/monitor/ports.rs` | 未开始 |
-| M4 | 变更自动重启 `RestartWatcher`（chokidar + 500 ms 去抖 + glob/ignore） | `RestartWatcher.ts` | 已验证（`RestartWatcher.test.ts`） | `core/src/watch/restart.rs` | 未开始 |
+| M1 | CPU/内存采样 `task:stats`（pidusage 1 Hz，批量 1 fork/tick） | `StatsMonitor.ts` | 部分（截图 sparkline） | `core/src/monitor/stats.rs`| 部分（`ps` 批量采样已实现，own/tree 口径分离并测试；后台 1 Hz 循环与 `task:stats` 事件待接） |
+| M2 | 端口探测 `task:ports`：`lsof` 进程表 + stdout 提示，3 次未确认淘汰 | `PortDetector.ts` | 已验证（`PortDetector.test.ts` 7 例） | `core/src/monitor/ports.rs`| 已验证（一次批量 `lsof`，多级后代端口归属实测；进程退出竞态采样为 0） |
+| M3 | confirmed owner 与"仅日志提示"的端口区分 | `PortDetector.ts`, `PortChip.tsx` | 已验证 | `core/src/monitor/ports.rs`| 已验证（confirmed 与 hinted 分离，未确认提示连续 3 次淘汰） |
+| M4 | 变更自动重启 `RestartWatcher`（chokidar + 500 ms 去抖 + glob/ignore） | `RestartWatcher.ts` | 已验证（`RestartWatcher.test.ts`） | `core/src/watch/restart.rs`| 已验证（notify 递归监听、去抖 500 ms、忽略 node_modules/.git/.next/dist/build/target、`**/` 兼容 picomatch） |
 
 ## 9. 桌面系统集成
 

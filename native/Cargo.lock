@@ -3871,9 +3871,11 @@ name = "neohub-core"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "glob",
  "libc",
  "neohub-domain",
  "neohub-storage",
+ "notify",
  "portable-pty",
  "regex",
  "reqwest",

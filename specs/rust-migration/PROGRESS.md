@@ -310,3 +310,33 @@
   3. http 探测使用 reqwest+rustls；私有 CA 场景尚未验证 → 阶段 16
 
 ---
+
+### 阶段 8：端口、资源、文件监听与通知事件
+- 状态：**开发中**（monitor/watch 模块已完成并测试；后台采样循环与事件接入待做）
+- 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
+- 最近提交：`feat: port process monitoring and file watchers`
+- 实际修改文件：新增 `native/crates/core/src/monitor/{mod,ports,stats}.rs`、
+  `native/crates/core/src/watch/{mod,environment,restart}.rs`、
+  `native/crates/core/tests/monitor_watch.rs`、`native/test-fixtures/process/spawn-listener.sh`；
+  修改 `Cargo.toml`（notify 8 / glob 0.3）
+- 验证命令与结果（2026-11-06T18:30Z–19:15Z UTC）：
+  - `cargo test -p neohub-core --test monitor_watch --locked` → **5 passed**
+    （孙进程监听端口被归到任务；confirmed 与 hint 分离且 hint 三次淘汰；退出竞态采样为 0；
+    `.env` 变化上报；源码变化上报且 node_modules/非匹配文件被过滤）
+  - `cargo test -p neohub-core --lib monitor` → **11 passed**；`--lib watch` → **8 passed**
+  - `cargo test --workspace --locked` → **225 passed / 0 failed**
+  - `cargo clippy -p neohub-core --all-targets --locked` → **0 warnings**；`cargo fmt --all` 已执行
+  - 残留进程检查：`pgrep -f test-fixtures/process` 为空
+- 与旧版不同之处：
+  1. 采样口径分离：`cpu_percent`/`mem_mb` 保留旧 `cpu`/`memMB` 语义（根进程），
+     另给 `tree_cpu_percent`/`tree_mem_mb`/`process_count`（整棵受管树），不静默改含义
+  2. 端口探测一次批量 `lsof`（旧版每任务一次），并按进程组归属判祖先链
+  3. glob 语义：`glob` crate 的 `**/` 需要至少一层目录，已补上 picomatch 的"零层"折叠形式
+  4. 目录级 FSEvents 事件（无法匹配文件 glob）视为"该目录有变化"，避免漏重启；生成目录仍被忽略
+- 未解决问题及所属阶段：
+  1. 后台采样循环（默认 1000 ms、下限 200 ms、无任务时**不轮询**）与 `task:stats`/`task:ports` 事件
+     → 本阶段剩余
+  2. 崩溃/就绪通知、通知点击跳转 → 阶段 15
+  3. `.env` 变化触发的 UI 横幅与"重启 watcher 复用启动锁"（避免重启风暴）→ 阶段 10/12
+
+---
