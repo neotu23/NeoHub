@@ -410,7 +410,7 @@
        上述 `import_flow` 测试从命令层验证了同一链路
 
 ### 阶段 10：项目详情、任务编辑、环境变量与设置
-- 状态：**开发中**（编辑会话/保存屏障/语言包/文本输入/详情页/任务编辑器表单完成；编辑面板渲染与设置面板待做）
+- 状态：**开发中**（详情页 + 任务编辑器（模型与视图）完成；设置面板与环境变量编辑器待做）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: add edit drafts, save barrier and locales`
 - 实际修改文件：新增 `native/crates/ui/src/state/edit_session.rs`、
@@ -484,4 +484,18 @@
   - `cargo test --workspace --locked` → **288 passed / 0 failed**；clippy **0 warnings**；`cargo fmt --all`
   - 未解决问题：编辑面板的**视图渲染**（点击"编辑任务"展开表单、字段聚焦/键入、保存按钮）
     仍是本阶段剩余；表单模型与保存通道已就绪，接线不需要新的核心能力
+
+- 第五批完成（2026-11-06T23:40Z–23:55Z UTC）：
+  - 编辑面板渲染进详情页：「编辑任务」按钮创建 `TaskForm` 并聚焦；四个字段行可点击聚焦，
+    当前焦点字段显示光标；readiness 六个选项可点选；保存/取消按钮；错误显示为
+    "字段名：消息"；Esc 关闭面板；Tab 切换字段
+  - 保存路径：`to_update_input()` → `HostBridge::save_task` → `HostBridge::take_save_outcome`
+    在下一帧回收结果：成功则 `ack` 并关闭面板、任务 tab 显示新名称；失败则把错误映射回字段
+  - 验证：编译/clippy **0 warnings**；`cargo test --workspace --locked` → **288 passed / 0 failed**；
+    实机启动 7 s 无 stderr（带编辑面板的界面不崩）
+  - 未解决问题：
+    1. 编辑面板的字段键入目前依赖一次性 focus（点击字段设置焦点）；实机上需要人工确认
+       IME/退格/光标移动，本会话无法做点击验证
+    2. 设置面板（17 项 + db 导出/重置/登录项/通知/菜单栏）与环境变量编辑器仍是本阶段剩余
+    3. 任务依赖编辑与重排 UI 尚未提供（命令层已具备）
 

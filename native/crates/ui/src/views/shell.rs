@@ -6,6 +6,7 @@
 
 use crate::state::session::{Session, SessionStore};
 use crate::state::store::UiStore;
+use crate::state::task_form::{Field, ReadinessChoice, TaskForm};
 use crate::state::text_input::{KeyOutcome, TextField};
 use crate::theme::{DARK, LIGHT, Palette, metrics};
 use gpui_kit::*;
@@ -339,16 +340,22 @@ pub struct ShellView {
     search_focus: FocusHandle,
     /// App whose history was last requested (avoids re-requesting every frame).
     history_requested: Option<AppId>,
+    /// Open task editor, if any.
+    editor: Option<TaskForm>,
+    editor_focus: FocusHandle,
 }
 
 impl ShellView {
     pub fn new(bridge: Arc<HostBridge>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search_focus = cx.focus_handle();
+        let editor_focus = cx.focus_handle();
         ShellView {
             bridge,
             search: TextField::new(""),
             search_focus,
             history_requested: None,
+            editor: None,
+            editor_focus,
         }
     }
 
@@ -422,6 +429,21 @@ fn state_label(state: ProcessState) -> &'static str {
 impl Render for ShellView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = self.palette();
+        // Fold a completed save back into the open editor.
+        let (saved, save_error) = self.bridge.take_save_outcome();
+        if let Some(editor) = self.editor.as_mut() {
+            if let Some(saved) = saved.as_ref() {
+                let revision = editor
+                    .take_save()
+                    .map(|request| request.revision)
+                    .unwrap_or_default();
+                editor.ack(saved, revision);
+                self.editor = None;
+            } else if let Some(message) = save_error.as_ref() {
+                editor.apply_core_error(message);
+            }
+        }
+
         let query = self.search.text().to_string();
         let (sections, cards, totals, tags, filter) = {
             let mut store = self.bridge.store.lock().expect("store lock");
@@ -879,6 +901,29 @@ impl Render for ShellView {
                     let bridge = self.bridge.clone();
                     let app_id = app.id.clone();
                     let entity = cx.entity().downgrade();
+                    actions = actions.child({
+                        let entity = cx.entity().downgrade();
+                        let current = current.clone();
+                        let focus = self.editor_focus.clone();
+                        div()
+                            .id("detail-edit-task")
+                            .px(px(metrics::PAD_3))
+                            .py(px(metrics::GAP_1))
+                            .rounded(px(metrics::RADIUS_MD))
+                            .bg(palette.bg_elevated)
+                            .text_size(px(metrics::TEXT_SM))
+                            .cursor_pointer()
+                            .child("编辑任务")
+                            .on_click(move |_, window, cx| {
+                                if let Some(task) = current.clone() {
+                                    let _ = entity.update(cx, |this, cx| {
+                                        this.editor = Some(TaskForm::new(&task));
+                                        window.focus(&focus, cx);
+                                        cx.notify();
+                                    });
+                                }
+                            })
+                    });
                     actions = actions.child(
                         div()
                             .id("detail-restart")
@@ -1030,6 +1075,231 @@ impl Render for ShellView {
                         );
                     }
                     main = main.child(row);
+
+                    // Task editor panel.
+                    if let Some(editor) = self.editor.as_mut() {
+                        let fields = editor.fields().clone();
+                        let focused = editor.focused();
+                        let error = editor.error().cloned();
+                        let dirty = editor.is_dirty();
+                        let mut panel = div()
+                            .id("task-editor")
+                            .track_focus(&self.editor_focus)
+                            .flex()
+                            .flex_col()
+                            .gap(px(metrics::GAP_1))
+                            .p(px(metrics::PAD_3))
+                            .rounded(px(metrics::RADIUS_LG))
+                            .border_1()
+                            .border_color(palette.border_strong)
+                            .bg(palette.bg_surface)
+                            .child(div().text_size(px(metrics::TEXT_SM)).child(if dirty {
+                                "编辑任务（未保存）"
+                            } else {
+                                "编辑任务"
+                            }));
+
+                        let rows: Vec<(Field, String)> = vec![
+                            (Field::Name, fields.name.clone()),
+                            (Field::Command, fields.command.clone()),
+                            (Field::WorkingDir, fields.working_dir.clone()),
+                            (Field::ReadinessArg, fields.readiness_arg.clone()),
+                        ];
+                        for (field, value) in rows {
+                            let entity = cx.entity().downgrade();
+                            let focus = self.editor_focus.clone();
+                            panel = panel.child(
+                                div()
+                                    .id(format!("editor-field-{:?}", field))
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(metrics::GAP_2))
+                                    .px(px(metrics::PAD_2))
+                                    .py(px(metrics::GAP_1))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .bg(if focused == field {
+                                        palette.bg_elevated
+                                    } else {
+                                        palette.bg_base
+                                    })
+                                    .cursor_pointer()
+                                    .child(
+                                        div()
+                                            .w(px(76.0))
+                                            .text_size(px(metrics::TEXT_XS))
+                                            .text_color(palette.fg_subtle)
+                                            .child(field.label()),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(metrics::TEXT_SM))
+                                            .text_color(if value.is_empty() {
+                                                palette.fg_subtle
+                                            } else {
+                                                palette.fg
+                                            })
+                                            .child(if value.is_empty() {
+                                                "（空）".to_string()
+                                            } else {
+                                                format!(
+                                                    "{value}{}",
+                                                    if focused == field { "▏" } else { "" }
+                                                )
+                                            }),
+                                    )
+                                    .on_click(move |_, window, cx| {
+                                        let _ = entity.update(cx, |this, cx| {
+                                            if let Some(form) = this.editor.as_mut() {
+                                                form.focus(field);
+                                            }
+                                            cx.notify();
+                                        });
+                                        window.focus(&focus, cx);
+                                    }),
+                            );
+                        }
+
+                        // Readiness + toggles.
+                        let mut toggles = div().flex().gap(px(metrics::GAP_1));
+                        for choice in ReadinessChoice::ALL {
+                            let entity = cx.entity().downgrade();
+                            let active = fields.readiness == choice;
+                            toggles = toggles.child(
+                                div()
+                                    .id(format!("readiness-{:?}", choice))
+                                    .px(px(metrics::PAD_2))
+                                    .py(px(1.0))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .bg(if active {
+                                        palette.accent
+                                    } else {
+                                        palette.bg_elevated
+                                    })
+                                    .text_color(if active {
+                                        palette.accent_fg
+                                    } else {
+                                        palette.fg_muted
+                                    })
+                                    .text_size(px(metrics::TEXT_XS))
+                                    .cursor_pointer()
+                                    .child(choice.label())
+                                    .on_click(move |_, _, cx| {
+                                        let _ = entity.update(cx, |this, cx| {
+                                            if let Some(form) = this.editor.as_mut() {
+                                                form.set_readiness(choice);
+                                            }
+                                            cx.notify();
+                                        });
+                                    }),
+                            );
+                        }
+                        panel = panel.child(toggles);
+                        panel = panel.child(
+                            div()
+                                .flex()
+                                .gap(px(metrics::GAP_2))
+                                .text_size(px(metrics::TEXT_XS))
+                                .text_color(palette.fg_muted)
+                                .child(format!(
+                                    "一次性任务：{} · 启用：{}",
+                                    if fields.one_shot { "是" } else { "否" },
+                                    if fields.enabled { "是" } else { "否" }
+                                )),
+                        );
+                        if let Some(error) = error {
+                            panel = panel.child(
+                                div()
+                                    .px(px(metrics::PAD_2))
+                                    .py(px(1.0))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .bg(palette.danger_bg)
+                                    .text_size(px(metrics::TEXT_XS))
+                                    .text_color(palette.danger_fg)
+                                    .child(format!("{}：{}", error.field.label(), error.message)),
+                            );
+                        }
+
+                        // Save / cancel.
+                        let mut buttons = div().flex().gap(px(metrics::GAP_2));
+                        {
+                            let bridge = self.bridge.clone();
+                            let entity = cx.entity().downgrade();
+                            buttons = buttons.child(
+                                div()
+                                    .id("editor-save")
+                                    .px(px(metrics::PAD_3))
+                                    .py(px(metrics::GAP_1))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .bg(palette.success_strong)
+                                    .text_color(palette.accent_fg)
+                                    .text_size(px(metrics::TEXT_SM))
+                                    .cursor_pointer()
+                                    .child("保存")
+                                    .on_click(move |_, _, cx| {
+                                        let _ = entity.update(cx, |this, cx| {
+                                            let Some(form) = this.editor.as_mut() else {
+                                                return;
+                                            };
+                                            match form.to_update_input() {
+                                                Ok(input) => {
+                                                    let task_id =
+                                                        neohub_domain::TaskId::from_existing(
+                                                            form.task_id(),
+                                                        );
+                                                    bridge.save_task(task_id, input);
+                                                }
+                                                Err(error) => {
+                                                    form.apply_core_error(&error.message);
+                                                }
+                                            }
+                                            cx.notify();
+                                        });
+                                    }),
+                            );
+                        }
+                        {
+                            let entity = cx.entity().downgrade();
+                            buttons = buttons.child(
+                                div()
+                                    .id("editor-cancel")
+                                    .px(px(metrics::PAD_3))
+                                    .py(px(metrics::GAP_1))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .bg(palette.bg_elevated)
+                                    .text_size(px(metrics::TEXT_SM))
+                                    .cursor_pointer()
+                                    .child("取消")
+                                    .on_click(move |_, _, cx| {
+                                        let _ = entity.update(cx, |this, cx| {
+                                            this.editor = None;
+                                            cx.notify();
+                                        });
+                                    }),
+                            );
+                        }
+                        panel = panel.child(buttons);
+                        panel =
+                            panel.on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                let Some(form) = this.editor.as_mut() else {
+                                    return;
+                                };
+                                if event.keystroke.key == "tab" {
+                                    form.focus_next();
+                                    cx.notify();
+                                    return;
+                                }
+                                let characters = event.keystroke.key_char.as_deref();
+                                match form.apply_key(&event.keystroke.key, characters) {
+                                    KeyOutcome::Changed => cx.notify(),
+                                    KeyOutcome::Escape => {
+                                        this.editor = None;
+                                        cx.notify();
+                                    }
+                                    _ => {}
+                                }
+                            }));
+                        main = main.child(panel);
+                    }
 
                     // Log tail from the live event stream.
                     let logs = {
