@@ -26,6 +26,10 @@ coverage
 .env.*
 !.env.example
 
+# Rust rewrite worktree + build output (native/ tree is tracked, target/ is not)
+.worktrees/
+native/target/
+
 # Local tool artifacts
 .understand-anything/
 .reasonix/
