@@ -1,0 +1,12 @@
+[package]
+name = "neohub-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "NeoHub native GPUI interface"
+
+[dependencies]
+gpui-kit.workspace = true

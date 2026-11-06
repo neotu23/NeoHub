@@ -16,7 +16,7 @@
 | D3 | `ReadinessSignal` 六种 `none/port/log/http/exit/delay` | `types.ts`, `services/readiness/*` | 已验证（`HttpReadiness.test.ts` 4 例 + MCP set_readiness） | `domain/src/models.rs` | 未开始 |
 | D4 | `NodeVersionPref` auto/system/explicit + `PackageManager` × 4 | `types.ts`, `NodeResolver.ts`, `PMDetector.ts` | 已验证（`NodeResolver.test.ts` 5 例） | `domain/src/models.rs` | 未开始 |
 | D5 | `SettingsState` 17 个字段 + `McpStatus` | `ipc.ts`, `Settings.ts` | 已验证（`Settings.test.ts`） | `domain/src/settings.rs` | 未开始 |
-| D6 | IPC 契约：**59 invoke + 22 event** 频道，preload 白名单与类型同源 | `ipc.ts`, `preload/index.ts` | 已验证（`satisfies` 编译期对齐） | `core/src/commands.rs` + `events.rs` + `docs/interfaces.md` | 未开始 |
+| D6 | IPC 契约：**59 invoke + 22 event** 频道，preload 白名单与类型同源 | `ipc.ts`, `preload/index.ts` | 已验证（`satisfies` 编译期对齐） | `core/src/commands.rs` + `events.rs` + `docs/interfaces.md` | 开发中（阶段 2 已写 `native/docs/interfaces.md` 契约，无实现） |
 
 ## 2. 项目 / 任务 / 分组（CRUD）
 
@@ -173,7 +173,7 @@
 | U11 | 命令面板 ⌘K（Apps/Start/Stop/Restart/Actions 分组） | `CommandPalette.tsx`（cmdk） | 部分 | `ui/src/components/` | 未开始 |
 | U12 | 全局日志搜索 ⌘⇧F | `GlobalLogSearch.tsx` | 部分 | `ui/src/views/log_search.rs` | 未开始 |
 | U13 | 通用组件：Toast、ErrorBanner、ErrorBoundary、ContextMenu、PromptModal、StatusDot、PortChip、NodeVersionPicker、OpenInMenu、EmptyState、CrashPin、UpdateBanner | 对应 `components/*.tsx` | 部分（截图） | `ui/src/components/` | 未开始 |
-| U14 | 主题系统（Radix slate 语义变量、light/dark/system、终端浅色主题） | `styles.css`, `useTheme.ts`, `tailwind.config.ts` | 部分（截图 light/dark） | `ui/src/theme.rs` | 未开始 |
+| U14 | 主题系统（Radix slate 语义变量、light/dark/system、终端浅色主题） | `styles.css`, `useTheme.ts`, `tailwind.config.ts` | 部分（截图 light/dark） | `ui/src/theme.rs` | 开发中（阶段 2 落地两套调色板 + 间距/圆角/字号常量，2 例单测通过；尚未接到视图） |
 | U15 | 国际化 en / zh-CN + `system` 跟随系统（19 组文案命名空间） | `i18n/locales/*`, `useLanguage.ts` | 已验证（`i18n` 4 个测试文件 17 例） | `ui/locales/` | 未开始 |
 | U16 | 无障碍：焦点陷阱 `useDialog`、Esc、键盘可导航菜单、`aria-label`、非颜色状态线索 | `hooks/useDialog.ts` | 部分 | `ui/src/components/` | 未开始 |
 | U17 | 窗口尺寸/位置持久化 `window-state.json` | `index.ts` loadBounds/saveBounds | 部分 | `desktop/src/window_session.rs` | 未开始 |

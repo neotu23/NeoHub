@@ -67,3 +67,36 @@
   用最小窗口验证后写 `native/docs/DEPENDENCIES.md` 与 `interfaces.md`。
 
 ---
+
+### 阶段 2：锁定依赖并验证原生宿主
+- 状态：**已验证**（宿主链路），视觉/交互确认**受限**（见下）
+- 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`，代码在 `native/`
+- 最近提交：`build: establish native GPUI workspace`
+- 实际修改文件：`native/Cargo.toml`、`native/Cargo.lock`、`native/rust-toolchain.toml`、
+  `native/crates/{ui,desktop}/{Cargo.toml,src/*}`、`native/crates/ui/src/theme.rs`、
+  `native/crates/desktop/src/main.rs`、`native/docs/{DEPENDENCIES.md,interfaces.md}`、
+  本文件与 `FEATURE-PARITY.md` 的 Rust 状态列。
+- 验证命令、时间与退出码（2026-11-06T12:41Z–12:47Z UTC）：
+  - `cargo check --workspace --locked` → exit 0（28.64s）
+  - `cargo build -p neohub-desktop --release --locked` → exit 0（1m25s，产物 19 MB，strip 后）
+  - `cargo tree -d` → 71 组上游重复依赖，已记录，不 patch
+  - `cargo test -p neohub-ui --locked` → 2 passed（调色板/模式解析）
+  - `cargo run -p neohub-desktop` → 进程驻留；`CGWindowList` 实测窗口 1280×853 @ (160,103)、
+    `layer=0`，与 `WindowOptions` 一致
+- 人工验证及截图：**像素/交互验证未完成**。`screencapture` 无屏幕录制权限、`osascript`
+  无辅助功能权限（-25211）、GPUI 的 `render_to_image` 仅 `test-support` 下提供且 macOS 未实现。
+  中文输入法组合/选择/剪贴板/Tab 焦点/暗色主题需在用户桌面会话人工确认，或由阶段 9 的无头
+  视觉测试补上。已写入 `native/docs/DEPENDENCIES.md` §6，不当作已完成。
+- 与旧版不同之处：
+  1. 工具链要求 Rust **1.99.1**（1.97 stable 编译 `gpui-pre-macos` 报 E0658），已固定
+  2. 构建需 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`（CLT 里没有 metal）
+  3. `gpui-kit 0.9.0` 钉住 `gpui-pre 0.3.11`（Zed 的 `gpui` crate 发布不规律）；只允许这一条依赖链
+- 未解决问题及所属阶段：
+  1. 视觉/交互人工确认（中文输入法、剪贴板、焦点）→ 用户会话或阶段 9 无头视觉测试
+  2. macOS 11 真实机器运行未验证（只核对了 `LC_BUILD_VERSION` minos 11.0）→ 阶段 15 打包时复核
+  3. 71 组重复依赖只记录不优化 → 阶段 16 评估
+- 下一项具体动作：阶段 3 —— 在 `native/crates/domain` + `native/crates/storage` 落地数据模型与
+  SQLite（原样保留 `0001`—`0007` 迁移与 `_schema_migrations` 版本名），先写 `legacy_import` /
+  `catalog` 失败测试，再实现 `Storage::open` 与 `Catalog::create_app`。
+
+---

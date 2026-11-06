@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = ["crates/desktop", "crates/ui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "AGPL-3.0-only"
+authors = ["Jainath Ponnala"]
+repository = "https://github.com/neotu23/NeoHub"
+
+[workspace.dependencies]
+# GPUI is consumed through gpui-kit, which re-exports the exact GPUI snapshot it was
+# validated against (published on crates.io as `gpui-pre`). Never add a second, direct
+# gpui dependency: two GPUI crates in one binary do not type-check against each other.
+gpui-kit = "=0.9.0"
+
+neohub-ui = { path = "crates/ui" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+strip = "debuginfo"
