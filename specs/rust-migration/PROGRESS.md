@@ -559,3 +559,28 @@
     2. 覆盖来源预览 `effective()` 已在模型里可用，但面板上还没渲染「哪一层生效」列表
     3. db danger zone（导出/重置）→ 阶段 15
 
+### 阶段 11：原生终端、日志搜索与导出
+- 状态：**开发中**（终端视图模型/选择/搜索完成并测试；详情页日志区渲染与导出命令待做）
+- 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
+- 最近提交：`feat: add the native terminal view, selection and search`
+- 实际修改文件：新增 `native/crates/ui/src/terminal/{mod,view,selection,search}.rs`、
+  `native/crates/ui/tests/terminal.rs`；更新 `ui/Cargo.toml`（unicode-width）、`ui/src/lib.rs`
+- 验证命令与结果（2026-11-07T01:50Z–02:15Z UTC）：
+  - `cargo test -p neohub-ui --lib terminal` → **17 passed**（视图 6：跟随/滚动/scrollback/裁剪/空/导出；
+    选择 6：单行/双向/宽字符/emoji/越界/空；搜索 5：字面量/上下环绕/正则与非法/无命中/limit）
+  - `cargo test -p neohub-ui --test terminal` → **6 passed**
+    （两个不同速率任务输出互不混入；重建视图不重复历史；退出任务仍可搜索；
+    UTF-8 跨 chunk 的中文/emoji 从 PTY 字节到显示行保持一致；滚动后恢复跟随；resize 不丢内容）
+  - `cargo test --workspace --locked` → **334 passed / 0 failed**；clippy **0 warnings**；`cargo fmt --all`
+- 与旧版不同之处：
+  1. 终端渲染读的是核心解析后的网格 + scrollback，不是 xterm.js；选择按**显示格**定位并按字符边界
+     切分，宽字符/emoji 不会被切成半个
+  2. 搜索复用核心的匹配器，所以终端内搜索与全局日志搜索的语义一致（非法正则同样报错）
+  3. 滚动是视图状态：向上滚暂停跟随、回到底部自动恢复；导出用 `TerminalView::text()`
+- 未解决问题及所属阶段：
+  1. 详情页日志区仍显示原始文本（阶段 9 的实现），尚未改为渲染 `TerminalView`（含 ANSI 颜色/字号）
+  2. 日志导出命令（写文件 + 与"可读文本"的区别说明）→ 本阶段剩余
+  3. 专用日志搜索视图（`views/log_search.rs`，全局跨任务定位）→ 本阶段剩余
+  4. 人工截图对比旧版 xterm 与本实现 → 需要用户桌面会话
+
+---
