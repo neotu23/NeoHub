@@ -197,7 +197,7 @@
 ---
 
 ### 阶段 5：PTY 运行、进程树停止与退出历史
-- 状态：**开发中**（PTY runner 与进程树终止已完成并验证；`CoreHandle`/service/快照/历史接线待做）
+- 状态：**已验证**（PTY runner、进程树终止、CoreHandle 闭环、运行历史与 Shutdown 顺序全部完成并测试）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: implement PTY task lifecycle and process tree shutdown`
 - 已完成并验证（2026-11-06T15:10Z–15:50Z UTC）：
@@ -230,5 +230,19 @@
   2. 运行历史写入（start 记 row、退出 finish + prune）→ 与 service 层一起补
   3. channel 满时的背压/resync 策略（当前用 broadcast，慢订阅者收到 Lagged）→ 阶段 6 与日志一起收紧
   4. `Quit during spawn` 的 service 级顺序（拒绝启动 → 等在途 → 反向停止 → 写历史 → 关库）→ 本阶段剩余
+
+- 第二批完成（2026-11-06T15:55Z–16:25Z UTC）：`commands.rs`/`events.rs`/`snapshot.rs`/`service.rs`
+  - `CoreCommand`：GetSnapshot / StartTask / StopTask / ResizeTask / GetLogs / StopApp / Shutdown
+  - `CoreService`：单一 DB 持有者 + `TaskRunner` + 事件泵；start 时解析 Node（`spawn_blocking`）、
+    构建 env、解密检查、spawn、**spawn 成功后再写运行历史**（写失败只记日志，进程仍被回收）
+  - 退出事件 → `finish_run`（ended_at/退出码/信号/是否用户停止）；慢订阅者超过 2048 事件收到
+    `ResyncRequired`；`Shutdown` 顺序为：拒绝新启动 → 停全部 → 关闭残留 run 行 + prune →
+    `wal_checkpoint` → 丢弃连接
+  - 验证：`cargo test -p neohub-core --test core_service --locked` → **5 passed**
+    （start→快照→日志→stop→历史行；崩溃退出码 7；shutdown 停止全部并拒绝新启动；
+    订阅者按序看到 running→terminal；`enc1:` 密文阻止启动并报 SecretUnavailable）
+  - `cargo test --workspace --locked` → **137 passed / 0 failed**；
+    `cargo clippy -p neohub-core --all-targets --locked` → **0 warnings**；`cargo fmt --all` 已执行
+  - 残留进程检查：`pgrep -f test-fixtures/process` 为空
 
 ---

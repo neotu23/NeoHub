@@ -16,7 +16,7 @@
 | D3 | `ReadinessSignal` 六种 `none/port/log/http/exit/delay` | `types.ts`, `services/readiness/*` | 已验证（`HttpReadiness.test.ts` 4 例 + MCP set_readiness） | `domain/src/models.rs` | 已验证（六种 readiness 编码 + 往返测试） |
 | D4 | `NodeVersionPref` auto/system/explicit + `PackageManager` × 4 | `types.ts`, `NodeResolver.ts`, `PMDetector.ts` | 已验证（`NodeResolver.test.ts` 5 例） | `domain/src/models.rs` | 已验证（{kind:…} 编码与旧库一致） |
 | D5 | `SettingsState` 17 个字段 + `McpStatus` | `ipc.ts`, `Settings.ts` | 已验证（`Settings.test.ts`） | `domain/src/settings.rs` | 部分（domain + `storage/src/settings.rs` 读写，重启不丢；UI 未接） |
-| D6 | IPC 契约：**59 invoke + 22 event** 频道，preload 白名单与类型同源 | `ipc.ts`, `preload/index.ts` | 已验证（`satisfies` 编译期对齐） | `core/src/commands.rs` + `events.rs` + `docs/interfaces.md` | 开发中（阶段 2 已写 `native/docs/interfaces.md` 契约，无实现） |
+| D6 | IPC 契约：**59 invoke + 22 event** 频道，preload 白名单与类型同源 | `ipc.ts`, `preload/index.ts` | 已验证（`satisfies` 编译期对齐） | `core/src/commands.rs` + `events.rs` + `docs/interfaces.md`| 部分（`CoreCommand`/`CoreReply`/`CoreEvent`/`CoreSnapshot`/`CoreHandle` 已落地并测试；59+22 全量映射随阶段推进补齐） |
 
 ## 2. 项目 / 任务 / 分组（CRUD）
 
@@ -42,8 +42,8 @@
 | P5 | 退出结算：用户停止 / 正常退出 / 崩溃三态，只结算一次 | `TaskRunner.ts`, `AppOrchestrator.ts` | 已验证（`AppOrchestrator.state.test.ts`） | `core/src/process/runner.rs` | 已验证（用户停止/正常退出/崩溃三态 + generation 校验只结算一次） |
 | P6 | 应用级启停重启 `proc:start/stop/restart` + 反向拓扑停止 | `AppOrchestrator.ts` | 已验证 | `core/src/orchestrator/` | 未开始 |
 | P7 | 任务级启停 `task:start/stop`（手动） | `ipc/index.ts` | 部分 | `core/src/service.rs` | 未开始 |
-| P8 | 运行历史写入 `run_history` + 每应用上限清理 + 重启后恢复 stopped/crashed | `RunHistory.ts`, `0003_run_history_tasks.sql` | 已验证（`AppOrchestrator.state.test.ts` 的 boot seeding） | `storage/src/history.rs` | 部分（storage 层读写/prune/close_all_open 已实现；写入时机在阶段 5） |
-| P9 | 优雅退出：确认 → 反向停止全部受管任务 → 写历史 → 关库 | `index.ts` before-quit | 部分 | `core/src/service.rs` | 部分（`TaskRunner::shutdown` 拒绝新启动并停止全部任务；完整 Shutdown 顺序待 service 层） |
+| P8 | 运行历史写入 `run_history` + 每应用上限清理 + 重启后恢复 stopped/crashed | `RunHistory.ts`, `0003_run_history_tasks.sql` | 已验证（`AppOrchestrator.state.test.ts` 的 boot seeding） | `storage/src/history.rs`| 已验证（start 写行、退出结算、shutdown 关闭残留行并按上限 prune；5 个 service 测试覆盖） |
+| P9 | 优雅退出：确认 → 反向停止全部受管任务 → 写历史 → 关库 | `index.ts` before-quit | 部分 | `core/src/service.rs`| 已验证（拒绝新启动 → 停止全部 → 写历史 → checkpoint → 关库；窗口关闭不触发） |
 
 ## 4. 日志与终端
 

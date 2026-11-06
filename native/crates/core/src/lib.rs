@@ -4,7 +4,11 @@
 //! state. GPUI types must never appear here (`native/docs/interfaces.md`).
 
 pub mod catalog;
+pub mod commands;
 pub mod environment;
+pub mod events;
 pub mod process;
+pub mod service;
+pub mod snapshot;
 
 pub use catalog::{AppCatalog, CoreError, CoreResult, CreateAppInput, CreateTaskSpec};
