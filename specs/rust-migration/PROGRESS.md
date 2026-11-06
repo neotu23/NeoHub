@@ -142,7 +142,7 @@
 ---
 
 ### 阶段 4：Node 环境、项目检测、环境变量和密钥接口
-- 状态：**开发中**（5/6 子项完成：`.env` 解析、环境分层、PATH 探测、Node 解析、项目检测、密钥接口；剩 macOS Keychain 实现）
+- 状态：**已验证**（本阶段 6/6 子项完成；接口接入启动流程属于阶段 5）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`，代码在 `native/`
 - 最近提交：`feat: port dotenv parsing and env layering`
 - 已完成并验证：
@@ -169,8 +169,25 @@
   假实现正常/锁定/损坏三态）、`core/tests/{detection,environment}.rs`。
   验证：`cargo test --workspace --locked` → **106 passed / 0 failed**；
   `cargo clippy -p neohub-{domain,storage,core} --all-targets` → 0 warnings；`cargo fmt --all` 已执行。
-- 仍缺（下一步）：`native/crates/platform-macos/src/keychain.rs` 真实 Keychain 实现
-  （security-framework），以及把 resolver/env/secrets 接进阶段 5 的启动流程。
+- 第三批完成（2026-11-06T14:45Z–15:05Z UTC）：新增 `native/crates/platform-macos/`
+  （`keychain.rs`：`security-framework 3.7` + `aes-gcm 0.10`；master key 存 login Keychain，
+  单条 generic-password 项，密文为自包含 `nhk1:` base64(nonce‖AES-256-GCM)；解密**不会**创建新
+  master key；`keychain_round_trip` 为 opt-in 测试，默认套件不碰钥匙串）。
+  验证：`cargo test -p neohub-platform-macos -- --include-ignored` → **3 passed**
+  （真实 Keychain 写入→解密→删除→再解密失败，且事后 `security find-generic-password` 返回
+  errSecItemNotFound，无残留）；`cargo test --workspace --locked` → **108 passed / 0 failed**；
+  `cargo clippy --workspace --all-targets --locked` → **0 warnings**；`cargo fmt --all` 已执行。
+- 与旧版不同之处（本阶段新增）：
+  1. `engines.node` 的 npm 风格写法（空格连接的比较符）会被归一化；`||` OR 组**显式报错**
+     （`InvalidRequirement`），不静默改变语义
+  2. 密钥格式：新密文统一 `nhk1:` 前缀，`enc1:` 明确拒绝（错误而非把密文当密码），
+     master key 缺失时解密报错而不是悄悄新建
+  3. 版本扫描结果带缓存，可显式刷新；system Node 通过 PATH 直接执行 `node --version`（不经 shell）
+- 未解决问题及所属阶段：
+  1. resolver/env/secrets 尚未接入 spawn 流程 → 阶段 5
+  2. "从 Finder 启动的原生包能发现预置测试 Node" 需要打包后的 `.app` → 阶段 15 验证
+  3. Keychain 仅在当前用户会话验证过 round-trip；锁定/拒绝授权、签名包内 keychain-access-groups
+     → 阶段 15/16
 - 与旧版不同之处：环境构建改为纯函数（注入 `os_env`/`login_path`/`project_dir`/三层变量），
   便于在不启动进程的情况下断言；语义与旧版逐层一致（含控制键保护与空值保留）。
 - 下一项具体动作：实现 `node_resolver.rs`（先用假 home 目录构造 nvm/fnm/volta/asdf 布局的 fixture，

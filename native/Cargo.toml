@@ -4,6 +4,7 @@ members = [
     "crates/core",
     "crates/desktop",
     "crates/domain",
+    "crates/platform-macos",
     "crates/storage",
     "crates/ui",
 ]

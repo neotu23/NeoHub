@@ -1,0 +1,19 @@
+[package]
+name = "neohub-platform-macos"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "NeoHub macOS platform services (keychain, open-in, deep links, tray, dock)"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+aes-gcm = "0.10"
+base64 = "0.22"
+rand = "0.9"
+security-framework = "3.7"
+
+[dependencies]
+neohub-storage = { path = "../storage" }
+thiserror = "2.0"
