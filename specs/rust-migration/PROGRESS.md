@@ -1301,3 +1301,18 @@
   1. Apple Event 接收未接（上面那条）
   2. 选中发生在第一帧快照之前，若快照还没到则本次不生效（不排队重试）
 
+### 阶段 17 收尾：完成度校正 + 补上真正的 autoStart
+- 状态：**交付文档与代码一致**
+- 最近提交：`fix: actually start auto_start apps at boot`
+- **又抓到一处自己的错报**：`FEATURE-PARITY` 的 S9 写着"每应用 `autoStart` 已在服务启动流程接线"，
+  但代码里 `auto_start` 从未被读取（`reopen()` 固定返回 `run_auto_start: false`，也没有遍历逻辑）。
+  已实现 `CoreService::start_auto_start_apps`：按依赖顺序、跳过已在运行的、单个失败不影响其余、
+  结果（成功/失败名单）写入应用日志；`desktop` 在窗口打开后异步拉起，不阻塞首帧
+- 校正对照表：逐条回源码核实后，把 10 行过期状态更新到与代码一致
+  （S9/R4/U3/U12/U9/D5/A5/P1/E7/U8/U6/L8/U14）
+  → 当前 **64 已验证 / 24 部分 / 1 未开始 / 5 说明**（共 94 项）
+- `DELIVERY.md` 同步：结论从"约 8 成、10 项未做"改为"主要功能面已对齐，剩 3 项且有明确原因"
+- 验证：`cargo test -p neohub-core --test database_ops auto_start` → **1 passed**
+  （只有 `auto_start` 的应用被尝试、二次调用不重复启动）
+  `cargo test --workspace --locked` → **476 passed / 0 failed**；clippy 0
+

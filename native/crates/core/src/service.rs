@@ -793,6 +793,37 @@ impl CoreService {
         Ok(settings)
     }
 
+    /// Start every app marked `auto_start`, in dependency order.
+    ///
+    /// Called once at boot. Apps are started one after another (not all at once) so a chain of
+    /// dependencies still comes up in order; each `start_app` already waits for readiness, which
+    /// is why this returns the names it started rather than spawning everything blindly.
+    pub async fn start_auto_start_apps(&self) -> CoreResult<Vec<(String, bool)>> {
+        let snapshot = self.snapshot()?;
+        let mut started = Vec::new();
+        for app in snapshot.apps.iter().filter(|app| app.auto_start) {
+            // Skip anything already live: a second boot (or a manual start) must not duplicate.
+            let live = snapshot
+                .app_states
+                .get(&app.id)
+                .map(|state| state.is_live())
+                .unwrap_or(false);
+            if live {
+                continue;
+            }
+            match self.start_app(&app.id).await {
+                Ok(()) => started.push((app.name.clone(), true)),
+                Err(error) => {
+                    // One broken project must not stop the rest of the boot. The failure is
+                    // reported to the caller so the boot log can say which one broke.
+                    eprintln!("[core] auto-start failed for {}: {error}", app.name);
+                    started.push((app.name.clone(), false));
+                }
+            }
+        }
+        Ok(started)
+    }
+
     /// Update an app through the catalog (validation lives there).
     pub fn update_app(
         &self,

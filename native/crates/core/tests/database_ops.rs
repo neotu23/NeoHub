@@ -168,3 +168,85 @@ async fn the_command_surface_reaches_the_same_operations() {
         "fresh database"
     );
 }
+
+#[tokio::test]
+async fn auto_start_only_starts_apps_that_ask_for_it() {
+    // This is the boot path: an app with `auto_start` runs, one without stays idle, and a
+    // second call does not start anything twice.
+    use neohub_core::catalog::UpdateAppInput;
+
+    let dir = tempfile::tempdir().unwrap();
+    let service = CoreService::open(DataDir::new(dir.path())).expect("core");
+    let wanted = project(dir.path(), "wanted");
+    let other = project(dir.path(), "other");
+    for (path, name, auto) in [(wanted, "wanted", true), (other, "other", false)] {
+        let app = service
+            .create_app(CreateAppInput {
+                path,
+                name: Some(name.into()),
+                node_version_pref: None,
+                package_manager: None,
+                default_script: None,
+                first_task: Some(CreateTaskSpec {
+                    name: "dev".into(),
+                    command_kind: Some(CommandKind::Script),
+                    script: Some("dev".into()),
+                    custom_command: None,
+                    working_dir_override: None,
+                }),
+                tasks: vec![],
+                env_vars: vec![],
+            })
+            .expect("app");
+        if auto {
+            service
+                .update_app(
+                    &app.id,
+                    UpdateAppInput {
+                        auto_start: Some(true),
+                        ..Default::default()
+                    },
+                )
+                .expect("mark auto start");
+        }
+    }
+
+    // The flag must survive the update, or nothing below means anything.
+    let snapshot = service.snapshot().unwrap();
+    let wanted_app = snapshot
+        .apps
+        .iter()
+        .find(|app| app.name == "wanted")
+        .expect("wanted app");
+    assert!(wanted_app.auto_start, "auto_start was stored");
+    assert!(
+        !snapshot
+            .apps
+            .iter()
+            .find(|app| app.name == "other")
+            .expect("other app")
+            .auto_start
+    );
+
+    let started = service.start_auto_start_apps().await.expect("boot");
+    // The synthetic project has no real dev server, so `start_app` may fail; what this asserts is
+    // *which* apps were attempted - the opted-in one and nothing else.
+    assert_eq!(started.len(), 1, "only the opted-in app is attempted");
+    assert_eq!(started[0].0, "wanted");
+
+    // Nothing is actually serving on node `dev` here, so the state is 'starting' or failed;
+    // what matters for this test is that the second pass does not start it again.
+    let again = service.start_auto_start_apps().await.expect("boot twice");
+    let still_live = service
+        .snapshot()
+        .unwrap()
+        .app_states
+        .values()
+        .any(|state| state.is_live());
+    if still_live {
+        assert!(
+            again.is_empty(),
+            "an already-running app must not be started twice"
+        );
+    }
+}

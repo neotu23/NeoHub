@@ -121,6 +121,40 @@ fn main() {
 
         // Menu bar item. It must be created after AppKit is up (i.e. inside `run`) and on the
         // main thread; the handle keeps the status item and its menu alive for the process.
+        // Apps marked auto_start come up with the app, in dependency order. Spawned so the
+        // window paints first: a slow dev server must not delay the UI.
+        {
+            let service = shared.app.lock().expect("host").service().clone();
+            let runtime = runtime.clone();
+            runtime.spawn(async move {
+                match service.start_auto_start_apps().await {
+                    Ok(results) if !results.is_empty() => {
+                        let ok: Vec<&str> = results
+                            .iter()
+                            .filter(|(_, started)| *started)
+                            .map(|(name, _)| name.as_str())
+                            .collect();
+                        let failed: Vec<&str> = results
+                            .iter()
+                            .filter(|(_, started)| !*started)
+                            .map(|(name, _)| name.as_str())
+                            .collect();
+                        if !ok.is_empty() {
+                            log_file::log("host", &format!("auto-started: {}", ok.join(", ")));
+                        }
+                        if !failed.is_empty() {
+                            log_file::log(
+                                "host",
+                                &format!("auto-start could not run: {}", failed.join(", ")),
+                            );
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(error) => log_file::log("host", &format!("auto-start failed: {error}")),
+                }
+            });
+        }
+
         // Application menu. Installed after AppKit is up, and it shares the tray's event
         // router (muda supports one handler per process).
         let _app_menu = match app_menu::install() {
