@@ -110,7 +110,7 @@
 | S4 | 单实例锁（第二实例只激活不抢库） | `index.ts` requestSingleInstanceLock | 部分 | `desktop/src/session_lock.rs`| 已验证（`flock` 单实例锁 + activation 文件；第二实例只发激活信号并退出，测试覆盖） |
 | S5 | 应用菜单与快捷项：⌘, 设置 / ⌘N 添加 / ⌘⇧N 新建文件夹 / 检查更新 / 打开日志 | `menu.ts` | 部分 | `platform-macos/src/` + `desktop/src/`| 部分（快捷键已注册并接到与按钮相同的代码路径：⌘, 设置 / ⌘N 导入 / ⌘P 筛选（**真正移焦**）/ ⌘⇧F 全局搜索 / ⌘R 重启；AppKit 顶部菜单栏未建） |
 | S6 | 深链接 `devharbor://open?id=…&path=…`、`start?id=…`（start 需用户确认） | `DeepLinks.ts` | 已验证（`DeepLinks.test.ts`） | `platform-macos/src/deep_links.rs` | 未开始 |
-| S7 | Open In：Finder/Terminal/VS Code/Cursor/Sublime + 能力探测 | `OpenIn.ts` | 部分 | `platform-macos/src/open_in.rs`| 部分（`open_in` 模块：Finder/Terminal/VS Code/Cursor/Sublime 的命令构造、安装探测、真实 `open` 启动；**详情页尚未挂按钮**） |
+| S7 | Open In：Finder/Terminal/VS Code/Cursor/Sublime + 能力探测 | `OpenIn.ts` | 部分 | `platform-macos/src/open_in.rs`| 已验证（`open_in`：五个目标、Finder 用 `open -R` 其余 `open -a`、按 `/Applications` 与 `~/Applications` 探测、缺目录先拒；详情页按本机已装目标生成按钮，点击分离启动） |
 | S8 | 崩溃/就绪桌面通知（受设置控制） | `index.ts` Notification | 部分 | `platform-macos/src/notifications.rs` | 未开始 |
 | S9 | 登录启动 `launch_at_login` + 每应用 `autoStart`（迁移 0007） | `Settings.ts`, `0007_app_autostart.sql` | 部分 | `platform-macos/src/login_item.rs`| 已验证（每应用 `autoStart` 在服务启动流程接线；`launch_at_login` 通过自写 LaunchAgent 实现：plist 由当前可执行文件生成、按设置 install/uninstall，主循环每 tick 校正漂移；真实 `launchctl` 往返已验证且无残留） |
 | S10 | 自动更新（electron-updater + UpdateBanner 进度/错误/说明） | `Updater.ts`, `UpdateBanner.tsx` | 已验证（`Updater.test.ts`，无 live feed） | `platform-macos/src/updater.rs` | 未开始 |

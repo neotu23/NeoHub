@@ -2150,6 +2150,28 @@ impl Render for ShellView {
                                 });
                             })
                     });
+                    for target in neohub_platform_macos::open_in::available_targets() {
+                        let app_path = std::path::PathBuf::from(&app.path);
+                        actions = actions.child(
+                            div()
+                                .id(format!("detail-open-in-{:?}", target))
+                                .px(px(metrics::PAD_3))
+                                .py(px(metrics::GAP_1))
+                                .rounded(px(metrics::RADIUS_MD))
+                                .bg(palette.bg_elevated)
+                                .text_size(px(metrics::TEXT_SM))
+                                .cursor_pointer()
+                                .child(target.label().to_string())
+                                .on_click(move |_, _, _| {
+                                    // Detached by design: the target app outlives this click.
+                                    if let Err(error) =
+                                        neohub_platform_macos::open_in::launch(target, &app_path)
+                                    {
+                                        eprintln!("[ui] open in {:?} failed: {error}", target);
+                                    }
+                                }),
+                        );
+                    }
                     actions = actions.child({
                         let entity = cx.entity().downgrade();
                         let focus = self.app_form_focus.clone();

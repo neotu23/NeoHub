@@ -4328,6 +4328,7 @@ dependencies = [
  "gpui-kit",
  "neohub-core",
  "neohub-domain",
+ "neohub-platform-macos",
  "neohub-storage",
  "serde",
  "serde_json",

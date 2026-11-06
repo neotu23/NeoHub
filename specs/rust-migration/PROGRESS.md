@@ -1122,3 +1122,15 @@
   1. 详情页/右键菜单还没挂 Open In 按钮（模型与启动已就绪）
   2. AppKit 顶部菜单栏（NSMenu）仍未建
 
+### S7 Open In（第二批：详情页接线）
+- 状态：**完成**
+- 最近提交：`feat: open a project from the detail pane`
+- 实际修改文件：`ui/src/views/shell.rs`（详情页按可用目标生成按钮）、`ui/Cargo.toml`
+  （`neohub-platform-macos` 从 dev 依赖提升为正式依赖）
+- 要点：按钮组由 `available_targets()` 驱动，**本机没装的目标不会出现**（不是灰掉，是不显示），
+  点击直接 `open_in::launch`，失败只打日志不弹窗（外部应用打不开不该打断工作）
+- 验证：`cargo test --workspace --locked` → **438 passed / 0 failed**；clippy 0；
+  重新打包（30 MB / dmg 13 MB）并启动，日志无 error/panic
+  本机探测：Finder + Terminal + VS Code 三个按钮，Cursor/Sublime 不显示
+- 未解决问题：无（S7 完成）。顶部菜单栏（NSMenu）仍缺，属 S5
+
