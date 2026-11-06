@@ -682,28 +682,130 @@ pub async fn dispatch(ctx: &ToolContext, tool: ToolName, args: &Value) -> ToolRe
         }
         ToolName::AddApp => {
             let path = require_str(args, "path")?;
-            let package_manager =
-                opt_str(args, "package_manager").and_then(|name| PackageManager::parse(&name));
-            let tasks: Vec<CreateTaskSpec> = args
+            let name = opt_str(args, "name");
+            // Legacy single-task arguments.
+            let script = opt_field_str(args, "script", "script");
+            let command = opt_field_str(args, "command", "command");
+            if script.is_some() && command.is_some() {
+                return Err(ToolError::field(
+                    "script",
+                    "只能给一个：`script` 或 `command`",
+                ));
+            }
+            let detection =
+                neohub_core::environment::detect::detect_project(std::path::Path::new(&path));
+            // `workspaceTasks`: one task per runnable workspace package, each running from its
+            // own directory — the monorepo case the legacy tool supported.
+            let want_workspace_tasks =
+                opt_field_bool(args, "workspaceTasks", "workspace_tasks").unwrap_or(false);
+            let mut tasks: Vec<CreateTaskSpec> = Vec::new();
+            let mut first_task: Option<CreateTaskSpec> = None;
+            let mut default_script: Option<String> = None;
+            let mut notes: Vec<String> = Vec::new();
+            let used_names: std::collections::HashSet<String> = Default::default();
+            let mut used_names = used_names;
+
+            if want_workspace_tasks {
+                // Containment is re-checked here: a candidate must never point a task outside
+                // the app root, whatever the detector returned.
+                let runnable: Vec<&neohub_core::environment::detect::WorkspaceCandidate> =
+                    detection
+                        .workspaces
+                        .iter()
+                        .filter(|workspace| {
+                            !workspace.rel_path.starts_with('/')
+                                && !workspace
+                                    .rel_path
+                                    .split(['/', '\\'])
+                                    .any(|segment| segment == "..")
+                        })
+                        .collect();
+                for workspace in &runnable {
+                    let Some(script) = workspace
+                        .suggested_script
+                        .clone()
+                        .or_else(|| workspace.scripts.first().cloned())
+                    else {
+                        continue;
+                    };
+                    // Two packages can share a package.json name; task names must be unique.
+                    let mut task_name = if workspace.name.is_empty() {
+                        workspace.rel_path.clone()
+                    } else {
+                        workspace.name.clone()
+                    };
+                    if !used_names.insert(task_name.to_lowercase()) {
+                        task_name = format!("{} ({})", task_name, workspace.rel_path);
+                        used_names.insert(task_name.to_lowercase());
+                    }
+                    tasks.push(CreateTaskSpec {
+                        name: task_name,
+                        command_kind: Some(CommandKind::Script),
+                        script: Some(script),
+                        custom_command: None,
+                        working_dir_override: Some(workspace.rel_path.clone()),
+                    });
+                }
+                if tasks.is_empty() {
+                    notes.push(
+                        "workspaceTasks was requested, but no workspace package with a runnable script was found - fell back to a single task.".to_string(),
+                    );
+                }
+            }
+
+            // An explicit `tasks` array (or workspaceTasks) wins: creating a default task on top
+            // of it would collide on names.
+            for item in args
                 .get("tasks")
                 .and_then(Value::as_array)
-                .map(|items| {
-                    items
-                        .iter()
-                        .map(|item| CreateTaskSpec {
-                            name: opt_str(item, "name").unwrap_or_default(),
-                            command_kind: Some(if opt_str(item, "command").is_some() {
-                                CommandKind::Custom
-                            } else {
-                                CommandKind::Script
-                            }),
-                            script: opt_str(item, "script"),
-                            custom_command: opt_str(item, "command"),
-                            working_dir_override: opt_str(item, "working_dir"),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+                .into_iter()
+                .flatten()
+            {
+                tasks.push(CreateTaskSpec {
+                    name: opt_str(item, "name").unwrap_or_default(),
+                    command_kind: Some(if opt_str(item, "command").is_some() {
+                        CommandKind::Custom
+                    } else {
+                        CommandKind::Script
+                    }),
+                    script: opt_str(item, "script"),
+                    custom_command: opt_str(item, "command"),
+                    working_dir_override: opt_field_str(item, "workingDir", "working_dir"),
+                });
+            }
+
+            if tasks.is_empty() {
+                if let Some(script) = script {
+                    first_task = Some(CreateTaskSpec {
+                        name: script.clone(),
+                        command_kind: Some(CommandKind::Script),
+                        script: Some(script.clone()),
+                        custom_command: None,
+                        working_dir_override: None,
+                    });
+                    default_script = Some(script);
+                } else if let Some(command) = command {
+                    first_task = Some(CreateTaskSpec {
+                        name: "start".to_string(),
+                        command_kind: Some(CommandKind::Custom),
+                        script: None,
+                        custom_command: Some(command),
+                        working_dir_override: None,
+                    });
+                } else if let Some(suggested) = detection.suggested_default_script.clone() {
+                    // Same precedence as the legacy tool: explicit script, explicit command,
+                    // then the detected default.
+                    first_task = Some(CreateTaskSpec {
+                        name: suggested.clone(),
+                        command_kind: Some(CommandKind::Script),
+                        script: Some(suggested.clone()),
+                        custom_command: None,
+                        working_dir_override: None,
+                    });
+                    default_script = Some(suggested);
+                }
+            }
+
             let env: Vec<(String, String, bool)> = args
                 .get("env")
                 .and_then(Value::as_array)
@@ -720,21 +822,18 @@ pub async fn dispatch(ctx: &ToolContext, tool: ToolName, args: &Value) -> ToolRe
                         .collect()
                 })
                 .unwrap_or_default();
-            let mut tasks = tasks;
-            let first_task = if tasks.is_empty() {
-                None
-            } else {
-                Some(tasks.remove(0))
-            };
+
             let reply = ctx
                 .handle
                 .request(CoreCommand::CreateApp {
                     input: Box::new(neohub_core::catalog::CreateAppInput {
                         path,
-                        name: opt_str(args, "name"),
+                        name,
                         node_version_pref: None,
-                        package_manager,
-                        default_script: opt_str(args, "default_script"),
+                        package_manager: opt_field_str(args, "package_manager", "package_manager")
+                            .and_then(|value| PackageManager::parse(&value))
+                            .or(detection.package_manager),
+                        default_script,
                         first_task,
                         tasks,
                         env_vars: env,
@@ -745,7 +844,66 @@ pub async fn dispatch(ctx: &ToolContext, tool: ToolName, args: &Value) -> ToolRe
             let CoreReply::App(app) = reply else {
                 return Err(ToolError::new("unexpected create reply"));
             };
-            Ok(json!({"app": app}))
+            // `autoStart` is applied after creation, like the legacy flow did.
+            if opt_field_bool(args, "autoStart", "auto_start").unwrap_or(false) {
+                ctx.handle
+                    .request(CoreCommand::UpdateApp {
+                        app_id: app.id.clone(),
+                        input: Box::new(UpdateAppInput {
+                            auto_start: Some(true),
+                            ..Default::default()
+                        }),
+                    })
+                    .await
+                    .map_err(core_error)?;
+            }
+            let snapshot = ctx
+                .handle
+                .request(CoreCommand::GetSnapshot)
+                .await
+                .map_err(core_error)?;
+            let CoreReply::Snapshot(snapshot) = snapshot else {
+                return Err(ToolError::new("unexpected snapshot reply"));
+            };
+            // Read the app back so a post-create autoStart patch shows in the reply.
+            let app = snapshot
+                .apps
+                .iter()
+                .find(|candidate| candidate.id == app.id)
+                .cloned()
+                .unwrap_or_else(|| (*app).clone());
+            let created = snapshot
+                .tasks_by_app
+                .get(&app.id)
+                .cloned()
+                .unwrap_or_default();
+            if created.is_empty() && notes.is_empty() {
+                notes.push(
+                    "No task was created (no script or command matched). Add one with add_task before starting."
+                        .to_string(),
+                );
+            }
+            let mut brief = app_brief(&app);
+            if let Some(map) = brief.as_object_mut() {
+                map.insert(
+                    "state".into(),
+                    json!(snapshot.app_states.get(&app.id).map(|state| state.as_str())),
+                );
+                map.insert(
+                    "tasks".into(),
+                    json!(created.iter().map(task_json).collect::<Vec<_>>()),
+                );
+                map.insert(
+                    "scripts".into(),
+                    json!(detection.scripts.keys().cloned().collect::<Vec<_>>()),
+                );
+                map.insert("workspaces".into(), json!(detection.workspaces));
+                map.insert(
+                    "note".into(),
+                    json!((!notes.is_empty()).then(|| notes.join(" "))),
+                );
+            }
+            Ok(ctx.redactor.scrub_json(&brief))
         }
         ToolName::UpdateApp => {
             let id = match opt_field_str(args, "app", "app_id") {
@@ -1185,6 +1343,7 @@ fn task_json(task: &Task) -> Value {
         "command_kind": task.command_kind,
         "script": task.script,
         "custom_command": task.custom_command,
+        "working_dir_override": task.working_dir_override,
         "depends_on": task.depends_on,
         "readiness": task.readiness,
         "one_shot": task.one_shot,

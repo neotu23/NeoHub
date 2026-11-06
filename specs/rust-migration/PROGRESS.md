@@ -732,7 +732,7 @@
   4. 迁移后 `migration.json` 清单尚未接入 UI 展示
 
 ### 阶段 14：MCP 全量迁移与协议兼容
-- 状态：**开发中**（22 工具全部对齐旧版参数与返回形状；`add_app` 的 `workspaceTasks` 与 TLS/SSE 待做）
+- 状态：**开发中**（22 工具的旧版参数与返回形状全部对齐，含 `workspaceTasks` monorepo；TLS/SSE 待做）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: port the MCP gate, redaction and tool catalogue`
 - 实际修改文件：新增 `native/crates/mcp/{Cargo.toml,src/{lib,auth,redaction,tools}.rs}`；更新 workspace 成员
@@ -845,12 +845,25 @@
   - 验证：`cargo test -p neohub-mcp` → **33 passed**
     （新增：`get_logs` 分节 + 单任务无节头 + `get_ports` 按应用分组）
   - `cargo test --workspace --locked` → **407 passed / 0 failed**；clippy **0 warnings**
+- 第八批完成（2026-11-07T11:05Z–11:40Z UTC）：`add_app` 收口
+  - 参数对齐：`path/name/script/command/workspaceTasks/autoStart`（`tasks`/`env` 数组保留为扩展）
+  - 任务选择优先级与旧版一致：**workspaceTasks → 显式 `tasks` 数组 → `script` → `command` → 探测到的默认脚本**
+  - `workspaceTasks: true`：用 core 的 `detect_workspaces`（npm/yarn `workspaces` + `pnpm-workspace.yaml`）
+    为每个可运行包建一个任务，`working_dir_override = rel_path`，包名重复时追加相对路径；
+    **重新做一遍越界检查**（拒绝绝对路径与 `..`）
+  - `autoStart` 在创建后通过 `UpdateApp` 应用，并**回读应用**使返回值反映实际状态
+  - 返回 shape：`appBrief` + `state`/`tasks`/`scripts`/`workspaces`/`note`
+  - 验证：`cargo test -p neohub-mcp` → **35 passed**
+    （新增：`add_app` 的 script/command/autoStart/默认脚本；monorepo 一包一任务且工作目录正确）
+  - `cargo test --workspace --locked` → **409 passed / 0 failed**；clippy **0 warnings**
+- 顺手修掉的两个真实缺陷（都是测试抓到的）：
+  1. 显式 `tasks` 数组与默认任务同时创建会**重名冲突**导致整个创建失败 → 改为数组优先
+  2. `task_json` 漏了 `working_dir_override`，monorepo 任务的工作目录在返回里看不到
 - 仍存在的兼容差异：
-  1. `add_app` 参数集未对齐（旧版 `path/name/script/command/workspaceTasks/autoStart`）；
-     `workspaceTasks`（monorepo 一包一任务）尚未实现，需要 core 的 workspace 探测
-  2. `set_readiness` 的旧版参数集未核对
-  3. 错误消息文案未逐条对齐旧版（只在字段层面一致）
-  4. 可选自签 TLS 与 SSE 未做
+  1. `set_readiness` 的旧版参数集未核对
+  2. 错误消息文案未逐条对齐旧版（只在字段层面一致）
+  3. 可选自签 TLS 与 SSE 未做
+
 
 
 

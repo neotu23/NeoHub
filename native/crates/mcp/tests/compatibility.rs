@@ -69,7 +69,7 @@ async fn add_app_then_list_and_get_it_through_the_tool_layer() {
         json!({"path": path, "name": "demo", "tasks": [{"name": "dev", "script": "dev"}]}),
     )
     .await;
-    let app_id = created["app"]["id"].as_str().expect("app id").to_string();
+    let app_id = created["id"].as_str().expect("app id").to_string();
 
     let listed = call(&ctx, ToolName::ListApps, json!({})).await;
     assert_eq!(listed["count"], 1);
@@ -93,7 +93,7 @@ async fn a_secret_never_comes_back_as_text() {
     let ctx = harness.context();
     let path = harness.project("secrets");
     let created = call(&ctx, ToolName::AddApp, json!({"path": path})).await;
-    let app_id = created["app"]["id"].as_str().unwrap().to_string();
+    let app_id = created["id"].as_str().unwrap().to_string();
 
     let stored = call(
         &ctx,
@@ -138,7 +138,7 @@ async fn logs_and_ports_come_from_the_running_task() {
         json!({"path": path, "tasks": [{"name": "run", "command": command}]}),
     )
     .await;
-    let app_id = created["app"]["id"].as_str().unwrap().to_string();
+    let app_id = created["id"].as_str().unwrap().to_string();
 
     let started = call(&ctx, ToolName::StartApp, json!({"app_id": app_id})).await;
     assert_eq!(started["started"], true);
@@ -202,7 +202,7 @@ async fn log_search_and_readiness_updates_work_through_tools() {
         json!({"path": path, "tasks": [{"name": "run", "command": command}]}),
     )
     .await;
-    let app_id = created["app"]["id"].as_str().unwrap().to_string();
+    let app_id = created["id"].as_str().unwrap().to_string();
     call(&ctx, ToolName::StartApp, json!({"app_id": app_id})).await;
 
     let running = call(&ctx, ToolName::ListRunning, json!({})).await;
@@ -456,7 +456,7 @@ async fn get_logs_splits_per_task_and_get_ports_groups_by_app() {
                "tasks": [{"name": "alpha", "command": command}, {"name": "beta", "command": command}]}),
     )
     .await;
-    let app_id = created["app"]["id"].as_str().unwrap().to_string();
+    let app_id = created["id"].as_str().unwrap().to_string();
     call(&ctx, ToolName::StartApp, json!({"app_id": app_id})).await;
 
     // Wait for both tasks to emit, then read the app-level logs.
@@ -506,4 +506,101 @@ async fn get_logs_splits_per_task_and_get_ports_groups_by_app() {
     );
 
     let _ = call(&ctx, ToolName::StopApp, json!({"app_id": app_id})).await;
+}
+
+#[tokio::test]
+async fn add_app_accepts_the_legacy_arguments_and_workspace_tasks() {
+    let harness = Harness::new();
+    let ctx = harness.context();
+
+    // A plain project with an explicit script: the task is named after the script.
+    let plain = harness.project("plain");
+    let created = call(
+        &ctx,
+        ToolName::AddApp,
+        json!({"path": plain, "name": "plain", "script": "dev", "autoStart": true}),
+    )
+    .await;
+    assert_eq!(created["name"], "plain");
+    assert_eq!(
+        created["autoStart"], true,
+        "autoStart is applied after creation"
+    );
+    assert_eq!(created["tasks"][0]["name"], "dev");
+    assert_eq!(created["tasks"][0]["script"], "dev");
+    assert!(
+        created["scripts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s == "dev")
+    );
+
+    // A project with no explicit script falls back to the detected default.
+    let detected = harness.project("detected");
+    let created = call(&ctx, ToolName::AddApp, json!({"path": detected})).await;
+    assert_eq!(
+        created["tasks"][0]["name"], "dev",
+        "the detected default script"
+    );
+
+    // script and command together are refused.
+    let both = call(
+        &ctx,
+        ToolName::AddApp,
+        json!({"path": harness.project("both"), "script": "dev", "command": "node ."}),
+    )
+    .await;
+    assert_eq!(both["error"]["field"], "script");
+}
+
+#[tokio::test]
+async fn workspace_tasks_create_one_task_per_package() {
+    let harness = Harness::new();
+    let ctx = harness.context();
+    let root = harness._dir.path().join("mono");
+    std::fs::create_dir_all(root.join("apps/api")).unwrap();
+    std::fs::create_dir_all(root.join("apps/web")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"mono","workspaces":["apps/*"]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("apps/api/package.json"),
+        r#"{"name":"@mono/api","scripts":{"dev":"node api.js"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("apps/web/package.json"),
+        r#"{"name":"@mono/web","scripts":{"dev":"node web.js"}}"#,
+    )
+    .unwrap();
+
+    let created = call(
+        &ctx,
+        ToolName::AddApp,
+        json!({"path": root.to_string_lossy(), "workspaceTasks": true}),
+    )
+    .await;
+    let tasks = created["tasks"].as_array().expect("tasks");
+    assert_eq!(tasks.len(), 2, "one task per workspace package: {created}");
+    let mut names: Vec<&str> = tasks
+        .iter()
+        .filter_map(|task| task["name"].as_str())
+        .collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["@mono/api", "@mono/web"]);
+    // Each task runs from its own directory.
+    let mut dirs: Vec<&str> = tasks
+        .iter()
+        .filter_map(|task| task["working_dir_override"].as_str())
+        .collect();
+    dirs.sort_unstable();
+    assert_eq!(dirs, vec!["apps/api", "apps/web"]);
+    assert_eq!(
+        created["workspaces"].as_array().unwrap().len(),
+        2,
+        "detected workspaces are reported back"
+    );
 }
