@@ -3916,6 +3916,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "neohub-mcp"
+version = "0.1.0"
+dependencies = [
+ "neohub-core",
+ "neohub-domain",
+ "neohub-storage",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "neohub-platform-macos"
 version = "0.1.0"
 dependencies = [

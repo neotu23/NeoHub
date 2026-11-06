@@ -730,3 +730,30 @@
   2. `enc1:` 密文目前只能"原样保留 + 计数"，重录/旧版 opt-in 导出入口待做
   3. UI 迁移向导（`ui/src/views/migration.rs`）待做
   4. 迁移后 `migration.json` 清单尚未接入 UI 展示
+
+### 阶段 14：MCP 全量迁移与协议兼容
+- 状态：**开发中**（工具清单/schema、gate 规则、脱敏完成并测试；rmcp 传输层与 dispatch 待做）
+- 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
+- 最近提交：`feat: port the MCP gate, redaction and tool catalogue`
+- 实际修改文件：新增 `native/crates/mcp/{Cargo.toml,src/{lib,auth,redaction,tools}.rs}`；更新 workspace 成员
+- 验证命令与结果（2026-11-07T06:30Z–07:00Z UTC）：
+  - `cargo test -p neohub-mcp` → **17 passed**
+    - `auth`（6）：Host 只接受精确 loopback（`localhost.evil.com` 被拒）、Origin 规则
+      （缺失通过 / `null` 拒绝 / 非 loopback 拒绝）、Bearer 精确匹配、**Token 轮换后旧 Token 立即失效**、
+      Host 去端口保留 IPv6 括号
+    - `redaction`（6）：已知 secret 字面量、`enc1:`/`nhk1:` 密文、`Bearer` 头、JSON 递归、
+      长 secret 优先（避免残留片段）、过短值不登记
+    - `tools`（5）：22 个工具各一条 spec、wire 名与旧版一致、全部是 object schema、
+      关键工具的 required 字段、名字可反查
+  - `cargo test --workspace --locked` → **391 passed / 0 failed**；clippy **0 warnings**；`cargo fmt --all`
+- 与旧版不同之处：
+  1. **Host 校验更严格**：旧版 `hostWithoutPort` 把 `[::1].evil.com` 归约成 `[::1]` 从而放行；
+     现在方括号 host 必须在 `]` 结束（后面只允许 `:port`）
+  2. Bearer 比较同样是"先 sha256 再常量时间比较"，但用 Rust 实现（无 `timingSafeEqual` 的长度陷阱）
+  3. 工具 schema 用 `additionalProperties: false` 明确拒绝多余参数（旧版 zod 也是严格模式）
+- 未解决问题及所属阶段：
+  1. **rmcp Streamable HTTP 服务未接入**（默认端口 6872、Bearer Token、可选自签 TLS）→ 本阶段剩余
+  2. **22 个工具的 dispatch 未实现**：需要先在 core 补 `UpdateApp`/`RemoveApp`/`ListNodeVersions`
+     命令，再逐个把工具接到 `CoreHandle`
+  3. 兼容性 golden cases（对照旧版返回 JSON）→ 随 dispatch 一起做
+  4. 真实 MCP 客户端验收（initialize → tools/list → tools/call）→ 随传输层一起做

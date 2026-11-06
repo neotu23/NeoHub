@@ -1,0 +1,21 @@
+[package]
+name = "neohub-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "NeoHub MCP server: tools, auth gate, redaction"
+
+[dependencies]
+neohub-core = { path = "../core" }
+neohub-domain = { path = "../domain" }
+neohub-storage = { path = "../storage" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+
+[dev-dependencies]
+tempfile = "3.14"
