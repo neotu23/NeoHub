@@ -7,9 +7,11 @@
 pub mod auth;
 pub mod dispatch;
 pub mod redaction;
+pub mod server;
 pub mod tools;
 
 pub use auth::{bearer_matches, host_allowed, is_loopback_hostname, origin_allowed};
 pub use dispatch::{ToolContext, ToolError, dispatch};
 pub use redaction::{MASK, Redactor};
+pub use server::{McpConfig, ServerHandle, start};
 pub use tools::{ALL as ALL_TOOLS, ToolName, ToolSpec, tool_specs};

@@ -732,7 +732,7 @@
   4. 迁移后 `migration.json` 清单尚未接入 UI 展示
 
 ### 阶段 14：MCP 全量迁移与协议兼容
-- 状态：**开发中**（22 工具定义 + dispatch + gate + 脱敏完成并测试；rmcp 传输层待做）
+- 状态：**开发中**（22 工具 + dispatch + gate + 脱敏 + HTTP 端点完成并测试；TLS/SSE 与事件广播待做）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: port the MCP gate, redaction and tool catalogue`
 - 实际修改文件：新增 `native/crates/mcp/{Cargo.toml,src/{lib,auth,redaction,tools}.rs}`；更新 workspace 成员
@@ -777,4 +777,26 @@
     2. 与旧版返回 JSON 的 golden 对照用例
     3. 真实 MCP 客户端验收（initialize → tools/list → tools/call）与 Token 轮换实测
     4. MCP 修改后窗口/菜单栏事件（`CatalogChanged`）尚未在 dispatch 后发出
+
+- 第三批完成（2026-11-07T07:45Z–08:20Z UTC）：
+  - `mcp/src/server.rs`：`POST /mcp` 上的 JSON-RPC 2.0 端点
+    （`initialize` / `tools/list` / `tools/call` / `ping` / `notifications/*`）
+  - gate 在解析 body **之前**生效：Host → Origin → Bearer，全部失败即 403/401
+  - `require_auth` 但未配置 Token 时返回 **401**（不会静默变成开放服务）
+  - 工具错误以 MCP 规范的 `result.isError = true` 返回，内容为 `{field,message}` JSON
+  - 出站内容统一过 `Redactor`
+  - 验证：`cargo test -p neohub-mcp --test protocol` → **6 passed**
+    - initialize → tools/list（22 个，全部 object schema）→ tools/call `list_apps` 读到真实应用
+    - gate：`Host: localhost.evil.com` → 403、非 loopback Origin → 403、缺/错 Token → 401、
+      loopback Origin（Inspector）→ 200
+    - 未知方法 → `-32601`；未知工具 → `-32602`；参数缺失 → `isError` 且点名 `path`
+    - 通知 → 202 且响应体为空
+    - **Token 轮换后旧 Token 立即 401**，新 Token 200
+    - 要求认证但无 Token → 401
+  - `cargo test --workspace --locked` → **402 passed / 0 failed**；clippy **0 warnings**
+- 关于 rmcp：`rmcp 3.9` 的 Streamable HTTP 传输以 tower/axum Service 形式装配，
+  会把第二套 HTTP 栈带进桌面应用；本阶段改用**协议兼容的最小实现**（上述端点），
+  工具层与传输层已解耦（`dispatch` 不依赖 HTTP），换回官方 SDK 是局部替换。
+  差异：暂不支持 SSE 流式响应与 `initialize` 后的会话 id（会话在单进程内隐式存在）。
+- 未解决问题：可选自签 TLS、SSE、工具变更后的 `CatalogChanged` 广播、与旧版返回 JSON 的 golden 对照。
 
