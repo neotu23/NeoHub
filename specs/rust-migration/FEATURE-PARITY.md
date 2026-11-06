@@ -85,11 +85,11 @@
 
 | # | 功能 | 旧版源码依据 | 旧版基线 | Rust 目标 | Rust 状态 |
 |---|---|---|---|---|---|
-| R1 | `none` / `port` / `log`(regex+flags) / `http`(2xx/3xx 或指定状态) / `exit` / `delay` 六种探测 | `services/readiness/*` | 已验证（`HttpReadiness.test.ts`） | `core/src/orchestrator/readiness.rs` | 未开始 |
-| R2 | readiness 超时 `readiness_timeout_ms`（默认 60000）与取消 | `AppOrchestrator.ts` | 已验证 | `core/src/orchestrator/` | 未开始 |
-| R3 | 启动失败回滚：只回收本次启动新增的任务 | `AppOrchestrator.ts` | 部分 | `core/src/orchestrator/state.rs` | 未开始 |
-| R4 | 依赖分层并行启动、disabled 任务跳过、autoStart 不重复启动 | `AppOrchestrator.ts` | 部分 | `core/src/orchestrator/state.rs` | 未开始 |
-| R5 | readiness 诚实性：未配置探测时 MCP 返回 `readinessVerified: null` | `mcp/tools.ts` | 已验证（`tools.test.ts` 真实断言） | `core/src/orchestrator/state.rs` | 未开始 |
+| R1 | `none` / `port` / `log`(regex+flags) / `http`(2xx/3xx 或指定状态) / `exit` / `delay` 六种探测 | `services/readiness/*` | 已验证（`HttpReadiness.test.ts`） | `core/src/orchestrator/readiness.rs`| 已验证（none/port/log/http/exit/delay 六种；port/log 用真实 fixture 集成验证，http 含 503→200 预热） |
+| R2 | readiness 超时 `readiness_timeout_ms`（默认 60000）与取消 | `AppOrchestrator.ts` | 已验证 | `core/src/orchestrator/`| 已验证（读取 `readiness_timeout_ms`，超时/任务退出即中止；start 被 stop 取消） |
+| R3 | 启动失败回滚：只回收本次启动新增的任务 | `AppOrchestrator.ts` | 部分 | `core/src/orchestrator/state.rs`| 已验证（回滚只停止本次启动新增的任务，用户先前手动启动的任务保持运行） |
+| R4 | 依赖分层并行启动、disabled 任务跳过、autoStart 不重复启动 | `AppOrchestrator.ts` | 部分 | `core/src/orchestrator/state.rs`| 部分（拓扑分层并行、disabled 跳过、同任务已在运行不重复启动已验证；app autoStart 接线在阶段 12/15） |
+| R5 | readiness 诚实性：未配置探测时 MCP 返回 `readinessVerified: null` | `mcp/tools.ts` | 已验证（`tools.test.ts` 真实断言） | `core/src/orchestrator/state.rs`| 已验证（`none` 记为 `(kind=none, verified=false)`，MCP 不会谎报 readinessVerified=true） |
 
 ## 8. 监控、端口、监听
 

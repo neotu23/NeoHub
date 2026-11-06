@@ -22,8 +22,16 @@ pub enum CoreCommand {
     GetLogs {
         task_id: TaskId,
     },
-    /// Reverse-topological stop of every task of one app (phase 7 adds the ordering).
+    /// Start an app: topological levels, readiness per task, rollback on failure.
+    StartApp {
+        app_id: AppId,
+    },
+    /// Reverse-topological stop of every task of one app.
     StopApp {
+        app_id: AppId,
+    },
+    /// Stop then start, held together so nothing interleaves.
+    RestartApp {
         app_id: AppId,
     },
     /// Refuse new starts, stop everything, write history, then close the database.

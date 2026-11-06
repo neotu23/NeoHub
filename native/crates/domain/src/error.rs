@@ -49,6 +49,9 @@ pub enum DomainError {
 
     #[error("{key} cannot be decrypted with the available key material")]
     SecretUnavailable { key: String },
+
+    #[error("task {task_id} was not ready within {timeout_ms} ms")]
+    ReadinessTimeout { task_id: TaskId, timeout_ms: u64 },
 }
 
 pub type Result<T> = std::result::Result<T, DomainError>;

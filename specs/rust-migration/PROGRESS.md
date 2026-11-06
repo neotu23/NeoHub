@@ -278,3 +278,35 @@
   3. 全局 100 MiB 预算在真实长跑任务上的高水位验证 → 阶段 16 压测
 
 ---
+
+### 阶段 7：任务依赖、就绪探测、失败回滚
+- 状态：**已验证**
+- 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
+- 最近提交：`feat: port task orchestration and readiness`
+- 实际修改文件：新增 `native/crates/core/src/orchestrator/{mod,topology,state,readiness}.rs`、
+  `native/crates/core/tests/orchestration.rs`、`native/test-fixtures/process/{listens-on-port,http-ready}.sh`；
+  修改 `service.rs`（`start_app`/`stop_app`/`restart_app` + 回滚 + 取消 + readiness 记录）、
+  `commands.rs`（`StartApp`/`RestartApp`）、`domain/error.rs`（`ReadinessTimeout`）、`Cargo.toml`（reqwest/futures）
+- 验证命令与结果（2026-11-06T17:30Z–18:15Z UTC）：
+  - `cargo test -p neohub-core --test orchestration --locked` → **7 passed**
+    （三层链路全部启动；readiness 失败只回滚本次启动、用户先前手动启动的任务保持运行；
+    disabled 任务保持 idle；`none` 记为 unverified；restart 产生新 run；真实 port 探测；
+    真实 http 探测穿过 503→200 预热）
+  - `cargo test -p neohub-core --lib orchestrator` → **24 passed**
+    （拓扑分层/环/自依赖/未知依赖/disabled/反向停止 9；app 状态与 sticky 6；readiness 单元 9）
+  - `cargo test --workspace --locked` → **201 passed / 0 failed**
+  - `cargo clippy -p neohub-core --all-targets --locked` → **0 warnings**；`cargo fmt --all` 已执行
+  - 残留进程检查：`pgrep -f test-fixtures/process` 为空
+- 与旧版不同之处：
+  1. `engines`/readiness 的 JS 正则差异被显式处理：只有 `i` flag 有等价物，其它 flags
+     返回 `Failed("…not supported…")`；非法正则同样明确失败，不静默改成字面量匹配
+  2. http readiness 的 TLS 跳过**仅限 loopback**（`danger_accept_invalid_certs` 只在
+     127.0.0.1/localhost/::1 时开启），非 loopback 正常校验证书
+  3. 回滚精确到"本次 start 新增的任务"集合，而不是按 app 全量停止
+  4. `none` readiness 有独立结果 `Unverified`，快照里记 `(kind, verified=false)`
+- 未解决问题及所属阶段：
+  1. app `autoStart`（登录/启动时自动拉起）→ 阶段 12/15（需要 AppHost 生命周期）
+  2. 每层 readiness 等待是串行等待同层全部完成（旧版亦然），更细的并发控制留待实测
+  3. http 探测使用 reqwest+rustls；私有 CA 场景尚未验证 → 阶段 16
+
+---

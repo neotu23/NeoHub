@@ -15,6 +15,9 @@ use crate::environment::env_builder::{BuildEnvInput, build_env};
 use crate::environment::node_resolver::NodeResolver;
 use crate::environment::path_probe::PathProbe;
 use crate::events::{CoreEvent, CoreEventKind};
+use crate::orchestrator::readiness::{ProbeContext, ReadinessOutcome, wait_for_readiness};
+use crate::orchestrator::state::StickyOutcomes;
+use crate::orchestrator::topology::{TopologyError, plan_start, plan_stop};
 use crate::process::runner::{RunnerEvent, TaskRunner, wait_for_settled};
 use crate::process::spawn_spec::{DEFAULT_COLS, DEFAULT_ROWS, SpawnSpec};
 use crate::snapshot::CoreSnapshot;
@@ -23,6 +26,7 @@ use neohub_storage::db::now_ms;
 use neohub_storage::secrets::{FakeSecretStore, SecretStore, read_secret_value};
 use neohub_storage::{DataDir, Storage};
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -40,6 +44,12 @@ pub struct CoreService {
     node_resolver: Arc<NodeResolver>,
     path_probe: PathProbe,
     secrets: Arc<dyn SecretStore>,
+    /// Sticky per-app outcome (a stopped app keeps reading stopped, not idle).
+    outcomes: Mutex<StickyOutcomes>,
+    /// In-flight start cancellation flags, one per app.
+    start_cancels: Mutex<HashMap<AppId, Arc<AtomicBool>>>,
+    /// Readiness result per task for the current run.
+    ready_flags: Mutex<HashMap<TaskId, (String, bool)>>,
 }
 
 /// Handle given to the UI and to MCP.
@@ -72,6 +82,9 @@ impl CoreService {
             node_resolver: Arc::new(NodeResolver::new()),
             path_probe: PathProbe::new(),
             secrets: Arc::new(FakeSecretStore::new()),
+            outcomes: Mutex::new(StickyOutcomes::new()),
+            start_cancels: Mutex::new(HashMap::new()),
+            ready_flags: Mutex::new(HashMap::new()),
         });
         Self::spawn_pump(&service);
         service
@@ -123,6 +136,15 @@ impl CoreService {
                 // the process is already reaped, only the row would be missing.
                 if matches!(state, ProcessState::Exited | ProcessState::Crashed) {
                     self.finish_history(&task_id, &run_id, exit.as_ref());
+                    self.ready_flags
+                        .lock()
+                        .expect("ready flags")
+                        .remove(&task_id);
+                    // Sticky outcome: an app whose tasks all end must not read as idle.
+                    self.outcomes
+                        .lock()
+                        .expect("outcomes")
+                        .record(&app_id, state);
                 }
                 let revision = self.bump_revision();
                 let _ = self.events.send(CoreEvent {
@@ -381,17 +403,6 @@ impl CoreService {
         Ok(())
     }
 
-    /// Stop every task of one app (phase 7 replaces this with reverse-topological order).
-    async fn stop_app(&self, app_id: &AppId) -> CoreResult<()> {
-        let tasks = self.with_storage(|storage| Ok(storage.catalog().list_tasks(app_id)?))?;
-        for task in tasks {
-            if self.runner.state_of(&task.id).is_live() {
-                let _ = self.stop_task(&task.id).await;
-            }
-        }
-        Ok(())
-    }
-
     /// Full shutdown: refuse starts → stop everything → write history → checkpoint → close.
     pub async fn shutdown(&self) -> CoreResult<()> {
         self.shutting_down.store(true, Ordering::SeqCst);
@@ -469,6 +480,222 @@ impl CoreService {
         if let Err(err) = result {
             eprintln!("[core] could not finish run history for {task_id}: {err}");
         }
+    }
+
+    /// Readiness result recorded for a task's current run.
+    pub fn readiness_of(&self, task_id: &TaskId) -> Option<(String, bool)> {
+        self.ready_flags
+            .lock()
+            .expect("ready flags")
+            .get(task_id)
+            .cloned()
+    }
+
+    fn set_ready(&self, task_id: &TaskId, kind: &str, verified: bool) {
+        self.ready_flags
+            .lock()
+            .expect("ready flags")
+            .insert(task_id.clone(), (kind.to_string(), verified));
+    }
+
+    /// Sticky app state (used by the snapshot when no task is live).
+    pub fn sticky_state(&self, app_id: &AppId) -> Option<ProcessState> {
+        self.outcomes.lock().expect("outcomes").get(app_id)
+    }
+
+    /// Build the probe context for a running task.
+    fn probe_context(&self, task_id: &TaskId, pid: u32, pgid: i32) -> ProbeContext {
+        let runner_for_state = self.runner.clone();
+        let runner_for_logs = self.runner.clone();
+        let runner_for_exit = self.runner.clone();
+        let id_state = task_id.clone();
+        let id_logs = task_id.clone();
+        let id_exit = task_id.clone();
+        ProbeContext {
+            pid,
+            pgid,
+            state: Arc::new(move || runner_for_state.state_of(&id_state)),
+            raw_logs: Arc::new(move || runner_for_logs.logs_of(&id_logs)),
+            exit_code: Arc::new(move || {
+                runner_for_exit
+                    .last_exit_of(&id_exit)
+                    .and_then(|exit| exit.code)
+            }),
+        }
+    }
+
+    fn cancellation_flag(&self, app_id: &AppId) -> Arc<AtomicBool> {
+        let mut cancels = self.start_cancels.lock().expect("cancel flags");
+        cancels
+            .entry(app_id.clone())
+            .or_insert_with(|| Arc::new(AtomicBool::new(false)))
+            .clone()
+    }
+
+    /// Cancel an in-flight start for this app (called by stop/restart before taking the lock).
+    fn cancel_start(&self, app_id: &AppId) {
+        let cancels = self.start_cancels.lock().expect("cancel flags");
+        if let Some(flag) = cancels.get(app_id) {
+            flag.store(true, Ordering::SeqCst);
+        }
+    }
+
+    fn readiness_timeout(&self) -> Duration {
+        let millis = self
+            .with_storage(|storage| {
+                Ok(storage
+                    .settings()
+                    .load()
+                    .map(|settings| settings.readiness_timeout_ms)
+                    .unwrap_or(60_000))
+            })
+            .unwrap_or(60_000);
+        Duration::from_millis(millis)
+    }
+
+    /// Start an app: topo levels, parallel within a level, readiness per task, rollback on
+    /// failure. Only tasks that *this* call started are rolled back — anything the user had
+    /// already running stays untouched.
+    pub async fn start_app(&self, app_id: &AppId) -> CoreResult<()> {
+        if self.shutting_down.load(Ordering::SeqCst) {
+            return Err(DomainError::InvalidInput {
+                field: "shutdown",
+                message: "the core is shutting down".into(),
+            }
+            .into());
+        }
+        let tasks = self.with_storage(|storage| Ok(storage.catalog().list_tasks(app_id)?))?;
+        let levels = plan_start(&tasks).map_err(|err| match err {
+            TopologyError::UnknownDependency { task, missing } => DomainError::UnknownDependency {
+                task_id: task,
+                missing,
+            },
+            TopologyError::Cycle { tasks } => DomainError::DependencyCycle { tasks },
+        })?;
+        if levels.is_empty() {
+            return Err(DomainError::InvalidInput {
+                field: "tasks",
+                message: "no enabled tasks for this app".into(),
+            }
+            .into());
+        }
+
+        self.outcomes.lock().expect("outcomes").clear(app_id);
+        let cancel = self.cancellation_flag(app_id);
+        cancel.store(false, Ordering::SeqCst);
+        let timeout = self.readiness_timeout();
+
+        let mut started_here: Vec<TaskId> = Vec::new();
+        for level in &levels {
+            if cancel.load(Ordering::SeqCst) {
+                self.rollback(&started_here).await;
+                return Err(DomainError::InvalidInput {
+                    field: "process",
+                    message: "start cancelled".into(),
+                }
+                .into());
+            }
+            // Start everything in this level in parallel.
+            let mut launch = Vec::new();
+            for task in level {
+                if self.runner.state_of(&task.id).is_live() {
+                    continue; // already running (user started it manually) — leave it alone
+                }
+                let task_id = task.id.clone();
+                let signal = task.readiness.clone();
+                let fut = async move {
+                    let info = self.start_task(&task_id).await?;
+                    let ctx = self.probe_context(&task_id, info.pid, info.pgid);
+                    let outcome = wait_for_readiness(&signal, &ctx, timeout).await;
+                    Ok::<_, CoreError>((task_id, signal.kind().to_string(), outcome))
+                };
+                launch.push(fut);
+            }
+            let results = futures::future::join_all(launch).await;
+            for result in results {
+                match result {
+                    Ok((task_id, kind, ReadinessOutcome::Ready)) => {
+                        self.set_ready(&task_id, &kind, true);
+                        started_here.push(task_id);
+                    }
+                    Ok((task_id, kind, ReadinessOutcome::Unverified)) => {
+                        // `none`: started, but nothing was verified. Never reported as ready.
+                        self.set_ready(&task_id, &kind, false);
+                        started_here.push(task_id);
+                    }
+                    Ok((task_id, kind, outcome)) => {
+                        self.set_ready(&task_id, &kind, false);
+                        started_here.push(task_id.clone());
+                        let message = match outcome {
+                            ReadinessOutcome::Failed(reason) => reason,
+                            ReadinessOutcome::TimedOut => {
+                                format!("readiness timed out after {} ms", timeout.as_millis())
+                            }
+                            _ => "readiness failed".to_string(),
+                        };
+                        self.rollback(&started_here).await;
+                        self.outcomes
+                            .lock()
+                            .expect("outcomes")
+                            .record(app_id, ProcessState::Crashed);
+                        eprintln!("[core] readiness failure: {message}");
+                        return Err(DomainError::ReadinessTimeout {
+                            task_id,
+                            timeout_ms: timeout.as_millis() as u64,
+                        }
+                        .into());
+                    }
+                    Err(err) => {
+                        self.rollback(&started_here).await;
+                        return Err(err);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Stop only the tasks this start added (failure rollback). Never touches pre-existing runs.
+    async fn rollback(&self, started: &[TaskId]) {
+        for task_id in started {
+            let _ = self.runner.stop(task_id).await;
+            self.ready_flags
+                .lock()
+                .expect("ready flags")
+                .remove(task_id);
+        }
+    }
+
+    /// Stop an app: reverse-topological, level by level.
+    pub async fn stop_app(&self, app_id: &AppId) -> CoreResult<()> {
+        // Cancel an in-flight start first, so the stop is not queued behind readiness waits.
+        self.cancel_start(app_id);
+        let tasks = self.with_storage(|storage| Ok(storage.catalog().list_tasks(app_id)?))?;
+        let levels = plan_start(&tasks).unwrap_or_default();
+        let stop_plan = plan_stop(&levels);
+        for level in stop_plan {
+            for task_id in level {
+                if self.runner.state_of(&task_id).is_live() {
+                    let _ = self.runner.stop(&task_id).await;
+                }
+                self.ready_flags
+                    .lock()
+                    .expect("ready flags")
+                    .remove(&task_id);
+            }
+        }
+        self.outcomes
+            .lock()
+            .expect("outcomes")
+            .record(app_id, ProcessState::Exited);
+        Ok(())
+    }
+
+    /// Stop then start, holding the app's cancellation flag across both.
+    pub async fn restart_app(&self, app_id: &AppId) -> CoreResult<()> {
+        self.stop_app(app_id).await?;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        self.start_app(app_id).await
     }
 
     /// Shared resolver: the scan cache lives for the process lifetime, so Node upgrades
@@ -566,8 +793,16 @@ impl CoreHandle {
             CoreCommand::GetLogs { task_id } => {
                 Ok(CoreReply::Logs(self.service.runner.logs_of(&task_id)))
             }
+            CoreCommand::StartApp { app_id } => {
+                self.service.start_app(&app_id).await?;
+                Ok(CoreReply::Ack)
+            }
             CoreCommand::StopApp { app_id } => {
                 self.service.stop_app(&app_id).await?;
+                Ok(CoreReply::Ack)
+            }
+            CoreCommand::RestartApp { app_id } => {
+                self.service.restart_app(&app_id).await?;
                 Ok(CoreReply::Ack)
             }
             CoreCommand::Shutdown => {

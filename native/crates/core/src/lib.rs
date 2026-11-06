@@ -8,6 +8,7 @@ pub mod commands;
 pub mod environment;
 pub mod events;
 pub mod logs;
+pub mod orchestrator;
 pub mod process;
 pub mod service;
 pub mod snapshot;
