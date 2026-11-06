@@ -12,6 +12,7 @@ description = "NeoHub macOS platform services (keychain, open-in, deep links, tr
 aes-gcm = "0.10"
 base64 = "0.22"
 rand = "0.9"
+chrono = "0.4"
 libc = "0.2"
 security-framework = "3.7"
 objc2 = "0.6"
@@ -25,3 +26,6 @@ neohub-storage = { path = "../storage" }
 neohub-core = { path = "../core" }
 neohub-domain = { path = "../domain" }
 thiserror = "2.0"
+
+[dev-dependencies]
+tempfile = "3.14"

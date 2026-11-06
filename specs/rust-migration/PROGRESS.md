@@ -1154,3 +1154,27 @@
   1. 设置面板的「危险区」按钮（导出对话框 / 重置确认）未接
   2. 导出走的是路径参数，没有原生 `NSSavePanel`；UI 接线时需要一个选路径的入口
 
+### S11 应用日志文件与 panic 捕获
+- 状态：**基础设施完成**；设置面板入口待接
+- 最近提交：`feat: write the host's own log file`
+- 实际修改文件：新增 `platform-macos/src/log_file.rs`；更新 `platform-macos/{lib.rs,Cargo.toml}`
+  （chrono、dev 依赖 tempfile）、`desktop/src/main.rs`（启动即初始化 + 记录数据目录 + 第二实例分支记录）
+- 为什么需要：UI 里看到的是**项目的**日志。NeoHub 自己出问题（host panic、窗口打不开）时，
+  进程可能在屏幕上留下任何东西之前就死了，而 Console.app 不索引应用自写的日志。
+  一个放在 `~/Library/Logs` 下的普通文件是用户能直接附到 bug 报告里的东西
+- 实现要点：
+  1. 路径 `~/Library/Logs/NeoHub/neohub.log`（与旧版同目录、不同文件名，不覆盖旧版日志）
+  2. 行格式 `2026-11-06T15:37:23Z [host] message`（UTC，ISO-8601）
+  3. **写入时轮转**：超过 5 MiB 就改名为 `.1`（只保留一份）。轮转失败不影响当前这行写入
+  4. **panic hook 先写日志再调默认 hook**：原 stderr 行为不变，只是多了一条落盘证据
+  5. `init` 在 `main` 最开头调用，所以之后的任何 panic 都能落盘
+- 验证：`cargo test -p neohub-platform-macos --lib log_file` → **6 passed**
+  （路径、行格式与 UTC 时间戳、追加顺序、超限轮转且只保留一份、panic 内容落盘、
+  sink 未初始化时静默）
+  `cargo test --workspace --locked` → **448 passed / 0 failed**；clippy 0
+  打包后真实启动：`~/Library/Logs/NeoHub/neohub.log` 出现
+  `[host] NeoHub starting` 与 `[host] data dir: …`
+- 未解决问题：
+  1. 设置面板没有「打开日志目录」按钮（`log_file::reveal` 已实现，等 UI 接线）
+  2. 只有 host 写日志；runner/UI 的 warn/error 尚未接入同一 sink
+

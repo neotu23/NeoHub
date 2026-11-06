@@ -13,6 +13,7 @@ use neohub_core::service::CoreService;
 use neohub_desktop::app_host::{ActivationWatcher, SharedHost, open_main_window, reopen_or_focus};
 use neohub_desktop::session_lock::{LockOutcome, SessionLock};
 use neohub_desktop::window_session::AppHost;
+use neohub_platform_macos::log_file;
 use neohub_platform_macos::login_item;
 use neohub_platform_macos::tray::{TrayAction, build_menu};
 use neohub_platform_macos::tray_native::TrayHandle;
@@ -62,12 +63,22 @@ fn run_command(shared: &SharedHost, runtime: &Arc<tokio::runtime::Runtime>, comm
 }
 
 fn main() {
+    // Earliest possible: a panic below this point still reaches the log file.
+    log_file::init(None);
+    log_file::install_panic_hook();
+    log_file::log("host", "NeoHub starting");
+
     let data_dir = DataDir::from_args(std::env::args()).expect("resolve data dir");
+    log_file::log("host", &format!("data dir: {}", data_dir.path().display()));
 
     // Only one NeoHub may own the database. A second launch just raises the first window.
     let _lock = match SessionLock::acquire(data_dir.path()).expect("session lock") {
         LockOutcome::Acquired(lock) => lock,
         LockOutcome::AlreadyRunning { activation_file } => {
+            log_file::log(
+                "host",
+                "another instance owns the database; raising its window",
+            );
             println!(
                 "NeoHub is already running; activation requested via {}",
                 activation_file.display()
