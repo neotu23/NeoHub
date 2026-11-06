@@ -35,6 +35,8 @@ enum HostUpdate {
     History(AppId, Vec<neohub_domain::RunHistoryRow>),
     TaskSaved(Box<neohub_domain::Task>),
     TaskError(String),
+    AppSaved(Box<neohub_domain::App>),
+    AppSaveError(String),
     SettingsSaved(Box<neohub_domain::Settings>),
     SettingsError(String),
     EnvVars(
@@ -59,6 +61,8 @@ pub struct HostBridge {
     reply_sink: Arc<std::sync::mpsc::Sender<HostUpdate>>,
     /// Outcome of the last task save, picked up by the editor.
     last_save: Mutex<(Option<neohub_domain::Task>, Option<String>)>,
+    /// Outcome of the last app-configuration save: (saved app, error).
+    last_app_save: Mutex<(Option<neohub_domain::App>, Option<String>)>,
     /// Outcome of the last settings save, picked up by the settings panel.
     last_settings: Mutex<(Option<neohub_domain::Settings>, Option<String>)>,
     /// Environment-variable loads/saves waiting to be folded into the editor.
@@ -102,6 +106,7 @@ impl HostBridge {
             updates: Mutex::new(rx),
             reply_sink,
             last_save: Mutex::new((None, None)),
+            last_app_save: Mutex::new((None, None)),
             last_settings: Mutex::new((None, None)),
             last_env: Mutex::new((Vec::new(), None)),
             session_store,
@@ -326,6 +331,30 @@ impl HostBridge {
         });
     }
 
+    /// Save the app configuration form through the same command the MCP tool uses.
+    pub fn save_app_config(
+        &self,
+        app_id: neohub_domain::AppId,
+        patch: neohub_core::catalog::UpdateAppInput,
+    ) {
+        let handle = self.handle.clone();
+        let sink = self.reply_sink.clone();
+        self.runtime.spawn(async move {
+            let reply = handle
+                .request(CoreCommand::UpdateApp {
+                    app_id,
+                    input: Box::new(patch),
+                })
+                .await;
+            let message = match reply {
+                Ok(CoreReply::App(app)) => HostUpdate::AppSaved(app),
+                Ok(_) => HostUpdate::AppSaveError("unexpected app reply".into()),
+                Err(err) => HostUpdate::AppSaveError(err.to_string()),
+            };
+            let _ = sink.send(message);
+        });
+    }
+
     /// Load the run history the detail pane renders.
     pub fn load_history(&self, app_id: AppId) {
         let handle = self.handle.clone();
@@ -419,6 +448,8 @@ impl HostBridge {
         let mut changed = false;
         let mut need_snapshot = false;
         let mut saved_task: Option<neohub_domain::Task> = None;
+        let mut app_saved_out: Option<neohub_domain::App> = None;
+        let mut app_save_error_out: Option<String> = None;
         let mut save_error: Option<String> = None;
         let mut saved_settings_out: Option<neohub_domain::Settings> = None;
         let mut settings_error_out: Option<String> = None;
@@ -457,6 +488,15 @@ impl HostBridge {
                     }
                     HostUpdate::TaskError(message) => {
                         save_error = Some(message);
+                        changed = true;
+                    }
+                    HostUpdate::AppSaved(app) => {
+                        app_saved_out = Some(*app);
+                        need_snapshot = true;
+                        changed = true;
+                    }
+                    HostUpdate::AppSaveError(message) => {
+                        app_save_error_out = Some(message);
                         changed = true;
                     }
                     HostUpdate::SettingsSaved(settings) => {
@@ -503,6 +543,12 @@ impl HostBridge {
             // Taken outside the store lock: `refresh_snapshot` re-locks it.
             self.refresh_snapshot();
             changed = true;
+        }
+        // Hand the app form outcome back the same way the task editor gets its result.
+        if (app_saved_out.is_some() || app_save_error_out.is_some())
+            && let Ok(mut guard) = self.last_app_save.lock()
+        {
+            *guard = (app_saved_out, app_save_error_out);
         }
         // Hand the save outcome back to the editor that is waiting for it.
         if (saved_task.is_some() || save_error.is_some())
@@ -558,6 +604,29 @@ impl HostBridge {
     }
 }
 
+/// Cycled sample values for a configuration field.
+///
+/// The panel has no per-field text input yet, so a click steps through sensible values. Every
+/// value still goes through `AppForm`'s validation, so a bad sample would surface as a field
+/// error rather than being saved.
+fn next_sample(field: &str, current: &str) -> String {
+    let samples: &[&str] = match field {
+        "name" => &["web", "api", "docs", "web-admin"],
+        "folder" => &["", "Work", "Personal", "Archive"],
+        "tags" => &["", "api", "api, web", "cli, tool"],
+        "watch_globs" => &["", "src/**/*.ts", "src/**/*.ts\ntests/**/*.ts"],
+        "port_hint" => &["", "3000", "4000", "5173"],
+        "node_version" => &["auto", "system", "20.11.0", "22.0.0"],
+        _ => &[""],
+    };
+    let position = samples.iter().position(|sample| *sample == current);
+    let next = match position {
+        Some(index) => (index + 1) % samples.len(),
+        None => 0,
+    };
+    samples[next].to_string()
+}
+
 /// The window root.
 pub struct ShellView {
     bridge: Arc<HostBridge>,
@@ -569,6 +638,9 @@ pub struct ShellView {
     /// Open task editor, if any.
     editor: Option<TaskForm>,
     editor_focus: FocusHandle,
+    /// Open app configuration panel, if any.
+    app_form: Option<crate::state::app_form::AppForm>,
+    app_form_focus: FocusHandle,
     /// Open settings panel, if any.
     settings: Option<SettingsForm>,
     settings_focus: FocusHandle,
@@ -598,6 +670,7 @@ impl ShellView {
         let search_focus = cx.focus_handle();
         let editor_focus = cx.focus_handle();
         let settings_focus = cx.focus_handle();
+        let app_form_focus = cx.focus_handle();
         let env_focus = cx.focus_handle();
         let log_search_focus = cx.focus_handle();
         ShellView {
@@ -607,7 +680,9 @@ impl ShellView {
             history_requested: None,
             editor: None,
             editor_focus,
+            app_form: None,
             settings: None,
+            app_form_focus,
             settings_focus,
             env: None,
             env_tab: ScopeTab::Global,
@@ -694,6 +769,17 @@ fn state_label(state: ProcessState) -> &'static str {
     }
 }
 
+impl ShellView {
+    /// Outcome of the last app-configuration save, drained once per frame.
+    fn take_app_save_outcome(&self) -> (Option<neohub_domain::App>, Option<String>) {
+        self.bridge
+            .last_app_save
+            .lock()
+            .map(|mut guard| std::mem::take(&mut *guard))
+            .unwrap_or((None, None))
+    }
+}
+
 impl Render for ShellView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = self.palette();
@@ -723,6 +809,16 @@ impl Render for ShellView {
         }
         if let (Some(message), Some(_)) = (env_error, self.env.as_ref()) {
             eprintln!("[ui] env editor: {message}");
+        }
+
+        // Fold a completed app-configuration save back into the open panel.
+        let (app_saved, app_error) = self.take_app_save_outcome();
+        if let Some(form) = self.app_form.as_mut() {
+            if let Some(saved) = app_saved {
+                form.reset_from_app(&saved);
+            } else if let Some(message) = app_error {
+                form.apply_error("name", message);
+            }
         }
 
         // Fold a completed settings save back into the open panel.
@@ -1221,6 +1317,210 @@ impl Render for ShellView {
                 }
             }));
             main = main.child(panel);
+        } else if let Some(form) = self.app_form.as_mut() {
+            // App configuration: nine fields, same layout language as the task editor.
+            let fields = form.fields().clone();
+            let errors = form.errors().clone();
+            let dirty = form.is_dirty();
+            let mut body = div()
+                .flex()
+                .flex_col()
+                .gap(px(metrics::GAP_2))
+                .p(px(metrics::PAD_4))
+                .rounded(px(metrics::RADIUS_LG))
+                .border_1()
+                .border_color(palette.border)
+                .bg(palette.bg_surface)
+                .child(div().flex().items_center().justify_between().child(
+                    div().text_size(px(metrics::TEXT_BASE)).child(if dirty {
+                        "应用配置（未保存）"
+                    } else {
+                        "应用配置"
+                    }),
+                ));
+
+            // Text rows: (label, field name, value, placeholder).
+            for (label, field, value, placeholder) in [
+                ("名称", "name", fields.name.clone(), "显示名称"),
+                ("文件夹", "folder", fields.folder.clone(), "分组，可留空"),
+                ("标签", "tags", fields.tags.clone(), "逗号分隔，如 api, web"),
+                (
+                    "监听文件",
+                    "watch_globs",
+                    fields.watch_globs.clone(),
+                    "每行一个，相对路径",
+                ),
+                (
+                    "端口提示",
+                    "port_hint",
+                    fields.port_hint.clone(),
+                    "如 3000，可留空",
+                ),
+                (
+                    "Node 版本",
+                    "node_version",
+                    fields.node_version.clone(),
+                    "auto / system / 20.11.0",
+                ),
+            ] {
+                let entity = cx.entity().downgrade();
+                let current = value.clone();
+                let error = errors.get(field).cloned();
+                body = body.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.0))
+                        .child(
+                            div()
+                                .text_size(px(metrics::TEXT_XS))
+                                .text_color(palette.fg_muted)
+                                .child(label),
+                        )
+                        .child(
+                            div()
+                                .id(format!("app-field-{field}"))
+                                .px(px(metrics::PAD_2))
+                                .py(px(1.0))
+                                .rounded(px(metrics::RADIUS_MD))
+                                .border_1()
+                                .border_color(if error.is_some() {
+                                    palette.danger_fg
+                                } else {
+                                    palette.border
+                                })
+                                .bg(palette.bg_elevated)
+                                .text_size(px(metrics::TEXT_SM))
+                                .cursor_text()
+                                .child(if current.is_empty() {
+                                    placeholder.to_string()
+                                } else {
+                                    current.clone()
+                                })
+                                .on_click(move |_, _, cx| {
+                                    // Cycle through a few useful values instead of a full text
+                                    // field: this keeps the panel honest until inline editing
+                                    // lands, and the model already validates every value.
+                                    let next = next_sample(field, &current);
+                                    let _ = entity.update(cx, |this, cx| {
+                                        if let Some(form) = this.app_form.as_mut() {
+                                            form.set(field, next);
+                                        }
+                                        cx.notify();
+                                    });
+                                }),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(metrics::TEXT_XS))
+                                .text_color(palette.danger_fg)
+                                .child(error.clone().unwrap_or_default()),
+                        ),
+                );
+            }
+
+            // Toggles.
+            for (label, field, active) in [
+                ("开机自启（应用）", "auto_start", fields.auto_start),
+                (
+                    "文件变化自动重启",
+                    "auto_restart_on_change",
+                    fields.auto_restart_on_change,
+                ),
+            ] {
+                let entity = cx.entity().downgrade();
+                body = body.child(
+                    div()
+                        .id(format!("app-toggle-{field}"))
+                        .flex()
+                        .items_center()
+                        .gap(px(metrics::GAP_2))
+                        .cursor_pointer()
+                        .text_size(px(metrics::TEXT_SM))
+                        .child(if active { "✓" } else { "·" })
+                        .child(label)
+                        .on_click(move |_, _, cx| {
+                            let _ = entity.update(cx, |this, cx| {
+                                if let Some(form) = this.app_form.as_mut() {
+                                    let flipped = match field {
+                                        "auto_start" => !form.fields().auto_start,
+                                        _ => !form.fields().auto_restart_on_change,
+                                    };
+                                    form.set_toggle(field, flipped);
+                                }
+                                cx.notify();
+                            });
+                        }),
+                );
+            }
+
+            // Save / cancel.
+            let mut buttons = div().flex().gap(px(metrics::GAP_2));
+            {
+                let entity = cx.entity().downgrade();
+                let bridge = self.bridge.clone();
+                let app_id = form.app_id().to_string();
+                buttons = buttons.child(
+                    div()
+                        .id("app-form-save")
+                        .px(px(metrics::PAD_3))
+                        .py(px(metrics::GAP_1))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(palette.accent)
+                        .text_color(palette.accent_fg)
+                        .text_size(px(metrics::TEXT_SM))
+                        .cursor_pointer()
+                        .child("保存")
+                        .on_click(move |_, _, cx| {
+                            let bridge = bridge.clone();
+                            let app_id = app_id.clone();
+                            let _ = entity.update(cx, |this, cx| {
+                                let Some(form) = this.app_form.as_ref() else {
+                                    return;
+                                };
+                                match form.to_patch() {
+                                    Ok(patch) => bridge.save_app_config(
+                                        neohub_domain::AppId::from_existing(app_id),
+                                        patch,
+                                    ),
+                                    Err(errors) => {
+                                        // Surface every field error at once; the model already
+                                        // names the field, the view just shows them.
+                                        if let Some(form) = this.app_form.as_mut() {
+                                            for (field, message) in errors {
+                                                form.apply_error(field, message);
+                                            }
+                                        }
+                                    }
+                                }
+                                cx.notify();
+                            });
+                        }),
+                );
+            }
+            {
+                let entity = cx.entity().downgrade();
+                buttons = buttons.child(
+                    div()
+                        .id("app-form-cancel")
+                        .px(px(metrics::PAD_3))
+                        .py(px(metrics::GAP_1))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(palette.bg_elevated)
+                        .text_size(px(metrics::TEXT_SM))
+                        .cursor_pointer()
+                        .child("取消")
+                        .on_click(move |_, _, cx| {
+                            let _ = entity.update(cx, |this, cx| {
+                                this.app_form = None;
+                                cx.notify();
+                            });
+                        }),
+                );
+            }
+            body = body.child(buttons);
+
+            main = main.child(body);
         } else if let Some(panel) = self.settings.as_mut() {
             let draft = panel.draft().clone();
             let dirty = panel.is_dirty();
@@ -1767,6 +2067,28 @@ impl Render for ShellView {
                                 let _ = entity.update(cx, |this, cx| {
                                     this.env_tab = ScopeTab::Global;
                                     this.env = Some(EnvEditor::new(scope, Vec::new()));
+                                    cx.notify();
+                                });
+                            })
+                    });
+                    actions = actions.child({
+                        let entity = cx.entity().downgrade();
+                        let focus = self.app_form_focus.clone();
+                        let app = app.clone();
+                        div()
+                            .id("detail-app-config")
+                            .px(px(metrics::PAD_3))
+                            .py(px(metrics::GAP_1))
+                            .rounded(px(metrics::RADIUS_MD))
+                            .bg(palette.bg_elevated)
+                            .text_size(px(metrics::TEXT_SM))
+                            .cursor_pointer()
+                            .child("应用配置")
+                            .on_click(move |_, window, cx| {
+                                let form = crate::state::app_form::AppForm::from_app(&app);
+                                let _ = entity.update(cx, |this, cx| {
+                                    this.app_form = Some(form);
+                                    window.focus(&focus, cx);
                                     cx.notify();
                                 });
                             })

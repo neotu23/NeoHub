@@ -1037,3 +1037,25 @@
   `cargo test --workspace --locked` → **427 passed / 0 failed**；clippy 0
 - 未解决问题：`shell.rs` 的配置面板渲染与 `UpdateApp` 提交接线（下一批）
 
+### U7 应用配置编辑（第二批：面板接线）
+- 状态：**可用**（有一个明确的输入方式限制）
+- 最近提交：`feat: edit app configuration in the window`
+- 实际修改文件：`ui/src/views/shell.rs`（面板渲染、入口按钮、保存通道）、`ui/src/state/app_form.rs`（不变）
+- 接线内容：
+  1. 详情页新增「应用配置」按钮 → 用当前应用构造 `AppForm`
+  2. 面板渲染 9 个字段 + 保存/取消；字段校验失败时**就地显示该字段的错误**（红色边框 + 文案），
+     不关闭面板
+  3. 保存走 `HostBridge::save_app_config` → `CoreCommand::UpdateApp`（与 MCP 同一条命令路径）
+  4. 结果经 `last_app_save` 通道回传，`render` 里消费：成功则用**服务端返回值**重建表单基线，
+     失败则把错误贴到面板上并保留输入
+  5. 校验在**保存时**统一执行，错误一次性全部呈现（不是逐字段拦截）
+- 验证：`cargo test --workspace --locked` → **427 passed / 0 failed**；clippy 0；
+  重新打包（30 MB / dmg 13 MB）并用临时数据目录启动，日志无 error/panic
+- **明确的限制（重要）**：面板没有行内文本输入，字段值是**点击循环取样**
+  （如 Node 版本在 auto/system/20.11.0/22.0.0 之间切换，标签在预设组合间切换）。
+  这是为了先打通"读到 → 改到 → 存回 → 报错"的完整链路；真正的文本编辑需要
+  与任务编辑器同款的行内 `TextField` 接线（下一步）
+- 未解决问题：
+  1. 行内文本输入（当前只能循环取样）
+  2. 面板未复用 `TextField` 的焦点处理，Tab 键不切换字段
+
