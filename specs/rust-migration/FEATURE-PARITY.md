@@ -166,7 +166,7 @@
 | U4 | 添加项目抽屉（浏览 → 检测 → 命名/Node/PM/脚本 → 环境；monorepo 每包一任务） | `AddAppDrawer.tsx` | 部分 | `ui/src/views/add_app.rs`| 部分（导入面板：选目录→扫描→候选清单→命名/脚本建议→导入；Node 版本与 PM 选择未接到面板） |
 | U5 | 扫描导入抽屉（候选列表、已注册标记、批量添加） | `ImportProjectsDrawer.tsx` | 部分 | `ui/src/views/import_projects.rs`| 部分（扫描导入面板含候选清单与已注册标记；批量多选添加待做） |
 | U6 | 任务编辑器抽屉（命令/脚本/工作目录/依赖/readiness/oneShot/enabled/重排） | `TaskEditor.tsx` | 部分 | `ui/src/views/task_editor.rs`| 部分（表单模型 + 视图已接：字段点击聚焦、键入、Tab 切换、readiness 六选择、保存/取消、字段级错误显示；依赖编辑与重排 UI 待做） |
-| U7 | 应用配置抽屉（名称/颜色/文件夹/标签/自动重启/watch globs/autoStart/Node/PM） | `AppConfigDrawer.tsx`, `TagInput.tsx`, `FolderSelect.tsx` | 部分 | `ui/src/views/app_config.rs`| 部分（`AppForm` 模型 + **面板已接线**：详情页「应用配置」打开，9 个字段（名称/文件夹/标签/watch globs/端口提示/Node 版本 + 两个开关），保存走 `UpdateApp` 命令，字段级错误就地显示；值为点击循环取样（无行内文本输入）,见 PROGRESS 的已知限制） |
+| U7 | 应用配置抽屉（名称/颜色/文件夹/标签/自动重启/watch globs/autoStart/Node/PM） | `AppConfigDrawer.tsx`, `TagInput.tsx`, `FolderSelect.tsx` | 部分 | `ui/src/views/app_config.rs`| 已验证（面板：9 个字段 + 两个开关；**行内文本输入**（点击字段聚焦、Tab 切换并带值、Esc 关闭），保存走 `UpdateApp`，字段级错误就地显示，成功用服务端返回值重建基线） |
 | U8 | 环境变量编辑器（见 E7） | `EnvEditor.tsx` | 部分 | `ui/src/views/env_editor.rs` | 未开始 |
 | U9 | 设置抽屉（17 项设置 + 危险区 db 导出/重置 + MCP 状态/Token） | `SettingsDrawer.tsx` | 部分（截图） | `ui/src/views/settings.rs`| 部分（设置面板视图已接：主题/语言/8 个开关/6 个数值步进、待接入项单独标注、保存回收；danger zone 的 db 导出/重置待阶段 15） |
 | U10 | 运行历史子视图（含 Rerun） | `AppDetail.tsx` History | 部分 | `ui/src/views/run_history.rs`| 部分（运行历史列表已渲染在详情页；Rerun 按钮与独立子视图待做） |

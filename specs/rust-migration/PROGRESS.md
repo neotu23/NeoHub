@@ -1059,3 +1059,22 @@
   1. 行内文本输入（当前只能循环取样）
   2. 面板未复用 `TextField` 的焦点处理，Tab 键不切换字段
 
+### U7 应用配置编辑（第三批：行内文本输入）
+- 状态：**完成**
+- 最近提交：`feat: type into the app configuration fields`
+- 实际修改文件：`ui/src/state/app_form.rs`（`TextField` + `apply_key` + `focus_field` + Tab）、
+  `ui/src/views/shell.rs`（面板键盘处理、光标标记、点击聚焦；删除取样函数）
+- 实现要点：
+  1. 与任务编辑器同款：**一个** text buffer + 焦点字段索引，Tab/Shift-Tab 切换时把目标字段的
+     当前值载入缓冲（切换不丢改动）
+  2. 每次按键即写回模型并**清除该字段的错误**——用户正在修它，错误不该还挂着
+  3. `Esc` 关闭面板（`KeyOutcome::Escape`），`Enter` 报 `Submit` 但**不**逐字段保存（保存走按钮）
+  4. 焦点字段显示 `▌` 光标标记，未聚焦字段显示当前值或占位符
+  5. 删掉了上一批的"点击循环取样"实现（已被真实输入取代）
+- 验证：`cargo test -p neohub-ui --lib app_form` → **14 passed**
+  （新增：输入落到焦点字段、Tab 切换带值且可回绕、编辑只清该字段错误、Esc/Enter 不被吞）
+  `cargo test --workspace --locked` → **431 passed / 0 failed**；clippy 0；
+  重新打包（30 MB / dmg 13 MB）并启动，日志无 error/panic
+- 未解决问题：Shift-Tab 反向切换尚未实现（`KeyOutcome` 只给到 `tab`，需要从 keystroke 读 modifiers）；
+  多行字段（watch globs）在单行缓冲里用换行较别扭
+

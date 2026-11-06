@@ -6,9 +6,20 @@
 //! **absent** from the patch so saving cannot clobber a concurrent change from MCP or another
 //! window.
 
+use crate::state::text_input::{KeyOutcome, TextField};
 use neohub_core::catalog::UpdateAppInput;
 use neohub_domain::{App, NodeVersionPref};
 use std::collections::BTreeMap;
+
+/// The text fields, in tab order. Toggles are not text, so Tab skips them.
+pub const TEXT_FIELDS: [&str; 6] = [
+    "name",
+    "folder",
+    "tags",
+    "watch_globs",
+    "port_hint",
+    "node_version",
+];
 
 /// Everything the form shows. Lists are edited as text (comma separated for tags, one glob per
 /// line) because a chip editor is more UI than this build needs.
@@ -34,6 +45,11 @@ pub struct AppForm {
     baseline: AppFormFields,
     fields: AppFormFields,
     errors: FormErrors,
+    /// Buffer for the field that has focus. One buffer (not one per field) because only one
+    /// field takes keys at a time, which is what makes Tab handling trivial.
+    text: TextField,
+    /// Index into [`TEXT_FIELDS`].
+    focused: usize,
 }
 
 impl AppForm {
@@ -56,11 +72,15 @@ impl AppForm {
             auto_start: app.auto_start,
             auto_restart_on_change: app.auto_restart_on_change,
         };
+        let mut text = TextField::new("app_form");
+        text.set_text(fields.name.clone());
         AppForm {
             app_id: app.id.as_str().to_string(),
             baseline: fields.clone(),
             fields,
             errors: FormErrors::new(),
+            text,
+            focused: 0,
         }
     }
 
@@ -78,6 +98,79 @@ impl AppForm {
 
     pub fn errors(&self) -> &FormErrors {
         &self.errors
+    }
+
+    /// Which field is being edited, by name.
+    pub fn focused_field(&self) -> &'static str {
+        TEXT_FIELDS[self.focused.min(TEXT_FIELDS.len() - 1)]
+    }
+
+    /// Current text buffer (what the caret is in).
+    pub fn text(&self) -> &TextField {
+        &self.text
+    }
+
+    /// Move focus to a field, loading its current value into the buffer.
+    pub fn focus_field(&mut self, field: &str) {
+        let Some(index) = TEXT_FIELDS.iter().position(|candidate| *candidate == field) else {
+            return;
+        };
+        self.focused = index;
+        self.text.set_text(self.value_of(field).to_string());
+    }
+
+    fn value_of(&self, field: &str) -> &str {
+        match field {
+            "name" => &self.fields.name,
+            "folder" => &self.fields.folder,
+            "tags" => &self.fields.tags,
+            "watch_globs" => &self.fields.watch_globs,
+            "port_hint" => &self.fields.port_hint,
+            "node_version" => &self.fields.node_version,
+            _ => "",
+        }
+    }
+
+    /// Feed a keystroke to the focused field.
+    ///
+    /// Tab / Shift-Tab move between fields and carry the value along; Escape closes the panel
+    /// (the caller decides what that means); Enter is a no-op because the form is saved with
+    /// the button, not per field.
+    pub fn apply_key(&mut self, key: &str, characters: Option<&str>) -> KeyOutcome {
+        match key {
+            "tab" => {
+                self.commit_text();
+                self.focused = (self.focused + 1) % TEXT_FIELDS.len();
+                let field = self.focused_field();
+                self.text.set_text(self.value_of(field).to_string());
+                KeyOutcome::Changed
+            }
+            "escape" => KeyOutcome::Escape,
+            "enter" => KeyOutcome::Submit,
+            _ => {
+                let outcome = self.text.apply_key(key, characters);
+                if outcome == KeyOutcome::Changed {
+                    self.commit_text();
+                }
+                outcome
+            }
+        }
+    }
+
+    /// Push the buffer into the focused field (and clear its error: the user is fixing it).
+    fn commit_text(&mut self) {
+        let field = self.focused_field();
+        let value = self.text.text().to_string();
+        match field {
+            "name" => self.fields.name = value,
+            "folder" => self.fields.folder = value,
+            "tags" => self.fields.tags = value,
+            "watch_globs" => self.fields.watch_globs = value,
+            "port_hint" => self.fields.port_hint = value,
+            "node_version" => self.fields.node_version = value,
+            _ => return,
+        }
+        self.errors.remove(field);
     }
 
     /// Set one field, clearing its error: the user is fixing it.
@@ -412,6 +505,82 @@ mod tests {
         assert!(
             patch.auto_restart_on_change.is_none(),
             "the untouched toggle stays out of the patch"
+        );
+    }
+
+    #[test]
+    fn typing_lands_in_the_focused_field() {
+        let mut form = AppForm::from_app(&app());
+        form.focus_field("name");
+        assert_eq!(
+            form.text().text(),
+            "web",
+            "focusing loads the current value"
+        );
+        // Clear it, then type a new name.
+        for _ in 0..3 {
+            form.apply_key("backspace", None);
+        }
+        for character in ["w", "e", "b", "2"] {
+            form.apply_key(character, Some(character));
+        }
+        assert_eq!(
+            form.fields().name,
+            "web2",
+            "the buffer is pushed on every change"
+        );
+        assert_eq!(
+            form.to_patch().expect("valid").name.as_deref(),
+            Some("web2")
+        );
+    }
+
+    #[test]
+    fn tab_moves_between_fields_and_carries_the_value() {
+        let mut form = AppForm::from_app(&app());
+        form.focus_field("name");
+        assert_eq!(form.focused_field(), "name");
+        form.apply_key("tab", None);
+        assert_eq!(form.focused_field(), "folder");
+        assert_eq!(
+            form.text().text(),
+            "Work",
+            "the next field's value is loaded"
+        );
+        // Wrap-around after the last field.
+        for _ in 0..5 {
+            form.apply_key("tab", None);
+        }
+        assert_eq!(form.focused_field(), "name");
+        assert_eq!(form.text().text(), "web");
+    }
+
+    #[test]
+    fn an_edit_clears_only_that_fields_error() {
+        let mut form = AppForm::from_app(&app());
+        form.apply_error("name", "名称冲突".into());
+        form.apply_error("port_hint", "端口无效".into());
+        form.focus_field("name");
+        form.apply_key("x", Some("x"));
+        assert!(
+            !form.errors().contains_key("name"),
+            "editing fixes the error"
+        );
+        assert!(
+            form.errors().contains_key("port_hint"),
+            "an unrelated error stays"
+        );
+    }
+
+    #[test]
+    fn escape_and_enter_are_reported_not_swallowed() {
+        let mut form = AppForm::from_app(&app());
+        assert_eq!(form.apply_key("escape", None), KeyOutcome::Escape);
+        assert_eq!(form.apply_key("enter", None), KeyOutcome::Submit);
+        assert_eq!(
+            form.apply_key("left", None),
+            KeyOutcome::Ignored,
+            "arrows with no room to move change nothing"
         );
     }
 

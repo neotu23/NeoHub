@@ -604,29 +604,6 @@ impl HostBridge {
     }
 }
 
-/// Cycled sample values for a configuration field.
-///
-/// The panel has no per-field text input yet, so a click steps through sensible values. Every
-/// value still goes through `AppForm`'s validation, so a bad sample would surface as a field
-/// error rather than being saved.
-fn next_sample(field: &str, current: &str) -> String {
-    let samples: &[&str] = match field {
-        "name" => &["web", "api", "docs", "web-admin"],
-        "folder" => &["", "Work", "Personal", "Archive"],
-        "tags" => &["", "api", "api, web", "cli, tool"],
-        "watch_globs" => &["", "src/**/*.ts", "src/**/*.ts\ntests/**/*.ts"],
-        "port_hint" => &["", "3000", "4000", "5173"],
-        "node_version" => &["auto", "system", "20.11.0", "22.0.0"],
-        _ => &[""],
-    };
-    let position = samples.iter().position(|sample| *sample == current);
-    let next = match position {
-        Some(index) => (index + 1) % samples.len(),
-        None => 0,
-    };
-    samples[next].to_string()
-}
-
 /// The window root.
 pub struct ShellView {
     bridge: Arc<HostBridge>,
@@ -1364,7 +1341,13 @@ impl Render for ShellView {
                 ),
             ] {
                 let entity = cx.entity().downgrade();
-                let current = value.clone();
+                let focus = self.app_form_focus.clone();
+                let editing = form.focused_field() == field;
+                let current = if editing {
+                    form.text().text().to_string()
+                } else {
+                    value.clone()
+                };
                 let error = errors.get(field).cloned();
                 body = body.child(
                     div()
@@ -1392,20 +1375,20 @@ impl Render for ShellView {
                                 .bg(palette.bg_elevated)
                                 .text_size(px(metrics::TEXT_SM))
                                 .cursor_text()
-                                .child(if current.is_empty() {
+                                .child(if current.is_empty() && !editing {
                                     placeholder.to_string()
+                                } else if editing {
+                                    format!("{current}▌")
                                 } else {
                                     current.clone()
                                 })
-                                .on_click(move |_, _, cx| {
-                                    // Cycle through a few useful values instead of a full text
-                                    // field: this keeps the panel honest until inline editing
-                                    // lands, and the model already validates every value.
-                                    let next = next_sample(field, &current);
+                                .on_click(move |_, window, cx| {
+                                    let focus = focus.clone();
                                     let _ = entity.update(cx, |this, cx| {
                                         if let Some(form) = this.app_form.as_mut() {
-                                            form.set(field, next);
+                                            form.focus_field(field);
                                         }
+                                        window.focus(&focus, cx);
                                         cx.notify();
                                     });
                                 }),
@@ -1518,7 +1501,24 @@ impl Render for ShellView {
                         }),
                 );
             }
+            body = body.child(
+                div()
+                    .text_size(px(metrics::TEXT_XS))
+                    .text_color(palette.fg_subtle)
+                    .child("点字段后输入，Tab 切换，Esc 关闭"),
+            );
             body = body.child(buttons);
+            body = body.on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                let characters = event.keystroke.key_char.as_deref();
+                let outcome = match this.app_form.as_mut() {
+                    Some(form) => form.apply_key(&event.keystroke.key, characters),
+                    None => return,
+                };
+                if outcome == KeyOutcome::Escape {
+                    this.app_form = None;
+                }
+                cx.notify();
+            }));
 
             main = main.child(body);
         } else if let Some(panel) = self.settings.as_mut() {
