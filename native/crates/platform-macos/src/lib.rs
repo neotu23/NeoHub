@@ -9,6 +9,7 @@ pub mod dock;
 #[cfg(target_os = "macos")]
 pub mod keychain;
 #[cfg(target_os = "macos")]
+pub mod login_item;
 pub mod tray;
 #[cfg(target_os = "macos")]
 pub mod tray_native;

@@ -13,12 +13,43 @@ use neohub_core::service::CoreService;
 use neohub_desktop::app_host::{ActivationWatcher, SharedHost, open_main_window, reopen_or_focus};
 use neohub_desktop::session_lock::{LockOutcome, SessionLock};
 use neohub_desktop::window_session::AppHost;
+use neohub_platform_macos::login_item;
 use neohub_platform_macos::tray::{TrayAction, build_menu};
 use neohub_platform_macos::tray_native::TrayHandle;
 use neohub_storage::db::DataDir;
 use neohub_ui::views::HostBridge;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+/// Keep the login item in step with the setting.
+///
+/// Called from the poll tick rather than from the settings save path so the LaunchAgent also
+/// self-heals after a manual `launchctl bootout` or a moved bundle: the plist is rewritten from
+/// the running executable whenever the setting and the installed state disagree.
+fn sync_login_item(settings: &neohub_domain::Settings, last: &mut Option<bool>) {
+    let wanted = settings.launch_at_login;
+    if *last == Some(wanted) {
+        return;
+    }
+    let outcome = if wanted {
+        std::env::current_exe()
+            .map_err(|error| error.to_string())
+            .and_then(|exe| login_item::install(&exe).map(|_| ()))
+            .map(|()| "installed".to_string())
+    } else {
+        login_item::uninstall().map(|()| "removed".to_string())
+    };
+    match outcome {
+        Ok(what) => {
+            eprintln!("[host] login item {what}");
+            *last = Some(wanted);
+        }
+        Err(error) => {
+            // Leave `last` untouched so the next tick retries.
+            eprintln!("[host] login item could not be updated: {error}");
+        }
+    }
+}
 
 /// Fire one command on the core without blocking the UI thread.
 fn run_command(shared: &SharedHost, runtime: &Arc<tokio::runtime::Runtime>, command: CoreCommand) {
@@ -66,6 +97,7 @@ fn main() {
 
         // Menu bar item. It must be created after AppKit is up (i.e. inside `run`) and on the
         // main thread; the handle keeps the status item and its menu alive for the process.
+        let mut login_state: Option<bool> = None;
         let mut tray: Option<TrayHandle> =
             match shared.app.lock().expect("host").service().snapshot() {
                 Ok(snapshot) => {
@@ -102,6 +134,10 @@ fn main() {
 
                 // Menu bar clicks. Drained on the same tick as the activation file, so a
                 // click never waits on the window.
+                if let Ok(settings) = shared.app.lock().expect("host").service().settings() {
+                    sync_login_item(&settings, &mut login_state);
+                }
+
                 // Keep the menu in step with the core. The snapshot is cheap (cached stats and
                 // ports); `refresh` is a no-op unless the rows actually changed.
                 if let Some(handle) = tray.as_mut() {

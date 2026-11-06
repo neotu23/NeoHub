@@ -995,3 +995,28 @@
   （会 panic），所以菜单映射只能靠纯模型测试覆盖，平台部分由启动验证兜底
 - 未解决问题：`launch_at_login` 的 LaunchAgent 注册仍未实现（S9 只剩这一项）
 
+### 登录启动 `launch_at_login`（S9 收尾）
+- 状态：**完成**
+- 最近提交：`feat: honour launch at login with a LaunchAgent`
+- 实际修改文件：新增 `platform-macos/src/login_item.rs`；更新 `platform-macos/{lib.rs,Cargo.toml}`、
+  `desktop/src/main.rs`
+- 为什么不用 `SMAppService`：它要求签名并（macOS 13+ 上）公证的 bundle；当前只有 ad-hoc 签名，
+  `SMAppService` 会失败。`osascript` 方案需要自动化权限。自写 LaunchAgent plist 是唯一对
+  未签名开发构建也可靠的方式。
+- 实现要点：
+  1. plist 每次从**当前可执行文件**重新生成，bundle 移动后不会留旧路径
+  2. `KeepAlive=false`：launchd 不该与应用的单实例锁打架；崩溃处理是应用自己的事
+  3. `LimitLoadToSessionType=Aqua`，只在图形会话加载
+  4. XML 转义：路径里有 `&`/`<` 会让 `launchctl` 拒绝解析，且失败表现是"登录项悄悄不见"
+  5. 主循环每 tick 校正：设置与已安装状态不一致就重写，所以手动 `launchctl bootout`
+     或移动 bundle 之后会自愈
+- 验证：
+  - `cargo test -p neohub-platform-macos --locked` → **14 passed / 1 ignored**
+  - **真实 launchd 往返**（`--ignored` 测试，用 `/usr/bin/true` 而非应用本体，
+    避免 `RunAtLoad` 在测试期间启动第二个实例）：install → `launchctl print`
+    能查到 job → uninstall → job 消失
+  - 验证后系统状态：`~/Library/LaunchAgents/app.neohub.desktop.plist` **不存在**、
+    `launchctl print gui/501/app.neohub.desktop` → `Could not find service`（无残留）
+  - `cargo test --workspace --locked` → **417 passed / 0 failed**；clippy 0
+- 未解决问题：无（S9 完成）。设置界面上该开关已可切换，但**切换后到下一次 tick 才生效**（≤500 ms）。
+

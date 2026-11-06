@@ -12,6 +12,7 @@ description = "NeoHub macOS platform services (keychain, open-in, deep links, tr
 aes-gcm = "0.10"
 base64 = "0.22"
 rand = "0.9"
+libc = "0.2"
 security-framework = "3.7"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSRunningApplication"] }
