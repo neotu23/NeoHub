@@ -5,7 +5,7 @@ use neohub_domain::{
     AppId, CommandKind, LanguageSetting, NodeVersionPref, ReadinessSignal, SettingsPatch, TaskId,
     ThemeSetting,
 };
-use neohub_storage::catalog::{AppPatch, NewApp, NewTask};
+use neohub_storage::catalog::{NewApp, NewTask};
 use neohub_storage::{DataDir, Storage};
 
 #[test]

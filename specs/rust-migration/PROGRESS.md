@@ -142,7 +142,7 @@
 ---
 
 ### 阶段 4：Node 环境、项目检测、环境变量和密钥接口
-- 状态：**开发中**（3/6 子项完成：`.env` 解析、环境分层、登录 shell PATH 探测）
+- 状态：**开发中**（5/6 子项完成：`.env` 解析、环境分层、PATH 探测、Node 解析、项目检测、密钥接口；剩 macOS Keychain 实现）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`，代码在 `native/`
 - 最近提交：`feat: port dotenv parsing and env layering`
 - 已完成并验证：
@@ -162,6 +162,15 @@
   `engines.node` + semver 选择）、`detect`（package.json scripts、PM 探测、monorepo workspaces）、
   `storage/src/secrets.rs` + `platform-macos/src/keychain.rs`（假 SecretStore 正常/锁定/损坏三态 +
   `SecretUnavailable`），以及 `core/tests/{environment,detection}.rs` 的 fixture 套件。
+- 第二批完成（2026-11-06T14:10Z–14:40Z UTC）：`node_resolver.rs`（五来源扫描、`.nvmrc`/
+  `.node-version`/`engines.node` 选择、npm 风格 range 归一化、OR 组显式拒绝、3 s 版本探测超时）、
+  `detect.rs`（PM/scripts/env 文件/engines/workspaces 展开、损坏 JSON 与越界 glob 防护）、
+  `storage/src/secrets.rs`（`SecretStore` trait、`nhk1:` 新前缀、`enc1:` 明确拒绝、
+  假实现正常/锁定/损坏三态）、`core/tests/{detection,environment}.rs`。
+  验证：`cargo test --workspace --locked` → **106 passed / 0 failed**；
+  `cargo clippy -p neohub-{domain,storage,core} --all-targets` → 0 warnings；`cargo fmt --all` 已执行。
+- 仍缺（下一步）：`native/crates/platform-macos/src/keychain.rs` 真实 Keychain 实现
+  （security-framework），以及把 resolver/env/secrets 接进阶段 5 的启动流程。
 - 与旧版不同之处：环境构建改为纯函数（注入 `os_env`/`login_path`/`project_dir`/三层变量），
   便于在不启动进程的情况下断言；语义与旧版逐层一致（含控制键保护与空值保留）。
 - 下一项具体动作：实现 `node_resolver.rs`（先用假 home 目录构造 nvm/fnm/volta/asdf 布局的 fixture，

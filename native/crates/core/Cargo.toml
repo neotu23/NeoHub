@@ -11,7 +11,9 @@ description = "NeoHub background core: catalog rules, process control, orchestra
 [dependencies]
 neohub-domain = { path = "../domain" }
 neohub-storage = { path = "../storage" }
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+semver = "1.0"
 thiserror = "2.0"
 
 [dev-dependencies]

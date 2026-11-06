@@ -28,8 +28,8 @@
 | A4 | 任务 CRUD + 重排 `tasks:reorder`、`TaskRegistry` 字段冻结 | `TaskRegistry.ts` | 已验证（MCP add_task/remove_task） | `core/src/catalog/` | 已验证（任务 CRUD/重排；重排必须全覆盖） |
 | A5 | 任务依赖 `dependsOn` + 拓扑/环/未知依赖校验 | `topo.ts`, `topo.test.ts`（8 例） | 已验证 | `core/src/orchestrator/topology.rs` | 部分（环/未知依赖/自依赖检测已实现；拓扑启动顺序在阶段 7） |
 | A6 | 文件夹分组：list/rename/clear、`apps.folder` | `AppRegistry.ts`, `0005_app_folders.sql` | 已验证 | `core/src/catalog/` | 已验证（list/rename/clear，清空不动磁盘目录） |
-| A7 | 扫描导入 `apps:scanFolder`（浅层扫描 package.json） | `DetectionService.ts`, `ImportProjectsDrawer.tsx` | 部分 | `core/src/environment/detect.rs` | 未开始 |
-| A8 | 项目检测 `apps:detect`：scripts、PM、`.env`、engines、monorepo workspaces | `DetectionService.ts`, `PMDetector.ts` | 已验证 | `core/src/environment/detect.rs` | 未开始 |
+| A7 | 扫描导入 `apps:scanFolder`（浅层扫描 package.json） | `DetectionService.ts`, `ImportProjectsDrawer.tsx` | 部分 | `core/src/environment/detect.rs` | 部分（monorepo 工作区展开与检测已实现；`scanFolder` 浅层扫描待接） |
+| A8 | 项目检测 `apps:detect`：scripts、PM、`.env`、engines、monorepo workspaces | `DetectionService.ts`, `PMDetector.ts` | 已验证 | `core/src/environment/detect.rs` | 已验证（PM/scripts/建议脚本/env 文件/engines/workspaces 全量检测，含损坏 JSON 与软链） |
 
 ## 3. 进程 / PTY / 生命周期
 
@@ -67,8 +67,8 @@
 | E2 | `.env*` 文件优先级 `.env` → `.env.development` → `.env.local` → `.env.development.local` | `src/shared/dotenv.ts` | 已验证（EnvLayering） | `core/src/environment/dotenv.rs` | 已验证（`.env`→`.env.development`→`.env.local`→`.env.development.local`，多行/引号/转义有测试） |
 | E3 | 进程控制键保护：项目 `.env` 不能覆盖 `PATH/NODE_OPTIONS/NODE_PATH/DYLD_*/LD_*` | `EnvBuilder.ts` | 已验证 | `core/src/environment/env_builder.rs` | 已验证（`PATH/NODE_OPTIONS/NODE_PATH/DYLD_*/LD_*` 被项目文件丢弃；UI 变量仍可覆盖） |
 | E4 | 强制 `FORCE_COLOR=1`、`TERM=xterm-256color` | `EnvBuilder.ts` | 已验证 | `core/src/environment/env_builder.rs` | 已验证（`FORCE_COLOR=1`、`TERM=xterm-256color` 强制写入） |
-| E5 | 秘密值加密存储（Electron `safeStorage` → `enc1:` 前缀） | `EnvStore.ts` | 部分（依赖 Keychain，未在测试中断言解密） | `storage/src/secrets.rs` + `platform-macos/src/keychain.rs` | 未开始 |
-| E6 | 密钥不可用时报 `SecretUnavailable` 并阻止受影响任务启动 | 计划要求（旧版行为需在阶段 4 复核） | **待复核** | `core/src/environment/` | 未开始 |
+| E5 | 秘密值加密存储（Electron `safeStorage` → `enc1:` 前缀） | `EnvStore.ts` | 部分（依赖 Keychain，未在测试中断言解密） | `storage/src/secrets.rs` + `platform-macos/src/keychain.rs` | 部分（`SecretStore` 接口 + 假实现 + `nhk1:` 前缀；macOS Keychain 实现待接） |
+| E6 | 密钥不可用时报 `SecretUnavailable` 并阻止受影响任务启动 | 计划要求（旧版行为需在阶段 4 复核） | **待复核** | `core/src/environment/` | 部分（`read_secret_value` 明确拒绝 `enc1:` 并报告 Locked/Corrupt；启动流程拦截待接） |
 | E7 | 环境变量编辑 UI：三 tab、启用开关、秘密遮挡、备注、批量粘贴、合并预览 | `EnvEditor.tsx` | 部分（截图 missing，见 BASELINE §5） | `ui/src/views/env_editor.rs` | 未开始 |
 | E8 | `.env` 文件变化推送 `env:fileChanged` + 横幅 | `EnvFileWatcher.ts` | 部分 | `core/src/watch/environment.rs` | 未开始 |
 
@@ -76,10 +76,10 @@
 
 | # | 功能 | 旧版源码依据 | 旧版基线 | Rust 目标 | Rust 状态 |
 |---|---|---|---|---|---|
-| N1 | 版本管理器检测 nvm/fnm/volta/asdf/system + `node:list` | `NodeResolver.ts` | 已验证（5 例，含特殊字符路径） | `core/src/environment/node_resolver.rs` | 未开始 |
-| N2 | 版本选择规则 `.nvmrc` / `.node-version` / `engines.node`（semver）+ 不自动安装 | `NodeResolver.ts` | 已验证 | `core/src/environment/node_resolver.rs` | 未开始 |
+| N1 | 版本管理器检测 nvm/fnm/volta/asdf/system + `node:list` | `NodeResolver.ts` | 已验证（5 例，含特殊字符路径） | `core/src/environment/node_resolver.rs` | 部分（nvm/fnm/volta/asdf/system 扫描 + 降序去重已实现并测试；`node:list` 命令层未接） |
+| N2 | 版本选择规则 `.nvmrc` / `.node-version` / `engines.node`（semver）+ 不自动安装 | `NodeResolver.ts` | 已验证 | `core/src/environment/node_resolver.rs` | 已验证（`.nvmrc`/`.node-version` 精确与 major-only、`engines.node` 范围、缺版本报错、不自动安装） |
 | N3 | Finder 启动无终端 PATH：登录 shell PATH 探测（有超时与缓存） | `PathProbe.ts` | 已验证（3 例） | `core/src/environment/path_probe.rs` | 部分（探测/哨兵解析/超时/缓存已实现并测试；尚未接到启动流程） |
-| N4 | `node:resolve` 单应用解析 | `ipc/index.ts` | 部分 | `core/src/environment/` | 未开始 |
+| N4 | `node:resolve` 单应用解析 | `ipc/index.ts` | 部分 | `core/src/environment/` | 部分（`NodeResolver::resolve` 已实现并测试，含 system/explicit/auto 分支） |
 
 ## 7. 就绪与编排
 

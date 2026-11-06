@@ -5,6 +5,7 @@ pub mod db;
 pub mod env;
 pub mod history;
 pub mod migrations;
+pub mod secrets;
 pub mod settings;
 
 pub use catalog::{AppPatch, Catalog, NewApp, NewTask, TaskPatch};
@@ -12,6 +13,7 @@ pub use db::{DataDir, Storage};
 pub use env::EnvStore;
 pub use history::{HistoryRow, RunHistoryStore};
 pub use migrations::MIGRATIONS;
+pub use secrets::{FakeSecretStore, SecretError, SecretStore};
 pub use settings::SettingsStore;
 
 /// Crate-wide error type. Storage failures must be actionable: the UI/MCP layer
