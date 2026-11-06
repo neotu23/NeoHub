@@ -11,23 +11,23 @@
 
 | # | 功能 | 旧版源码依据 | 旧版基线 | Rust 目标 | Rust 状态 |
 |---|---|---|---|---|---|
-| D1 | `App`/`Task`/`RunningProcess`/`RunningTask`/`EnvVar`/`NodeInstallation`/`DetectionResult`/`WorkspaceCandidate` 类型 | `src/shared/types.ts` | 已验证（类型 + 51 例 MCP 往返） | `domain/src/{ids,models}.rs` | 未开始 |
-| D2 | `ProcessState` 六态 `idle/starting/running/exiting/exited/crashed` | `types.ts`, `lib/processState.ts` | 已验证（`AppOrchestrator.state.test.ts`） | `domain/src/models.rs` | 未开始 |
-| D3 | `ReadinessSignal` 六种 `none/port/log/http/exit/delay` | `types.ts`, `services/readiness/*` | 已验证（`HttpReadiness.test.ts` 4 例 + MCP set_readiness） | `domain/src/models.rs` | 未开始 |
-| D4 | `NodeVersionPref` auto/system/explicit + `PackageManager` × 4 | `types.ts`, `NodeResolver.ts`, `PMDetector.ts` | 已验证（`NodeResolver.test.ts` 5 例） | `domain/src/models.rs` | 未开始 |
-| D5 | `SettingsState` 17 个字段 + `McpStatus` | `ipc.ts`, `Settings.ts` | 已验证（`Settings.test.ts`） | `domain/src/settings.rs` | 未开始 |
+| D1 | `App`/`Task`/`RunningProcess`/`RunningTask`/`EnvVar`/`NodeInstallation`/`DetectionResult`/`WorkspaceCandidate` 类型 | `src/shared/types.ts` | 已验证（类型 + 51 例 MCP 往返） | `domain/src/{ids,models}.rs` | 已验证（`domain/src/models.rs`；serde 形状有断言） |
+| D2 | `ProcessState` 六态 `idle/starting/running/exiting/exited/crashed` | `types.ts`, `lib/processState.ts` | 已验证（`AppOrchestrator.state.test.ts`） | `domain/src/models.rs` | 已验证（六态字符串/序列化测试） |
+| D3 | `ReadinessSignal` 六种 `none/port/log/http/exit/delay` | `types.ts`, `services/readiness/*` | 已验证（`HttpReadiness.test.ts` 4 例 + MCP set_readiness） | `domain/src/models.rs` | 已验证（六种 readiness 编码 + 往返测试） |
+| D4 | `NodeVersionPref` auto/system/explicit + `PackageManager` × 4 | `types.ts`, `NodeResolver.ts`, `PMDetector.ts` | 已验证（`NodeResolver.test.ts` 5 例） | `domain/src/models.rs` | 已验证（{kind:…} 编码与旧库一致） |
+| D5 | `SettingsState` 17 个字段 + `McpStatus` | `ipc.ts`, `Settings.ts` | 已验证（`Settings.test.ts`） | `domain/src/settings.rs` | 部分（domain + `storage/src/settings.rs` 读写，重启不丢；UI 未接） |
 | D6 | IPC 契约：**59 invoke + 22 event** 频道，preload 白名单与类型同源 | `ipc.ts`, `preload/index.ts` | 已验证（`satisfies` 编译期对齐） | `core/src/commands.rs` + `events.rs` + `docs/interfaces.md` | 开发中（阶段 2 已写 `native/docs/interfaces.md` 契约，无实现） |
 
 ## 2. 项目 / 任务 / 分组（CRUD）
 
 | # | 功能 | 旧版源码依据 | 旧版基线 | Rust 目标 | Rust 状态 |
 |---|---|---|---|---|---|
-| A1 | 应用 CRUD（list/add/update/remove/findByPath）、身份字段 pinning 校验 | `ipc/index.ts`, `AppRegistry.ts` | 已验证 | `core/src/catalog/` | 未开始 |
-| A2 | 原子创建 `apps:create`：应用 + 首个任务 + 多任务 + 环境变量，单事务 | `AppRegistry.ts`, `AddAppDrawer.tsx` | 已验证 | `core/src/catalog/` | 未开始 |
-| A3 | realpath 去重、路径不存在报错 | `AppRegistry.ts` | 部分（无独立测试） | `core/src/catalog/` | 未开始 |
-| A4 | 任务 CRUD + 重排 `tasks:reorder`、`TaskRegistry` 字段冻结 | `TaskRegistry.ts` | 已验证（MCP add_task/remove_task） | `core/src/catalog/` | 未开始 |
-| A5 | 任务依赖 `dependsOn` + 拓扑/环/未知依赖校验 | `topo.ts`, `topo.test.ts`（8 例） | 已验证 | `core/src/orchestrator/topology.rs` | 未开始 |
-| A6 | 文件夹分组：list/rename/clear、`apps.folder` | `AppRegistry.ts`, `0005_app_folders.sql` | 已验证 | `core/src/catalog/` | 未开始 |
+| A1 | 应用 CRUD（list/add/update/remove/findByPath）、身份字段 pinning 校验 | `ipc/index.ts`, `AppRegistry.ts` | 已验证 | `core/src/catalog/` | 已验证（core catalog：列出/读取/更新/删除/按路径查） |
+| A2 | 原子创建 `apps:create`：应用 + 首个任务 + 多任务 + 环境变量，单事务 | `AppRegistry.ts`, `AddAppDrawer.tsx` | 已验证 | `core/src/catalog/` | 已验证（单事务创建 app+任务+env，失败不留半个 app） |
+| A3 | realpath 去重、路径不存在报错 | `AppRegistry.ts` | 部分（无独立测试） | `core/src/catalog/` | 已验证（realpath 去重 + 非目录/不存在报错，含 symlink 用例） |
+| A4 | 任务 CRUD + 重排 `tasks:reorder`、`TaskRegistry` 字段冻结 | `TaskRegistry.ts` | 已验证（MCP add_task/remove_task） | `core/src/catalog/` | 已验证（任务 CRUD/重排；重排必须全覆盖） |
+| A5 | 任务依赖 `dependsOn` + 拓扑/环/未知依赖校验 | `topo.ts`, `topo.test.ts`（8 例） | 已验证 | `core/src/orchestrator/topology.rs` | 部分（环/未知依赖/自依赖检测已实现；拓扑启动顺序在阶段 7） |
+| A6 | 文件夹分组：list/rename/clear、`apps.folder` | `AppRegistry.ts`, `0005_app_folders.sql` | 已验证 | `core/src/catalog/` | 已验证（list/rename/clear，清空不动磁盘目录） |
 | A7 | 扫描导入 `apps:scanFolder`（浅层扫描 package.json） | `DetectionService.ts`, `ImportProjectsDrawer.tsx` | 部分 | `core/src/environment/detect.rs` | 未开始 |
 | A8 | 项目检测 `apps:detect`：scripts、PM、`.env`、engines、monorepo workspaces | `DetectionService.ts`, `PMDetector.ts` | 已验证 | `core/src/environment/detect.rs` | 未开始 |
 
@@ -42,7 +42,7 @@
 | P5 | 退出结算：用户停止 / 正常退出 / 崩溃三态，只结算一次 | `TaskRunner.ts`, `AppOrchestrator.ts` | 已验证（`AppOrchestrator.state.test.ts`） | `core/src/process/runner.rs` | 未开始 |
 | P6 | 应用级启停重启 `proc:start/stop/restart` + 反向拓扑停止 | `AppOrchestrator.ts` | 已验证 | `core/src/orchestrator/` | 未开始 |
 | P7 | 任务级启停 `task:start/stop`（手动） | `ipc/index.ts` | 部分 | `core/src/service.rs` | 未开始 |
-| P8 | 运行历史写入 `run_history` + 每应用上限清理 + 重启后恢复 stopped/crashed | `RunHistory.ts`, `0003_run_history_tasks.sql` | 已验证（`AppOrchestrator.state.test.ts` 的 boot seeding） | `storage/src/history.rs` | 未开始 |
+| P8 | 运行历史写入 `run_history` + 每应用上限清理 + 重启后恢复 stopped/crashed | `RunHistory.ts`, `0003_run_history_tasks.sql` | 已验证（`AppOrchestrator.state.test.ts` 的 boot seeding） | `storage/src/history.rs` | 部分（storage 层读写/prune/close_all_open 已实现；写入时机在阶段 5） |
 | P9 | 优雅退出：确认 → 反向停止全部受管任务 → 写历史 → 关库 | `index.ts` before-quit | 部分 | `core/src/service.rs` | 未开始 |
 
 ## 4. 日志与终端
@@ -149,9 +149,9 @@
 
 | # | 功能 | 旧版源码依据 | 旧版基线 | Rust 目标 | Rust 状态 |
 |---|---|---|---|---|---|
-| B1 | SQLite（WAL）+ 7 次迁移 `0001_init` → `0007_app_autostart`，`_schema_migrations` 版本记录 | `db/index.ts`, `db/migrations/*` | 已验证（启动即跑） | `storage/src/migrations.rs` | 未开始 |
-| B2 | TS 补数 `backfill.ts`（老应用 → 单任务、env_overrides 延迟迁移） | `db/backfill.ts` | 部分 | `storage/src/` | 未开始 |
-| B3 | 外键与级联（app 删除 → task/env/history） | `0001`–`0007` | 部分 | `storage/src/` | 未开始 |
+| B1 | SQLite（WAL）+ 7 次迁移 `0001_init` → `0007_app_autostart`，`_schema_migrations` 版本记录 | `db/index.ts`, `db/migrations/*` | 已验证（启动即跑） | `storage/src/migrations.rs` | 已验证（7 次迁移原样执行，版本名与旧库一致，重开幂等） |
+| B2 | TS 补数 `backfill.ts`（老应用 → 单任务、env_overrides 延迟迁移） | `db/backfill.ts` | 部分 | `storage/src/` | 已验证（Rust 重写补数：custom > script，无命令不造任务，幂等） |
+| B3 | 外键与级联（app 删除 → task/env/history） | `0001`–`0007` | 部分 | `storage/src/` | 已验证（删除 app 级联清空 tasks/env/history） |
 | B4 | `db:export` / `db:reset` / `db:path`（WAL 安全导出） | `ipc/index.ts` | 部分 | `storage/src/` + `ui/src/views/settings.rs` | 未开始 |
 | B5 | 历史用户目录发现（`NeoHub` → `DevHarbor` → `devharbor`，含 `devharbor.db`） | `AppIdentity.ts` | 已验证（`AppIdentity.test.ts` 4 例） | `storage/src/import/legacy_db.rs` | 未开始 |
 | B6 | 旧库 + 密钥迁移（`enc1:` safeStorage → 新版本前缀密文） | 计划阶段 13 | 未实现（旧版没有导出入口） | `storage/src/import/` | 未开始 |

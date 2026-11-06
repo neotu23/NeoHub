@@ -1,0 +1,19 @@
+[package]
+name = "neohub-storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "NeoHub SQLite persistence: schema migrations, catalog, run history"
+
+[dependencies]
+neohub-domain = { path = "../domain" }
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+
+[dev-dependencies]
+tempfile = "3.14"

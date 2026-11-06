@@ -100,3 +100,43 @@
   `catalog` 失败测试，再实现 `Storage::open` 与 `Catalog::create_app`。
 
 ---
+
+### 阶段 3：数据模型、数据库与项目管理
+- 状态：**已验证**
+- 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`，代码在 `native/`
+- 最近提交：`feat: port catalog and SQLite persistence`
+- 实际修改文件：新增 `native/crates/domain/src/{lib,ids,models,settings,error}.rs`、
+  `native/crates/storage/src/{lib,db,migrations,catalog,env,history,settings}.rs`、
+  `native/crates/storage/migrations/legacy/0001…0007.sql`（与旧版逐字节相同）、
+  `native/crates/storage/tests/{legacy_import,catalog,persistence}.rs`、
+  `native/crates/core/src/{lib.rs,catalog/{mod,graph}.rs}`、`native/crates/core/tests/catalog.rs`；
+  更新 `native/Cargo.toml`（加入 core/domain/storage 成员）、`FEATURE-PARITY.md`、本文件。
+- 验证命令、时间与退出码（2026-11-06T13:05Z–13:30Z UTC）：
+  - `cargo test -p neohub-storage --test legacy_import --locked` → exit 0，**7 passed**
+    （7 次迁移/版本名/幂等/补数/三层 env 同键/级联/历史 task_id 可空/老库补列）
+  - `cargo test -p neohub-storage --test catalog --locked` → exit 0，5 passed
+  - `cargo test -p neohub-storage --test persistence --locked` → exit 0，2 passed
+    （重启后项目/任务/分组/设置全在；损坏的设置单元格只回落该字段）
+  - `cargo test -p neohub-core --test catalog --locked` → exit 0，**9 passed**
+    （原子创建/回滚/路径不存在/重复路径/symlink 去重/依赖环/未知依赖/自依赖/
+      one-shot 需 exit/删除有依赖者/重排全覆盖/清空文件夹不动磁盘）
+  - `cargo test --workspace --locked` → exit 0，**44 passed / 0 failed**
+  - `cargo clippy -p neohub-domain -p neohub-storage -p neohub-core --all-targets --locked` → 0 warnings
+  - `cargo fmt --all` 已执行
+- 人工验证及截图：不需要（纯数据层）。合成数据等价物是 `neohub-synth`（`demo-web`/`demo-worker`），
+  在测试里以临时目录内的假项目目录体现，不执行任何真实用户项目。
+- 与旧版不同之处：
+  1. 原始缓冲/日志等尚未涉及；本阶段差异集中在数据层：`Storage::open(DataDir)` 取代模块级单例，
+     数据目录默认 `~/Library/Application Support/NeoHub-Rust-Dev`，支持 `--data-dir`（旧版硬编码 userData）
+  2. 事务边界显式化：`EnvStore` 检测 `is_autocommit()`，在外部事务内直接写，保证"创建 app + 任务 + env"
+     是一个事务（旧版为 renderer 侧多次 IPC + 补偿删除）
+  3. 时间戳统一 i64 毫秒（同旧版 `Date.now()`）
+- 未解决问题及所属阶段：
+  1. 旧库真实数据导入（含 `enc1:` 密文与 `_schema_migrations` 对照）→ 阶段 13
+  2. `db:export` / `db:reset` / `db:path` 等价命令 → 阶段 9/10 接到命令层
+  3. 任务删除/更新的 UI 错误定位（`DomainError.field`）→ 阶段 10
+- 下一项具体动作：阶段 4 —— `native/crates/core/src/environment/`（detect / node_resolver /
+  path_probe / dotenv / env_builder）+ `storage/src/secrets.rs` + `platform-macos/src/keychain.rs`，
+  先建 fixture（空格/中文路径、软链、损坏 JSON、monorepo、缺 Node 版本、不同包管理器）再实现。
+
+---

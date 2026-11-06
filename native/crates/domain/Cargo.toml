@@ -1,0 +1,15 @@
+[package]
+name = "neohub-domain"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "NeoHub domain types: ids, models, settings, errors (no GUI, no database)"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+ulid = "1.2"
+thiserror = "2.0"

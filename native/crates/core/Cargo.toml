@@ -1,0 +1,18 @@
+[package]
+name = "neohub-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "NeoHub background core: catalog rules, process control, orchestration"
+
+[dependencies]
+neohub-domain = { path = "../domain" }
+neohub-storage = { path = "../storage" }
+serde_json = "1.0"
+thiserror = "2.0"
+
+[dev-dependencies]
+tempfile = "3.14"
