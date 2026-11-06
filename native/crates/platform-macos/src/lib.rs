@@ -5,12 +5,14 @@
 //! layer; the desktop crate assembles these into the app host.
 
 #[cfg(target_os = "macos")]
+pub mod app_menu;
+#[cfg(target_os = "macos")]
 pub mod dock;
 #[cfg(target_os = "macos")]
 pub mod keychain;
-#[cfg(target_os = "macos")]
 pub mod log_file;
 pub mod login_item;
+pub mod menu_router;
 pub mod notify;
 pub mod open_in;
 pub mod tray;

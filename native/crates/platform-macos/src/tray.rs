@@ -17,6 +17,13 @@ pub enum TrayAction {
     StartApp(AppId),
     StopApp(AppId),
     StopAll,
+    /// Open the settings panel.
+    OpenSettings,
+    /// Reveal the app's log folder.
+    OpenLogs,
+    /// Ask whether a newer release exists.
+    CheckUpdates,
+    /// Quit the app.
     Quit,
 }
 

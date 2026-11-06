@@ -13,6 +13,7 @@ use neohub_core::service::CoreService;
 use neohub_desktop::app_host::{ActivationWatcher, SharedHost, open_main_window, reopen_or_focus};
 use neohub_desktop::session_lock::{LockOutcome, SessionLock};
 use neohub_desktop::window_session::AppHost;
+use neohub_platform_macos::app_menu;
 use neohub_platform_macos::log_file;
 use neohub_platform_macos::login_item;
 use neohub_platform_macos::tray::{TrayAction, build_menu};
@@ -108,6 +109,16 @@ fn main() {
 
         // Menu bar item. It must be created after AppKit is up (i.e. inside `run`) and on the
         // main thread; the handle keeps the status item and its menu alive for the process.
+        // Application menu. Installed after AppKit is up, and it shares the tray's event
+        // router (muda supports one handler per process).
+        let _app_menu = match app_menu::install() {
+            Ok(menu) => Some(menu),
+            Err(error) => {
+                eprintln!("[host] could not install the application menu: {error}");
+                None
+            }
+        };
+
         let mut login_state: Option<bool> = None;
         let mut tray: Option<TrayHandle> =
             match shared.app.lock().expect("host").service().snapshot() {
@@ -202,6 +213,31 @@ fn main() {
                                         }
                                     }
                                 });
+                            }
+                            TrayAction::OpenSettings => {
+                                // Settings live in the view; the menu only asks for the window.
+                                let shared = shared.clone();
+                                if let Err(err) = reopen_or_focus(cx, &shared) {
+                                    eprintln!("[host] could not focus the window: {err}");
+                                }
+                                log_file::log("host", "settings requested from the menu");
+                            }
+                            TrayAction::OpenLogs => {
+                                if let Some(dir) = log_file::log_dir() {
+                                    let _ = log_file::reveal(&dir);
+                                }
+                            }
+                            TrayAction::CheckUpdates => {
+                                // Reported in the app log rather than a dialog: the window is
+                                // where the answer belongs, and it may be closed.
+                                match neohub_core::update::check_blocking(env!("CARGO_PKG_VERSION"))
+                                {
+                                    Ok(status) => log_file::log("host", &status.summary()),
+                                    Err(error) => log_file::log(
+                                        "host",
+                                        &format!("update check failed: {error}"),
+                                    ),
+                                }
                             }
                             TrayAction::Quit => {
                                 run_command(&shared, &runtime, CoreCommand::Shutdown);

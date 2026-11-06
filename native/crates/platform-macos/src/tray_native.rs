@@ -17,7 +17,6 @@ use std::sync::mpsc::{Receiver, channel};
 pub struct TrayHandle {
     tray: tray_icon::TrayIcon,
     actions: Receiver<TrayAction>,
-    sender: std::sync::mpsc::Sender<TrayAction>,
     /// Map from menu id back to the action it fires. Rebuilt whenever the menu is.
     mapping: Vec<(muda::MenuId, TrayAction)>,
     quit_id: muda::MenuId,
@@ -28,8 +27,10 @@ impl TrayHandle {
     /// Build the status item from a menu model. Call on the main thread.
     pub fn install(menu: &TrayMenu, title: &str) -> Result<Self, String> {
         let (native, mapping) = build_native_menu(menu)?;
-        let (sender, actions) = channel::<TrayAction>();
-        install_event_router(&mapping, sender.clone());
+        // One receiver for the whole process: tray and application menu share a channel.
+        let actions =
+            crate::menu_router::take_receiver().unwrap_or_else(|| channel::<TrayAction>().1);
+        install_event_router(&mapping);
 
         let tray = tray_icon::TrayIconBuilder::new()
             .with_tooltip("NeoHub")
@@ -41,7 +42,6 @@ impl TrayHandle {
         Ok(TrayHandle {
             tray,
             actions,
-            sender,
             quit_id: quit_id_of(&mapping),
             mapping,
         })
@@ -59,7 +59,7 @@ impl TrayHandle {
             self.tray.set_title(Some(title));
             return Ok(false);
         }
-        install_event_router(&mapping, self.sender.clone());
+        install_event_router(&mapping);
         self.tray.set_title(Some(title));
         // `set_menu` returns () - it cannot fail; the entries were validated above.
         self.tray.set_menu(Some(Box::new(native)));
@@ -114,21 +114,12 @@ fn build_native_menu(
     Ok((native, mapping))
 }
 
-/// Point the process-wide event handler at one sender + routing table.
+/// Hand the tray's rows to the shared router.
 ///
-/// `muda` keeps a single handler slot, so installing one per item would leave only the last
-/// item clickable; and because a refresh replaces the menu, the handler is re-installed rather
-/// than assumed stable.
-fn install_event_router(
-    mapping: &[(muda::MenuId, TrayAction)],
-    sender: std::sync::mpsc::Sender<TrayAction>,
-) {
-    let routes = std::sync::Arc::new(mapping.to_vec());
-    muda::MenuEvent::set_event_handler(Some(move |event: muda::MenuEvent| {
-        if let Some((_, action)) = routes.iter().find(|(id, _)| *id == event.id) {
-            let _ = sender.send(action.clone());
-        }
-    }));
+/// `muda` supports one handler per process and the application menu needs the same one, so the
+/// tray registers its rows instead of installing a handler.
+fn install_event_router(mapping: &[(muda::MenuId, TrayAction)]) {
+    crate::menu_router::register(crate::menu_router::MenuSource::Tray, mapping.to_vec());
 }
 
 fn quit_id_of(mapping: &[(muda::MenuId, TrayAction)]) -> muda::MenuId {

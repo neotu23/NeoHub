@@ -1251,3 +1251,25 @@
   1. 没有自动安装（见上，属有意不做）
   2. 没有"忽略此版本"记忆；每次打开面板点检查都会重新提示
 
+### S5 收尾：AppKit 顶部菜单
+- 状态：**完成**（菜单项点击需人工确认）
+- 最近提交：`feat: install the application menu`
+- 实际修改文件：新增 `platform-macos/src/{app_menu,menu_router}.rs`；更新
+  `platform-macos/src/{lib,tray,tray_native}.rs`、`desktop/src/main.rs`
+- **先修的一个真实缺陷**：`muda` 全进程只有一个 `MenuEvent` handler。上一批托盘是"谁最后安装谁生效"，
+  再加一个应用菜单就会让**托盘点击静默失效**。现在抽出 `menu_router`：单一 handler + 按来源
+  （`Tray`/`AppMenu`）登记路由，重建某个菜单只替换它自己的行。这条有测试（托盘重建不影响应用菜单）
+- 菜单结构（只放真能做的事，不做点不动的行）：
+  - **NeoHub**：设置…（⌘,）、打开日志目录、退出（⌘Q）
+  - **文件**：打开窗口（⌘O）、检查更新…
+- 动作处理：打开窗口走 `reopen_or_focus`；打开日志目录走 `log_file::reveal`；
+  检查更新写进应用日志（窗口可能是关的）；退出走 core shutdown + `cx.quit()`
+- 验证：`cargo test -p neohub-platform-macos --locked` → **37 passed / 2 ignored**（新增菜单模型、
+  加速键可解析、行都必须有真实动作、路由按来源替换）
+  `cargo test --workspace --locked` → **465 passed / 0 failed**；clippy 0
+  重新打包（30 MB）并启动，日志无 error/panic
+- 未解决问题：
+  1. 菜单点击与顶部菜单的实际显示需人工确认（辅助功能权限不可用，`System Events` 拒绝查询）
+  2. 「设置…」目前只把窗口带到前台，未直接把设置面板打开（需要向视图派发 GPUI action）
+  3. 没有「编辑」菜单（文本框自己处理按键，标准编辑项会与之冲突）
+
