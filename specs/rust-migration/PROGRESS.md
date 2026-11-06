@@ -11,7 +11,7 @@
 ### 阶段 0：确认起点和旧版验收基线
 - 状态：**已验证**
 - 工作分支与目录：`main` @ `/Users/neil/Code/NeoHub`
-- 最近提交：`docs: define Rust GPUI migration baseline`（见下条目的实际 SHA）
+- 最近提交：`66d8519` `docs: define Rust GPUI migration baseline`；随后 `58f88de` `build: ignore local worktree dir and Rust build output`
 - 实际修改文件：新增 `docs/superpowers/plans/2026-11-06-neohub-rust-gpui-deepseek.md`（本计划）、
   `specs/rust-migration/BASELINE.md`、`specs/rust-migration/FEATURE-PARITY.md`、
   `specs/rust-migration/PROGRESS.md`、`specs/rust-migration/screenshots/{dashboard,app,settings,empty,light}.png`；
@@ -40,5 +40,30 @@
 - 下一项具体动作：进入阶段 1A —— 在 `02acedb` + 本阶段提交后的新 HEAD 上创建
   `legacy/electron` 分支与 annotated tag `electron-final-20261106`，推送并核对 `^{}` 解引用，
   再创建离线 bundle 与 worktree。
+- 完成情况：已全部执行，证据见 `specs/rust-migration/BACKUP.md`。
+
+---
+
+### 阶段 1：远程代码备份、数据备份、独立工作区
+- 状态：**已验证**
+- 工作分支与目录：`main` @ `/Users/neil/Code/NeoHub`（备份引用）→ Rust 工作区
+  `/Users/neil/Code/NeoHub-Rust` @ `rewrite/rust-gpui`
+- 最近提交：`docs: record migration backups and create Rust worktree`
+- 实际修改文件：新增 `specs/rust-migration/BACKUP.md`；修改 `.gitignore`（`.worktrees/`、`native/target/`，
+  单独提交 `58f88de`）；更新本文件。**未**修改 `src/` 或任何产品代码。
+- 验证命令、时间与退出码（2026-11-06T12:34Z–12:40Z UTC）：
+  - `git push --atomic origin refs/heads/legacy/electron refs/tags/electron-final-20261106` → exit 0（两个引用均为 new，无 force push）
+  - `git ls-remote origin refs/heads/legacy/electron 'refs/tags/electron-final-20261106*'` → branch `58f88de…`；tag `^{}` = `58f88de…`
+  - `git bundle create … --all` + `git bundle verify` → `The bundle records a complete history`（9 refs）；SHA-256 `d11ce859…`；临时目录 clone 后 `electron-final-20261106^{commit}` = `58f88de…`
+  - 用户数据副本 `PRAGMA integrity_check` = `ok`，`PRAGMA foreign_key_check` 空，7 条迁移，行数 apps 4 / tasks 4 / env_vars 0 / run_history 9 / settings 7
+  - `git worktree add -b rewrite/rust-gpui /Users/neil/Code/NeoHub-Rust 58f88de` → 成功，`git worktree list` 显示两个 worktree
+- 人工验证及截图：不需要截图；恢复演练（bundle clone + `fsck`）与哈希核对已记录在 BACKUP.md。
+- 与旧版不同之处：无（本阶段未触碰产品代码；旧版 `main` 保持不变）。
+- 未解决问题及所属阶段：
+  1. bundle 与 userData 备份目录只存在本机 `~/Backups/…`，没有第二份异地副本 → 交付前若需要，请用户决定是否复制到外置盘
+  2. Keychain 加密的 secret 无法随文件备份迁移（当前 `env_vars` 为 0 行，暂无实际影响）→ 阶段 13
+- 下一项具体动作：进入阶段 2 —— 在 `/Users/neil/Code/NeoHub-Rust/native/` 建立 Cargo workspace，
+  先查 GPUI 与 Longbridge 组件库当前官方示例，锁定版本组合（`DEVELOPER_DIR` 指向 Xcode 27.1 以获得 metal 工具链），
+  用最小窗口验证后写 `native/docs/DEPENDENCIES.md` 与 `interfaces.md`。
 
 ---
