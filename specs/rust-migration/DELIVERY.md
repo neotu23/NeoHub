@@ -82,5 +82,3 @@ Rust 版与旧版完全独立：
 2. U7 应用配置抽屉 + S5 快捷键（日常使用频率最高）
 3. 其余（通知、Open In、深链接、更新、崩溃日志、db 危险区）
 4. 真实数据迁移（需要你确认后执行）
-SEOF
-echo written; wc -l specs/rust-migration/DELIVERY.md
