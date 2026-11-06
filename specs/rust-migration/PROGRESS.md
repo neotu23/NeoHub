@@ -626,3 +626,30 @@
     2. 日志刷新合批（33 ms / 16 KiB）与"仅可见任务推送"门控仍未做
     3. 快捷键 ⌘⇧F/⌘K 的键位绑定待阶段 12 与菜单一起接
 
+### 阶段 12：窗口销毁、菜单栏、Dock、单实例
+- 状态：**开发中**（生命周期状态机与单实例锁完成并测试；GPUI 窗口销毁/重建、托盘与 Dock 实机接线待做）
+- 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
+- 最近提交：`feat: add the window lifecycle and single-instance lock`
+- 实际修改文件：新增 `native/crates/desktop/src/{lib,session_lock,window_session}.rs`、
+  `native/crates/desktop/tests/window_lifecycle.rs`；更新 `desktop/Cargo.toml`（lib target、libc、tempfile）
+- 验证命令与结果（2026-11-07T03:50Z–04:20Z UTC）：
+  - `cargo test -p neohub-desktop --test window_lifecycle` → **8 passed**
+    （在途启动时关窗任务继续运行；保存失败保留窗口；无窗口时日志继续增长；
+    20 次关闭/重开窗口代数 = 21 且没有任务被启动；quit 停止全部并拒绝新启动；
+    tray 开关决定 Dock 隐藏；关窗后快照仍报告运行任务；重开恢复选择且不跑 autoStart）
+  - `cargo test -p neohub-desktop --lib session_lock` → **3 passed**
+    （首个实例拿到锁、第二个拿到 AlreadyRunning 并写激活文件、drop 后锁释放）
+  - `cargo test --workspace --locked` → **354 passed / 0 failed**；clippy **0 warnings**；`cargo fmt --all`
+- 与旧版不同之处：
+  1. 单实例锁用 `flock`（进程被杀也会释放），不再依赖陈旧 pid 文件；第二实例通过
+     `<data>/neohub.activate` 的 mtime 通知主实例
+  2. 关窗语义显式建模为 `CloseDecision::{HideWindow, FlushFirst, KeepWindow(errors)}`，
+     保存失败的分支在状态机里而不是散落在 UI 回调中
+  3. `reopen()` 明确返回 `run_auto_start: false`，从类型上杜绝"重开窗口又启动一遍项目"
+- 未解决问题及所属阶段：
+  1. GPUI 真实窗口的销毁/重建（`open_window` 第二次调用、关闭时销毁实体）与 Cmd+W 绑定 → 本阶段剩余
+  2. 托盘（AppKit/`tray-icon`）与 Dock 隐藏的实机调用、逐项目启停菜单 → 本阶段剩余
+  3. 在打包 `.app` 上实测 Dock/Finder 激活/最后窗口关闭后事件循环不退出 → 阶段 15 打包后
+  4. 第二实例把激活信号送达主实例（当前只写文件，主实例轮询读取的逻辑待接）
+
+---

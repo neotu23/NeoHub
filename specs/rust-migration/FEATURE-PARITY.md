@@ -104,10 +104,10 @@
 
 | # | 功能 | 旧版源码依据 | 旧版基线 | Rust 目标 | Rust 状态 |
 |---|---|---|---|---|---|
-| S1 | 关窗销毁面板进入菜单栏常驻，Dock 隐藏，后台继续运行 | `index.ts`, `PanelWindow.ts` | 已验证（`panel-lifecycle.test.ts`, `panel-session.test.ts`） | `desktop/src/window_session.rs` + `platform-macos/src/{tray,dock}.rs` | 未开始 |
-| S2 | 关窗保存屏障 `panel:prepareClose` / `panel:closeReady`（保存失败不关窗） | `panelSaves.ts`, `DebouncedSaveQueue.ts` | 已验证（`DebouncedSaveQueue.test.ts`） | `ui/src/state/save_barrier.rs` | 未开始 |
-| S3 | 菜单栏：聚合状态、逐项目启停、Stop all、Open、Quit | `TrayController.ts` | 已验证（`TrayController.test.ts`） | `platform-macos/src/tray.rs` | 未开始 |
-| S4 | 单实例锁（第二实例只激活不抢库） | `index.ts` requestSingleInstanceLock | 部分 | `desktop/src/session_lock.rs` | 未开始 |
+| S1 | 关窗销毁面板进入菜单栏常驻，Dock 隐藏，后台继续运行 | `index.ts`, `PanelWindow.ts` | 已验证（`panel-lifecycle.test.ts`, `panel-session.test.ts`） | `desktop/src/window_session.rs` + `platform-macos/src/{tray,dock}.rs`| 部分（`AppHost` 生命周期：关窗不 Shutdown、Dock 依据 tray 设置隐藏/恢复、重开恢复选择与 bounds；GPUI 窗口销毁/重建与托盘实机接线待做） |
+| S2 | 关窗保存屏障 `panel:prepareClose` / `panel:closeReady`（保存失败不关窗） | `panelSaves.ts`, `DebouncedSaveQueue.ts` | 已验证（`DebouncedSaveQueue.test.ts`） | `ui/src/state/save_barrier.rs`| 已验证（`Draft`/`SaveBarrier`：保存失败保留窗口与输入、关窗先 flush；详见阶段 10 的四个测试） |
+| S3 | 菜单栏：聚合状态、逐项目启停、Stop all、Open、Quit | `TrayController.ts` | 已验证（`TrayController.test.ts`） | `platform-macos/src/tray.rs`| 部分（`AppHost` 已有 Open/quit 语义与逐项目状态来源；托盘 UI 与逐项目菜单待做） |
+| S4 | 单实例锁（第二实例只激活不抢库） | `index.ts` requestSingleInstanceLock | 部分 | `desktop/src/session_lock.rs`| 已验证（`flock` 单实例锁 + activation 文件；第二实例只发激活信号并退出，测试覆盖） |
 | S5 | 应用菜单与快捷项：⌘, 设置 / ⌘N 添加 / ⌘⇧N 新建文件夹 / 检查更新 / 打开日志 | `menu.ts` | 部分 | `platform-macos/src/` + `desktop/src/` | 未开始 |
 | S6 | 深链接 `devharbor://open?id=…&path=…`、`start?id=…`（start 需用户确认） | `DeepLinks.ts` | 已验证（`DeepLinks.test.ts`） | `platform-macos/src/deep_links.rs` | 未开始 |
 | S7 | Open In：Finder/Terminal/VS Code/Cursor/Sublime + 能力探测 | `OpenIn.ts` | 部分 | `platform-macos/src/open_in.rs` | 未开始 |

@@ -3894,9 +3894,12 @@ name = "neohub-desktop"
 version = "0.1.0"
 dependencies = [
  "gpui-kit",
+ "libc",
  "neohub-core",
+ "neohub-domain",
  "neohub-storage",
  "neohub-ui",
+ "tempfile",
  "tokio",
 ]
 

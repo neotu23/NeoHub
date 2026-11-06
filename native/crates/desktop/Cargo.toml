@@ -12,9 +12,22 @@ description = "NeoHub native desktop host (macOS first)"
 name = "neohub-desktop"
 path = "src/main.rs"
 
+[lib]
+name = "neohub_desktop"
+path = "src/lib.rs"
+
+[features]
+default = []
+test-support = []
+
 [dependencies]
 gpui-kit.workspace = true
 neohub-ui.workspace = true
 neohub-core = { path = "../core" }
+neohub-domain = { path = "../domain" }
 neohub-storage = { path = "../storage" }
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3.14"
