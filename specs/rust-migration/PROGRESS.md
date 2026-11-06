@@ -195,3 +195,40 @@
   最后 secrets/keychain + `tests/{environment,detection}.rs`。
 
 ---
+
+### 阶段 5：PTY 运行、进程树停止与退出历史
+- 状态：**开发中**（PTY runner 与进程树终止已完成并验证；`CoreHandle`/service/快照/历史接线待做）
+- 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
+- 最近提交：`feat: implement PTY task lifecycle and process tree shutdown`
+- 已完成并验证（2026-11-06T15:10Z–15:50Z UTC）：
+  - `native/test-fixtures/process/`：5 个合成 fixture（固定日志、延迟启动、派生两个孙进程、
+    忽略 SIGTERM、指定退出码）。**不执行任何用户真实项目**
+  - `crates/core/src/process/spawn_spec.rs`：`SpawnSpec`（program/args/cwd/env/初始 120×30/display）。
+    script 任务 → `<pm> run <script>` 参数数组；只有显式 `custom` 才经 shell；工作目录覆盖相对 app 路径；
+    缺失 script/command/包管理器/目录各自报错；grid 下限 2×2
+  - `crates/core/src/process/process_tree.rs`：按**进程组**终止（TERM → grace → KILL），
+    `ps -o pid=,pgid=` 一次批量枚举成员，拒绝 pid 0/1 与 NeoHub 自身进程组
+  - `crates/core/src/process/runner.rs`：每任务一个操作锁串行化 start/stop；PTY 读取与 `wait`
+    都在独立线程；日志按 5 MiB 有界环缓冲 + 事件；退出按 generation 只结算一次；
+    shutdown 置位后拒绝新启动、立即回收"晚到"的子进程
+- 验证命令与结果：
+  - `cargo test -p neohub-core --test process_lifecycle --locked` → **13 passed / 0 failed**，含计划要求的
+    四个竞态：`same_task_concurrent_start_spawns_once`、`stop_during_start_leaves_no_orphan`、
+    `start_during_exit_waits_for_teardown`、`quit_during_spawn_reaps_late_child`；另有
+    整棵进程树消失（父 + 两个孙进程）、忽略 TERM 后升级 KILL（实测耗时 ≥ grace）、
+    崩溃记录退出码 5、正常退出、用户停止归因、resize 下限、3 任务 shutdown、自身组安全
+  - 测试中对每个用例都断言 `group_members(pgid)` 为空，且运行时 `pgrep -f test-fixtures/process` 无残留
+  - `cargo test --workspace --locked` → **132 passed / 0 failed**
+  - `cargo clippy -p neohub-core --all-targets --locked` → **0 warnings**；`cargo fmt --all` 已执行
+- 与旧版不同之处：
+  1. 停止作用于**进程组**而非递归 pid 列表（旧版 `tree-kill` 逐 pid），少一次系统调用竞态；
+     portable-pty 的 `setsid` 已在测试中确认（子进程 pid == pgid，孙进程同组）
+  2. 日志环按字节（5 MiB），不是按 JS 字符串长度
+  3. 退出结算带 generation 校验，陈旧 waiter 无法改写新 run 的状态
+- 未解决问题及所属阶段：
+  1. `CoreCommand`/`CoreSnapshot`/`CoreEvent` 与 `CoreHandle` 的 actor 尚未落地 → 本阶段剩余
+  2. 运行历史写入（start 记 row、退出 finish + prune）→ 与 service 层一起补
+  3. channel 满时的背压/resync 策略（当前用 broadcast，慢订阅者收到 Lagged）→ 阶段 6 与日志一起收紧
+  4. `Quit during spawn` 的 service 级顺序（拒绝启动 → 等在途 → 反向停止 → 写历史 → 关库）→ 本阶段剩余
+
+---

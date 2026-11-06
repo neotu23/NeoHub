@@ -5,5 +5,6 @@
 
 pub mod catalog;
 pub mod environment;
+pub mod process;
 
 pub use catalog::{AppCatalog, CoreError, CoreResult, CreateAppInput, CreateTaskSpec};
