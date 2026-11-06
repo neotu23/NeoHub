@@ -1078,3 +1078,26 @@
 - 未解决问题：Shift-Tab 反向切换尚未实现（`KeyOutcome` 只给到 `tab`，需要从 keystroke 读 modifiers）；
   多行字段（watch globs）在单行缓冲里用换行较别扭
 
+### S5 快捷键（第一批）
+- 状态：**部分**（快捷键可用；AppKit 顶部菜单未建）
+- 最近提交：`feat: add the window shortcuts`
+- 实际修改文件：`ui/src/views/shell.rs`（actions、`bind_shortcuts`、`on_shortcut`、根元素 `on_action`）
+- 实现的键位（与旧版一致的部分）：
+  | 键 | 动作 |
+  |---|---|
+  | ⌘, | 打开设置面板 |
+  | ⌘N | 打开导入面板并扫描默认目录 |
+  | ⌘P | 聚焦侧栏筛选框 |
+  | ⌘⇧F | 打开全局日志搜索 |
+  | ⌘R | 重启当前选中的应用 |
+- 设计点：**快捷键处理与按钮走同一条代码路径**（`on_shortcut` 调用与按钮相同的状态变更/命令），
+  所以不会出现"按钮能做、快捷键做不到"的分叉
+- 验证：`cargo test --workspace --locked` → **431 passed / 0 failed**；clippy 0；
+  重新打包（30 MB）并启动，日志无 error/panic
+- 未解决问题：
+  1. **AppKit 顶部菜单栏（NSMenu：关于/设置/退出/编辑菜单）未建**，所以这些动作只由快捷键触发，
+     菜单里看不到
+  2. 快捷键的实际按键行为需人工确认（自动化无法按键）
+  3. `⌘P` 目前只"重新设置焦点句柄"，未真正把焦点移入筛选框（GPUI 的焦点需要在标签上用
+     `track_focus`）；本轮先保证动作通路，焦点落在下一轮修正
+

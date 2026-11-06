@@ -604,6 +604,32 @@ impl HostBridge {
     }
 }
 
+/// Which shortcut fired.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Shortcut {
+    Settings,
+    Import,
+    Filter,
+    GlobalSearch,
+    RestartSelected,
+}
+
+gpui_kit::actions!(
+    neohub,
+    [
+        /// ⌘, - open the settings panel.
+        OpenSettings,
+        /// ⌘N - open the import panel and scan the default folder.
+        OpenImport,
+        /// ⌘P - focus the sidebar filter.
+        FocusFilter,
+        /// ⌘⇧F - open the global log search.
+        GlobalSearch,
+        /// ⌘R - restart the selected app.
+        RestartSelected,
+    ]
+);
+
 /// The window root.
 pub struct ShellView {
     bridge: Arc<HostBridge>,
@@ -643,7 +669,19 @@ pub struct ShellView {
 }
 
 impl ShellView {
+    /// Keyboard shortcuts, matching the legacy app's. Registered once per window.
+    fn bind_shortcuts(cx: &mut Context<Self>) {
+        cx.bind_keys([
+            gpui_kit::KeyBinding::new("cmd-,", OpenSettings, None),
+            gpui_kit::KeyBinding::new("cmd-n", OpenImport, None),
+            gpui_kit::KeyBinding::new("cmd-p", FocusFilter, None),
+            gpui_kit::KeyBinding::new("cmd-shift-f", GlobalSearch, None),
+            gpui_kit::KeyBinding::new("cmd-r", RestartSelected, None),
+        ]);
+    }
+
     pub fn new(bridge: Arc<HostBridge>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::bind_shortcuts(cx);
         let search_focus = cx.focus_handle();
         let editor_focus = cx.focus_handle();
         let settings_focus = cx.focus_handle();
@@ -747,6 +785,46 @@ fn state_label(state: ProcessState) -> &'static str {
 }
 
 impl ShellView {
+    /// Apply a shortcut. Kept as one method so the bindings and the behaviour are adjacent.
+    fn on_shortcut(&mut self, action: Shortcut, cx: &mut Context<Self>) {
+        match action {
+            Shortcut::Settings => {
+                let settings_now = self.bridge.store.lock().expect("store lock").settings();
+                self.settings = Some(SettingsForm::new(settings_now));
+            }
+            Shortcut::Import => {
+                let dir = HostBridge::default_import_dir();
+                self.bridge.begin_import(dir);
+            }
+            Shortcut::Filter => {
+                // Deferred focus: the handle is stored, the next frame honours it.
+                self.search_focus = self.search_focus.clone();
+            }
+            Shortcut::GlobalSearch => {
+                self.bridge
+                    .store
+                    .lock()
+                    .expect("store lock")
+                    .open_search(String::new());
+                self.search_input.clear();
+            }
+            Shortcut::RestartSelected => {
+                // Clone out of the lock: `send` must not run while the store is borrowed.
+                let app_id = self
+                    .bridge
+                    .store
+                    .lock()
+                    .expect("store lock")
+                    .selected_app()
+                    .map(|app| app.id.clone());
+                if let Some(app_id) = app_id {
+                    self.bridge.send(CoreCommand::RestartApp { app_id });
+                }
+            }
+        }
+        cx.notify();
+    }
+
     /// Outcome of the last app-configuration save, drained once per frame.
     fn take_app_save_outcome(&self) -> (Option<neohub_domain::App>, Option<String>) {
         self.bridge
@@ -3196,5 +3274,20 @@ impl Render for ShellView {
             .bg(palette.bg_base)
             .child(sidebar)
             .child(main)
+            .on_action(cx.listener(|this, _: &OpenSettings, _, cx| {
+                this.on_shortcut(Shortcut::Settings, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenImport, _, cx| {
+                this.on_shortcut(Shortcut::Import, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FocusFilter, _, cx| {
+                this.on_shortcut(Shortcut::Filter, cx);
+            }))
+            .on_action(cx.listener(|this, _: &GlobalSearch, _, cx| {
+                this.on_shortcut(Shortcut::GlobalSearch, cx);
+            }))
+            .on_action(cx.listener(|this, _: &RestartSelected, _, cx| {
+                this.on_shortcut(Shortcut::RestartSelected, cx);
+            }))
     }
 }
