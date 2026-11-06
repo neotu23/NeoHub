@@ -13,7 +13,12 @@ aes-gcm = "0.10"
 base64 = "0.22"
 rand = "0.9"
 security-framework = "3.7"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSRunningApplication"] }
+objc2-foundation = { version = "0.3", features = ["NSString"] }
 
 [dependencies]
 neohub-storage = { path = "../storage" }
+neohub-core = { path = "../core" }
+neohub-domain = { path = "../domain" }
 thiserror = "2.0"

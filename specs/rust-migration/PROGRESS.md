@@ -627,7 +627,7 @@
     3. 快捷键 ⌘⇧F/⌘K 的键位绑定待阶段 12 与菜单一起接
 
 ### 阶段 12：窗口销毁、菜单栏、Dock、单实例
-- 状态：**开发中**（生命周期状态机、单实例锁、GPUI 窗口销毁/重建与激活轮询完成；托盘/Dock 实机接线待做）
+- 状态：**开发中**（生命周期、单实例、窗口重建、Dock 桥接、托盘菜单模型完成；NSStatusItem 绑定待做）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: add the window lifecycle and single-instance lock`
 - 实际修改文件：新增 `native/crates/desktop/src/{lib,session_lock,window_session}.rs`、
@@ -669,4 +669,23 @@
     2. Cmd+W 的键位绑定（当前只有窗口关闭按钮路径）
     3. 把 `window-state.json` 落盘（现在 bounds 只在进程内捕获）
     4. 打包 `.app` 上验证 Dock/Finder 激活与"最后窗口关闭后事件循环不退出" → 阶段 15
+
+- 第三批完成（2026-11-07T04:55Z–05:20Z UTC）：
+  - `platform-macos/src/dock.rs`：`set_dock_visible` / `current_dock_visible` / `sync_dock`，
+    通过 `NSApplication.setActivationPolicy(Regular|Accessory)` 实现；**强制主线程**（非主线程
+    直接拒绝并回报当前状态，不静默失败）；返回值是**读回**的真实策略，供调用方验证
+  - `platform-macos/src/tray.rs`：`build_menu(&CoreSnapshot) -> TrayMenu`
+    - 状态栏标题为运行中任务数（空闲为空串）
+    - 逐项目一行：运行中显示「停止 X」、否则「启动 X」，**按名称排序**
+    - 「全部停止」仅在确有任务运行时启用；另有「打开 NeoHub」「退出 NeoHub」
+    - 全部从快照生成 —— **不要求窗口存在**（这正是托盘的意义）
+  - 验证：`cargo test -p neohub-platform-macos --lib tray` → **5 passed**
+    （标题计数、逐项目动词与排序、Stop all 启用条件、空注册表仍给 Open/Quit、无窗口可用）
+    `cargo test --workspace --locked` → **359 passed / 0 failed**；clippy **0 warnings**；实机启动无 stderr
+  - 未解决问题（本阶段剩余）：
+    1. **NSStatusItem 绑定**：需要 `declare_class!` 定义 target-action 对象并在 GPUI 主线程创建；
+       尚未实现（风险与成本都高，且必须实机点击验证）
+    2. Dock 隐藏/恢复尚未接到 `AppHost.dock_hidden` 的变化上（函数已就绪，调用点待接）
+    3. Cmd+W 绑定、`window-state.json` 落盘
+    4. 打包 `.app` 上验证 Finder/Dock 激活与事件循环不退出的行为 → 阶段 15
 

@@ -5,7 +5,15 @@
 //! layer; the desktop crate assembles these into the app host.
 
 #[cfg(target_os = "macos")]
+pub mod dock;
+#[cfg(target_os = "macos")]
 pub mod keychain;
+#[cfg(target_os = "macos")]
+pub mod tray;
 
 #[cfg(target_os = "macos")]
+pub use dock::{current_dock_visible, set_dock_visible, sync_dock};
+#[cfg(target_os = "macos")]
 pub use keychain::{KeychainSecretStore, delete_master_key};
+#[cfg(target_os = "macos")]
+pub use tray::{TrayAction, TrayMenu, TrayMenuItem, build_menu};

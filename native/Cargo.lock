@@ -3920,7 +3920,12 @@ version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
+ "neohub-core",
+ "neohub-domain",
  "neohub-storage",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
  "rand 0.9.5",
  "security-framework",
  "thiserror 2.0.21",
