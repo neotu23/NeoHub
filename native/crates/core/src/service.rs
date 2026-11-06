@@ -205,7 +205,20 @@ impl CoreService {
     }
 
     /// Run a storage operation while the database is still open.
-    fn with_storage<T>(&self, f: impl FnOnce(&Storage) -> CoreResult<T>) -> CoreResult<T> {
+    /// Raw access to the storage slot (used by the database maintenance helpers).
+    pub(crate) fn storage_slot(&self) -> std::sync::MutexGuard<'_, Option<Storage>> {
+        self.storage.lock().expect("storage lock")
+    }
+
+    /// Live tasks, for callers that must refuse while something runs.
+    pub fn running_tasks(&self) -> Vec<crate::process::runner::RunningTaskInfo> {
+        self.runner.running_tasks()
+    }
+
+    pub(crate) fn with_storage<T>(
+        &self,
+        f: impl FnOnce(&Storage) -> CoreResult<T>,
+    ) -> CoreResult<T> {
         let guard = self.storage.lock().expect("storage lock");
         let storage = guard
             .as_ref()

@@ -1134,3 +1134,23 @@
   本机探测：Finder + Terminal + VS Code 三个按钮，Cursor/Sublime 不显示
 - 未解决问题：无（S7 完成）。顶部菜单栏（NSMenu）仍缺，属 S5
 
+### B4 数据库导出 / 重置 / 路径
+- 状态：**后端完成**；UI 危险区按钮待接
+- 最近提交：`feat: export and reset the database safely`
+- 实际修改文件：新增 `core/src/database.rs`、`core/tests/database_ops.rs`；更新
+  `core/src/{lib,service}.rs`（`storage_slot`、`running_tasks`、`with_storage` 放宽到 `pub(crate)`）、
+  `core/Cargo.toml`（dev 依赖 rusqlite 0.37，与 storage 同版本）
+- 语义（沿用旧版 `db:*` 的两个关键决定，它们各自避免一种**静默数据丢失**）：
+  1. **导出用 `VACUUM INTO`，不是文件复制**：WAL 模式下最新写入在 `-wal` 里，
+     只拷 `.db` 会得到一个能打开但少了最近若干分钟的文件。目标已存在时**拒绝**（不覆盖）
+  2. **重置先关连接**：checkpoint 把 WAL 折进主文件，然后把 `db`/`-wal`/`-shm`
+     **三件一起**改名为 `.reset-<ts>.bak`；留下 `-wal` 会让下次启动把旧行恢复进"新"库
+  3. 有任务在运行时**拒绝重置**（否则 UI 会描述一个连历史都写不进去的任务）
+- 验证：`cargo test -p neohub-core --test database_ops` → **4 passed**
+  （路径就是活动库文件；导出副本有 app/task 且 `integrity_check=ok`；覆盖已存在文件被拒且
+  原文件字节不变；重置后备份存在、备份里仍有原数据、新库为空且可再写）
+  `cargo test --workspace --locked` → **442 passed / 0 failed**；clippy 0
+- 未解决问题：
+  1. 设置面板的「危险区」按钮（导出对话框 / 重置确认）未接
+  2. 导出走的是路径参数，没有原生 `NSSavePanel`；UI 接线时需要一个选路径的入口
+

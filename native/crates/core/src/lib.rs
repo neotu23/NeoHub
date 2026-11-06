@@ -5,6 +5,7 @@
 
 pub mod catalog;
 pub mod commands;
+pub mod database;
 pub mod environment;
 pub mod events;
 pub mod logs;
