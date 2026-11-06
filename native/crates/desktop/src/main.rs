@@ -66,22 +66,23 @@ fn main() {
 
         // Menu bar item. It must be created after AppKit is up (i.e. inside `run`) and on the
         // main thread; the handle keeps the status item and its menu alive for the process.
-        let tray: Option<TrayHandle> = match shared.app.lock().expect("host").service().snapshot() {
-            Ok(snapshot) => {
-                let menu = build_menu(&snapshot);
-                match TrayHandle::install(&menu, &menu.title) {
-                    Ok(handle) => Some(handle),
-                    Err(error) => {
-                        eprintln!("[host] could not install the menu bar item: {error}");
-                        None
+        let mut tray: Option<TrayHandle> =
+            match shared.app.lock().expect("host").service().snapshot() {
+                Ok(snapshot) => {
+                    let menu = build_menu(&snapshot);
+                    match TrayHandle::install(&menu, &menu.title) {
+                        Ok(handle) => Some(handle),
+                        Err(error) => {
+                            eprintln!("[host] could not install the menu bar item: {error}");
+                            None
+                        }
                     }
                 }
-            }
-            Err(error) => {
-                eprintln!("[host] no snapshot for the menu bar item: {error}");
-                None
-            }
-        };
+                Err(error) => {
+                    eprintln!("[host] no snapshot for the menu bar item: {error}");
+                    None
+                }
+            };
 
         // Another launch (or, later, the tray) asks us to show the window again. The poll is
         // cheap: one file timestamp every 500 ms, no shell, no database.
@@ -101,6 +102,18 @@ fn main() {
 
                 // Menu bar clicks. Drained on the same tick as the activation file, so a
                 // click never waits on the window.
+                // Keep the menu in step with the core. The snapshot is cheap (cached stats and
+                // ports); `refresh` is a no-op unless the rows actually changed.
+                if let Some(handle) = tray.as_mut() {
+                    let snapshot = shared.app.lock().expect("host").service().snapshot();
+                    if let Ok(snapshot) = snapshot {
+                        let menu = build_menu(&snapshot);
+                        if let Err(error) = handle.refresh(&menu, &menu.title) {
+                            eprintln!("[host] could not refresh the menu bar item: {error}");
+                        }
+                    }
+                }
+
                 if let Some(handle) = tray.as_ref() {
                     while let Some(action) = handle.try_recv() {
                         let shared = shared.clone();

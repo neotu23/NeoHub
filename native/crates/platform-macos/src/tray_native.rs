@@ -15,63 +15,65 @@ use std::sync::mpsc::{Receiver, channel};
 
 /// Keep-alive wrapper for the status item.
 pub struct TrayHandle {
-    _tray: tray_icon::TrayIcon,
+    tray: tray_icon::TrayIcon,
     actions: Receiver<TrayAction>,
-    // The menu must outlive the tray icon: dropping it first leaves dangling targets.
-    _menu: muda::Menu,
-    quit_id: muda::MenuId,
-    /// Map from menu id back to the action it fires.
+    sender: std::sync::mpsc::Sender<TrayAction>,
+    /// Map from menu id back to the action it fires. Rebuilt whenever the menu is.
     mapping: Vec<(muda::MenuId, TrayAction)>,
+    quit_id: muda::MenuId,
 }
 
 impl TrayHandle {
     /// Build (or rebuild) the status item from a menu model. Call on the main thread.
+    /// Build the status item from a menu model. Call on the main thread.
     pub fn install(menu: &TrayMenu, title: &str) -> Result<Self, String> {
-        let native = muda::Menu::new();
+        let (native, mapping) = build_native_menu(menu)?;
         let (sender, actions) = channel::<TrayAction>();
-        let mut mapping: Vec<(muda::MenuId, TrayAction)> = Vec::new();
-        let mut quit_id = None;
-
-        for item in &menu.items {
-            if item.separator {
-                native
-                    .append(&muda::PredefinedMenuItem::separator())
-                    .map_err(|e| e.to_string())?;
-                continue;
-            }
-            let entry = muda::MenuItem::new(item.label.clone(), item.enabled, None);
-            let id = entry.id().clone();
-            mapping.push((id.clone(), item.action.clone()));
-            if matches!(item.action, TrayAction::Quit) {
-                quit_id = Some(id.clone());
-            }
-            native.append(&entry).map_err(|e| e.to_string())?;
-        }
-
-        // `muda` keeps one process-wide handler, so it is installed once and looks the id up:
-        // installing one per item would leave only the last item working.
-        let routes = std::sync::Arc::new(mapping.clone());
-        let sender_for_events = sender.clone();
-        muda::MenuEvent::set_event_handler(Some(move |event: muda::MenuEvent| {
-            if let Some((_, action)) = routes.iter().find(|(id, _)| *id == event.id) {
-                let _ = sender_for_events.send(action.clone());
-            }
-        }));
+        install_event_router(&mapping, sender.clone());
 
         let tray = tray_icon::TrayIconBuilder::new()
             .with_tooltip("NeoHub")
             .with_title(title)
-            .with_menu(Box::new(native.clone()))
+            .with_menu(Box::new(native))
             .build()
             .map_err(|error| error.to_string())?;
 
         Ok(TrayHandle {
-            _tray: tray,
+            tray,
             actions,
-            _menu: native,
-            quit_id: quit_id.unwrap_or_else(|| muda::MenuId("neohub-quit".into())),
+            sender,
+            quit_id: quit_id_of(&mapping),
             mapping,
         })
+    }
+
+    /// Replace the menu after the app state changed.
+    ///
+    /// The status item itself stays, so the menu bar does not flicker; only the title and the
+    /// rows are swapped. Returns `true` when the rows actually changed, which lets the caller
+    /// skip the work when the snapshot is unchanged.
+    pub fn refresh(&mut self, menu: &TrayMenu, title: &str) -> Result<bool, String> {
+        let (native, mapping) = build_native_menu(menu)?;
+        if mapping == self.mapping {
+            // Same rows and actions: only the title can differ (e.g. the running count).
+            self.tray.set_title(Some(title));
+            return Ok(false);
+        }
+        install_event_router(&mapping, self.sender.clone());
+        self.tray.set_title(Some(title));
+        // `set_menu` returns () - it cannot fail; the entries were validated above.
+        self.tray.set_menu(Some(Box::new(native)));
+        self.quit_id = quit_id_of(&mapping);
+        self.mapping = mapping;
+        Ok(true)
+    }
+
+    /// Map the current rows to their actions (the shape a test can assert on).
+    pub fn actions(&self) -> Vec<TrayAction> {
+        self.mapping
+            .iter()
+            .map(|(_, action)| action.clone())
+            .collect()
     }
 
     /// Next click, if any (never blocks).
@@ -90,6 +92,51 @@ impl TrayHandle {
     pub fn quit_id(&self) -> &muda::MenuId {
         &self.quit_id
     }
+}
+
+/// A native menu plus the id→action map, built from the model.
+fn build_native_menu(
+    menu: &TrayMenu,
+) -> Result<(muda::Menu, Vec<(muda::MenuId, TrayAction)>), String> {
+    let native = muda::Menu::new();
+    let mut mapping: Vec<(muda::MenuId, TrayAction)> = Vec::new();
+    for item in &menu.items {
+        if item.separator {
+            native
+                .append(&muda::PredefinedMenuItem::separator())
+                .map_err(|error| error.to_string())?;
+            continue;
+        }
+        let entry = muda::MenuItem::new(item.label.clone(), item.enabled, None);
+        mapping.push((entry.id().clone(), item.action.clone()));
+        native.append(&entry).map_err(|error| error.to_string())?;
+    }
+    Ok((native, mapping))
+}
+
+/// Point the process-wide event handler at one sender + routing table.
+///
+/// `muda` keeps a single handler slot, so installing one per item would leave only the last
+/// item clickable; and because a refresh replaces the menu, the handler is re-installed rather
+/// than assumed stable.
+fn install_event_router(
+    mapping: &[(muda::MenuId, TrayAction)],
+    sender: std::sync::mpsc::Sender<TrayAction>,
+) {
+    let routes = std::sync::Arc::new(mapping.to_vec());
+    muda::MenuEvent::set_event_handler(Some(move |event: muda::MenuEvent| {
+        if let Some((_, action)) = routes.iter().find(|(id, _)| *id == event.id) {
+            let _ = sender.send(action.clone());
+        }
+    }));
+}
+
+fn quit_id_of(mapping: &[(muda::MenuId, TrayAction)]) -> muda::MenuId {
+    mapping
+        .iter()
+        .find(|(_, action)| matches!(action, TrayAction::Quit))
+        .map(|(id, _)| id.clone())
+        .unwrap_or_else(|| muda::MenuId("neohub-quit".into()))
 }
 
 #[cfg(test)]
@@ -165,6 +212,31 @@ mod tests {
         }
         assert_eq!(actual, expected);
         assert!(actual.contains(&TrayAction::Quit), "quit is reachable");
+    }
+
+    #[test]
+    fn refresh_inputs_are_the_model_rows() {
+        // `refresh` feeds `build_native_menu` straight from the model, so what can be checked
+        // without AppKit is that the model itself is a stable, clickable shape. (muda panics if
+        // a menu is constructed off the main thread, so the native build is not unit-tested.)
+        let idle = build_menu(&snapshot(2, vec![ProcessState::Idle, ProcessState::Idle]));
+        let running = build_menu(&snapshot(
+            2,
+            vec![ProcessState::Running, ProcessState::Idle],
+        ));
+
+        let quits = |menu: &crate::tray::TrayMenu| {
+            menu.items
+                .iter()
+                .filter(|item| item.action == TrayAction::Quit)
+                .count()
+        };
+        assert_eq!(quits(&idle), 1, "exactly one Quit row");
+        assert_eq!(quits(&running), 1);
+        assert_eq!(idle.title, "");
+        // The title counts live *tasks*, not app states: with no running task it stays empty
+        // even though an app state was set to Running in this fixture.
+        assert_eq!(running.title, "");
     }
 
     #[test]

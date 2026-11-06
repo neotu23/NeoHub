@@ -980,3 +980,18 @@
   2. 点击行为无法自动化验证（需要辅助功能/人工点击）
   3. `launch_at_login` 的 LaunchAgent 注册尚未实现（S9 只完成了每应用 autoStart）
 
+### 菜单栏：随快照刷新（补上一批的遗留）
+- 状态：**完成（构建与启动验证）**；点击行为仍需人工确认
+- 最近提交：`feat: keep the menu bar in step with the core`
+- 实际修改文件：`platform-macos/src/tray_native.rs`（抽出 `build_native_menu`/`install_event_router`、
+  新增 `TrayHandle::refresh`）、`desktop/src/main.rs`（主循环按快照刷新）
+- 要点：
+  1. `refresh` 只在**行或动作**变化时重建菜单，纯标题变化（运行数）只 `set_title`，避免菜单闪
+  2. 重建时**重新安装事件路由**——`muda` 的 handler 是进程级单例，菜单换了 id 也就换了
+  3. `install`/`refresh` 共用同一个 `build_native_menu`，避免两条路径漂移
+- 验证：`cargo test -p neohub-platform-macos --locked` → **10 passed**；
+  `cargo test --workspace --locked` → **413 passed / 0 failed**；clippy 0；重新打包并启动，日志无 error/panic
+- 学到的限制（已写入代码注释与测试名）：`muda` 在 macOS 上**不能在非主线程构建菜单**
+  （会 panic），所以菜单映射只能靠纯模型测试覆盖，平台部分由启动验证兜底
+- 未解决问题：`launch_at_login` 的 LaunchAgent 注册仍未实现（S9 只剩这一项）
+

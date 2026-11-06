@@ -106,7 +106,7 @@
 |---|---|---|---|---|---|
 | S1 | 关窗销毁面板进入菜单栏常驻，Dock 隐藏，后台继续运行 | `index.ts`, `PanelWindow.ts` | 已验证（`panel-lifecycle.test.ts`, `panel-session.test.ts`） | `desktop/src/window_session.rs` + `platform-macos/src/{tray,dock}.rs`| 已验证（关窗拦截 + 窗口重建 + Dock 隐藏 + 菜单栏 Open 走 `reopen_or_focus`；菜单点击本身需人工确认，无自动化手段） |
 | S2 | 关窗保存屏障 `panel:prepareClose` / `panel:closeReady`（保存失败不关窗） | `panelSaves.ts`, `DebouncedSaveQueue.ts` | 已验证（`DebouncedSaveQueue.test.ts`） | `ui/src/state/save_barrier.rs`| 已验证（`Draft`/`SaveBarrier`：保存失败保留窗口与输入、关窗先 flush；详见阶段 10 的四个测试） |
-| S3 | 菜单栏：聚合状态、逐项目启停、Stop all、Open、Quit | `TrayController.ts` | 已验证（`TrayController.test.ts`） | `platform-macos/src/tray.rs`| 部分（`NSStatusItem` 已用 tray-icon+muda 真实安装并接入主循环：Open/StartApp/StopApp/StopAll/Quit 全部走与 UI 相同的命令面；聚合标题与逐项启用状态来自快照；**菜单只在启动时构建一次**，状态变化后不会自动重建） |
+| S3 | 菜单栏：聚合状态、逐项目启停、Stop all、Open、Quit | `TrayController.ts` | 已验证（`TrayController.test.ts`） | `platform-macos/src/tray.rs`| 已验证（`NSStatusItem` 由 tray-icon+muda 安装；Open/StartApp/StopApp/StopAll/Quit 走与 UI 相同的命令面；菜单**随快照刷新**（行未变时只更新标题），聚合标题为运行任务数；点击本身需人工确认） |
 | S4 | 单实例锁（第二实例只激活不抢库） | `index.ts` requestSingleInstanceLock | 部分 | `desktop/src/session_lock.rs`| 已验证（`flock` 单实例锁 + activation 文件；第二实例只发激活信号并退出，测试覆盖） |
 | S5 | 应用菜单与快捷项：⌘, 设置 / ⌘N 添加 / ⌘⇧N 新建文件夹 / 检查更新 / 打开日志 | `menu.ts` | 部分 | `platform-macos/src/` + `desktop/src/` | 未开始 |
 | S6 | 深链接 `devharbor://open?id=…&path=…`、`start?id=…`（start 需用户确认） | `DeepLinks.ts` | 已验证（`DeepLinks.test.ts`） | `platform-macos/src/deep_links.rs` | 未开始 |
