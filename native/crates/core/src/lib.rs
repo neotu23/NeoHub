@@ -14,6 +14,7 @@ pub mod orchestrator;
 pub mod process;
 pub mod service;
 pub mod snapshot;
+pub mod update;
 pub mod watch;
 
 pub use catalog::{AppCatalog, CoreError, CoreResult, CreateAppInput, CreateTaskSpec};

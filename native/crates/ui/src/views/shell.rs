@@ -35,6 +35,8 @@ enum HostUpdate {
     History(AppId, Vec<neohub_domain::RunHistoryRow>),
     TaskSaved(Box<neohub_domain::Task>),
     TaskError(String),
+    UpdateChecked(neohub_core::update::UpdateStatus),
+    UpdateFailed(String),
     DatabaseExported(std::path::PathBuf),
     DatabaseReset(usize),
     DatabaseError(String),
@@ -68,6 +70,8 @@ pub struct HostBridge {
     last_app_save: Mutex<(Option<neohub_domain::App>, Option<String>)>,
     /// Message from the last database operation (export/reset/error).
     last_db_notice: Mutex<Option<String>>,
+    /// Outcome of the last update check: (status summary, has update).
+    last_update: Mutex<Option<(String, bool)>>,
     /// Outcome of the last settings save, picked up by the settings panel.
     last_settings: Mutex<(Option<neohub_domain::Settings>, Option<String>)>,
     /// Environment-variable loads/saves waiting to be folded into the editor.
@@ -113,6 +117,7 @@ impl HostBridge {
             last_save: Mutex::new((None, None)),
             last_app_save: Mutex::new((None, None)),
             last_db_notice: Mutex::new(None),
+            last_update: Mutex::new(None),
             last_settings: Mutex::new((None, None)),
             last_env: Mutex::new((Vec::new(), None)),
             session_store,
@@ -361,6 +366,19 @@ impl HostBridge {
         });
     }
 
+    /// Ask GitHub whether a newer release exists (blocking call, off the UI thread).
+    pub fn check_for_updates(&self) {
+        let sink = self.reply_sink.clone();
+        let current = env!("CARGO_PKG_VERSION").to_string();
+        self.runtime.spawn_blocking(move || {
+            let message = match neohub_core::update::check_blocking(&current) {
+                Ok(status) => HostUpdate::UpdateChecked(status),
+                Err(error) => HostUpdate::UpdateFailed(error),
+            };
+            let _ = sink.send(message);
+        });
+    }
+
     /// Reveal the app's own log file in Finder (creates the folder first).
     pub fn open_log_dir(&self) {
         let dir = self.data_dir.join("logs");
@@ -507,6 +525,7 @@ impl HostBridge {
         let mut notices: Vec<neohub_platform_macos::notify::Notification> = Vec::new();
         let mut saved_task: Option<neohub_domain::Task> = None;
         let mut db_notice_out: Option<String> = None;
+        let mut update_out: Option<(String, bool)> = None;
         let mut app_saved_out: Option<neohub_domain::App> = None;
         let mut app_save_error_out: Option<String> = None;
         let mut save_error: Option<String> = None;
@@ -615,6 +634,14 @@ impl HostBridge {
                         eprintln!("[ui] log export failed: {message}");
                         changed = true;
                     }
+                    HostUpdate::UpdateChecked(status) => {
+                        update_out = Some((status.summary(), status.is_available()));
+                        changed = true;
+                    }
+                    HostUpdate::UpdateFailed(message) => {
+                        update_out = Some((format!("检查更新失败：{message}"), false));
+                        changed = true;
+                    }
                     HostUpdate::DatabaseExported(path) => {
                         db_notice_out = Some(format!("数据库已导出到 {}", path.display()));
                         changed = true;
@@ -647,6 +674,11 @@ impl HostBridge {
             if let Err(error) = neohub_platform_macos::notify::send(&notice) {
                 eprintln!("[ui] notification failed: {error}");
             }
+        }
+        if let Some(update) = update_out
+            && let Ok(mut guard) = self.last_update.lock()
+        {
+            *guard = Some(update);
         }
         if let Some(notice) = db_notice_out
             && let Ok(mut guard) = self.last_db_notice.lock()
@@ -937,6 +969,16 @@ impl ShellView {
         cx.notify();
     }
 
+    /// Update-check outcome: (summary, has update), read without clearing so the panel keeps
+    /// showing the answer.
+    fn update_status(&self) -> Option<(String, bool)> {
+        self.bridge
+            .last_update
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone())
+    }
+
     /// Message from the last database operation, drained once per frame.
     fn take_db_notice(&self) -> Option<String> {
         self.bridge
@@ -986,6 +1028,9 @@ impl Render for ShellView {
         if let (Some(message), Some(_)) = (env_error, self.env.as_ref()) {
             eprintln!("[ui] env editor: {message}");
         }
+
+        // Read before any panel borrows `self` mutably.
+        let update_status_now = self.update_status();
 
         // Fold a completed app-configuration save back into the open panel.
         let (app_saved, app_error) = self.take_app_save_outcome();
@@ -2027,6 +2072,46 @@ impl Render for ShellView {
                             .text_color(palette.fg_muted)
                             .child("诊断与危险区"),
                     )
+                    .child({
+                        let check_bridge = bridge.clone();
+                        let (summary, has_update) = update_status_now.clone().unwrap_or_default();
+                        let mut row = div().flex().items_center().gap(px(metrics::GAP_2));
+                        row = row.child(
+                            div()
+                                .id("settings-check-update")
+                                .px(px(metrics::PAD_2))
+                                .py(px(metrics::GAP_1))
+                                .rounded(px(metrics::RADIUS_MD))
+                                .bg(palette.bg_elevated)
+                                .text_size(px(metrics::TEXT_SM))
+                                .cursor_pointer()
+                                .child("检查更新")
+                                .on_click(move |_, _, _| check_bridge.check_for_updates()),
+                        );
+                        if has_update {
+                            row = row.child(
+                                div()
+                                    .id("settings-download-update")
+                                    .px(px(metrics::PAD_2))
+                                    .py(px(metrics::GAP_1))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .bg(palette.accent)
+                                    .text_color(palette.accent_fg)
+                                    .text_size(px(metrics::TEXT_SM))
+                                    .cursor_pointer()
+                                    .child("打开下载页")
+                                    .on_click(move |_, _, _| {
+                                        let _ = neohub_core::update::open_releases_page();
+                                    }),
+                            );
+                        }
+                        row.child(
+                            div()
+                                .text_size(px(metrics::TEXT_XS))
+                                .text_color(palette.fg_subtle)
+                                .child(summary),
+                        )
+                    })
                     .child({
                         let log_bridge = bridge.clone();
                         div()

@@ -113,7 +113,7 @@
 | S7 | Open In：Finder/Terminal/VS Code/Cursor/Sublime + 能力探测 | `OpenIn.ts` | 部分 | `platform-macos/src/open_in.rs`| 已验证（`open_in`：五个目标、Finder 用 `open -R` 其余 `open -a`、按 `/Applications` 与 `~/Applications` 探测、缺目录先拒；详情页按本机已装目标生成按钮，点击分离启动） |
 | S8 | 崩溃/就绪桌面通知（受设置控制） | `index.ts` Notification | 部分 | `platform-macos/src/notifications.rs`| 部分（`notify` 模块：AppleScript `display notification`（ad-hoc 签名下 `UNUserNotificationCenter` 不投递）、引号/反斜杠/换行转义、只对**意外退出**通知；UI 在 TaskStatus 事件里按 `notify_on_crash` 开关发送，`notify_on_ready` 未接） |
 | S9 | 登录启动 `launch_at_login` + 每应用 `autoStart`（迁移 0007） | `Settings.ts`, `0007_app_autostart.sql` | 部分 | `platform-macos/src/login_item.rs`| 已验证（每应用 `autoStart` 在服务启动流程接线；`launch_at_login` 通过自写 LaunchAgent 实现：plist 由当前可执行文件生成、按设置 install/uninstall，主循环每 tick 校正漂移；真实 `launchctl` 往返已验证且无残留） |
-| S10 | 自动更新（electron-updater + UpdateBanner 进度/错误/说明） | `Updater.ts`, `UpdateBanner.tsx` | 已验证（`Updater.test.ts`，无 live feed） | `platform-macos/src/updater.rs` | 未开始 |
+| S10 | 自动更新（electron-updater + UpdateBanner 进度/错误/说明） | `Updater.ts`, `UpdateBanner.tsx` | 已验证（`Updater.test.ts`，无 live feed） | `platform-macos/src/updater.rs`| 部分（`update` 模块：GitHub Releases 检查、semver 版本比较（含 tag 归一化）、失败不误报、`open_releases_page`；设置面板「检查更新」+「打开下载页」；**不下载不安装**——ad-hoc 构建装不了更新，那会是安全回退） |
 | S11 | 崩溃/未捕获异常日志文件（`~/Library/Logs/…`）+ 打开日志目录 | `Logger.ts` | 部分 | `core/src/` + `platform-macos/`| 已验证（`~/Library/Logs/NeoHub/neohub.log`、UTC 时间戳、5 MiB 轮转、panic hook、设置面板「打开日志目录」） |
 
 ## 10. MCP 服务（22 个工具，全量保留）

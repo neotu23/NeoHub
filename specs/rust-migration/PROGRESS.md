@@ -1227,3 +1227,27 @@
   2. 通知实际弹出需人工确认（自动化不能点授权/看横幅）
   3. 用户在"系统设置 → 通知"里若禁用脚本宿主，通知不会出现
 
+### S10 更新检查
+- 状态：**检查可用**；下载/安装明确不做
+- 最近提交：`feat: check for a newer release`
+- 实际修改文件：新增 `core/src/update.rs`；更新 `core/{lib.rs,Cargo.toml}`（reqwest blocking+json）、
+  `ui/src/views/shell.rs`（桥接 `check_for_updates`、设置面板「检查更新」/「打开下载页」/状态文案）
+- 范围决定（写进模块文档）：**只检查与跳转下载**，不自动安装。安全地自动安装需要签名+公证的
+  bundle 与安装步骤；一个能给未签名构建装更新的通道是**安全回退**，不是功能。旧版 `electron-updater`
+  同样没有接 live feed（PROGRESS Phase 4 备注），所以这是"对齐 + 真实检查"，不是隐藏缺口。
+- 实现要点：
+  1. `normalise_version` 处理 `v1.4.0`/`1.4.0`/`release-1.4.0`，**部分版本（`v1.4`）不算版本**
+  2. 用 `semver` 比较：`1.10.0 > 1.9.9`（字符串比较会得出相反结论）
+  3. 任一侧无法解析 → 报"已是最新"并显示当前版本，**不猜有更新**
+  4. 缺 `html_url` 时回落到 releases 页面
+  5. 网络失败只在面板显示错误，不弹窗、不打断
+- 验证：
+  - `cargo test -p neohub-core --lib update` → **6 passed**
+  - **真实网络往返**（`--ignored`）：`check_blocking("0.0.1")` 从 api.github.com 拿到最新发布并判定
+    "有更新" —— 已实跑通过
+  - `cargo test --workspace --locked` → **461 passed / 0 failed**；clippy 0
+  - 重新打包（30 MB）并启动，日志无 error/panic
+- 未解决问题：
+  1. 没有自动安装（见上，属有意不做）
+  2. 没有"忽略此版本"记忆；每次打开面板点检查都会重新提示
+
