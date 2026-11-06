@@ -94,6 +94,8 @@ pub struct UiStore {
     import: ImportState,
     /// Run history per app, as loaded by the detail pane.
     history: BTreeMap<AppId, Vec<RunHistoryRow>>,
+    /// Parsed terminal text per task (readable, escapes already consumed).
+    terminal_text: BTreeMap<TaskId, String>,
 }
 
 impl UiStore {
@@ -106,6 +108,7 @@ impl UiStore {
             tag_filter: None,
             import: ImportState::default(),
             history: BTreeMap::new(),
+            terminal_text: BTreeMap::new(),
         }
     }
 
@@ -159,6 +162,14 @@ impl UiStore {
                     .insert(task.app_id.clone(), vec![task]);
             }
         }
+    }
+
+    pub fn set_terminal_text(&mut self, task_id: TaskId, text: String) {
+        self.terminal_text.insert(task_id, text);
+    }
+
+    pub fn terminal_text(&self, task_id: &TaskId) -> Option<&str> {
+        self.terminal_text.get(task_id).map(String::as_str)
     }
 
     pub fn set_history(&mut self, app_id: AppId, rows: Vec<RunHistoryRow>) {

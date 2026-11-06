@@ -376,6 +376,11 @@ impl LogStore {
         }
     }
 
+    /// Parsed terminal text (scrollback + grid, escape sequences already consumed).
+    pub fn terminal_text(&self, task_id: &TaskId) -> Option<String> {
+        self.logs.get(task_id).map(|log| log.terminal.to_text())
+    }
+
     pub fn terminal_snapshot(
         &self,
         task_id: &TaskId,

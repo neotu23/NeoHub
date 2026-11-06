@@ -80,6 +80,17 @@ pub enum CoreCommand {
         query: String,
         options: crate::logs::SearchOptions,
     },
+    /// Parsed terminal text (readable).
+    GetTerminalText {
+        task_id: TaskId,
+    },
+    /// Write one task's logs to a file. `raw = true` keeps escape sequences byte-for-byte;
+    /// `raw = false` writes the parsed, human-readable text.
+    ExportLogs {
+        task_id: TaskId,
+        path: PathBuf,
+        raw: bool,
+    },
     /// Drop one task's retained logs. Never touches the process.
     ClearLogs {
         task_id: TaskId,
@@ -113,5 +124,7 @@ pub enum CoreReply {
     RunHistory(Vec<neohub_domain::RunHistoryRow>),
     LogBootstrap(LogSubscriptionOutcome),
     LogMatches(Vec<(TaskId, LineMatch)>),
+    /// Absolute path written by `ExportLogs`.
+    Exported(PathBuf),
     Ack,
 }

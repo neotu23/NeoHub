@@ -1248,6 +1248,28 @@ impl CoreHandle {
                 };
                 Ok(CoreReply::LogMatches(matches))
             }
+            CoreCommand::GetTerminalText { task_id } => {
+                Ok(CoreReply::Logs(self.service.runner.terminal_text(&task_id)))
+            }
+            CoreCommand::ExportLogs { task_id, path, raw } => {
+                let contents = if raw {
+                    self.service.runner.logs_of(&task_id)
+                } else {
+                    self.service.runner.terminal_text(&task_id)
+                };
+                let write_to = path.clone();
+                tokio::task::spawn_blocking(move || std::fs::write(&write_to, contents))
+                    .await
+                    .map_err(|err| DomainError::InvalidInput {
+                        field: "path",
+                        message: err.to_string(),
+                    })?
+                    .map_err(|err| DomainError::InvalidInput {
+                        field: "path",
+                        message: err.to_string(),
+                    })?;
+                Ok(CoreReply::Exported(path))
+            }
             CoreCommand::ClearLogs { task_id } => {
                 self.service.runner.clear_logs(&task_id);
                 Ok(CoreReply::Ack)

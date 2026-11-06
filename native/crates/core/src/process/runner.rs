@@ -242,6 +242,16 @@ impl TaskRunner {
         text[start..].to_string()
     }
 
+    /// Parsed terminal text for one task (readable export / view).
+    pub fn terminal_text(&self, task_id: &TaskId) -> String {
+        self.inner
+            .logs
+            .lock()
+            .expect("logs lock")
+            .terminal_text(task_id)
+            .unwrap_or_default()
+    }
+
     /// Take a subscription bootstrap (terminal + cursor + bounded raw tail).
     pub fn bootstrap_logs(
         &self,

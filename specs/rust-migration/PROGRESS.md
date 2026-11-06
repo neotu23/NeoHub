@@ -560,7 +560,7 @@
     3. db danger zone（导出/重置）→ 阶段 15
 
 ### 阶段 11：原生终端、日志搜索与导出
-- 状态：**开发中**（终端视图模型/选择/搜索完成并测试；详情页日志区渲染与导出命令待做）
+- 状态：**开发中**（终端视图/选择/搜索 + 详情页终端渲染 + 导出完成；全局搜索视图与 ANSI 颜色待做）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: add the native terminal view, selection and search`
 - 实际修改文件：新增 `native/crates/ui/src/terminal/{mod,view,selection,search}.rs`、
@@ -584,3 +584,18 @@
   4. 人工截图对比旧版 xterm 与本实现 → 需要用户桌面会话
 
 ---
+
+- 第二批完成（2026-11-07T02:20Z–02:45Z UTC）：
+  - core：`GetTerminalText`（已解析文本，含 scrollback）与 `ExportLogs { path, raw }`
+    （`raw=true` 保留 ANSI 原始字节，`raw=false` 写可读文本；写文件在 `spawn_blocking` 里）
+  - ui：详情页日志区改为渲染 `TerminalView`（默认 16 行可视区）；工具条含「跟随」「↑」「↓」
+    「导出可读」「导出原始」；选中任务变化或行数变化时重建视图并请求文本
+  - 验证：`cargo test -p neohub-core --test log_export` → **2 passed**
+    （可读文本无转义且 CR 覆写只保留最后一帧；原始导出含 ANSI；未知任务导出为空文件而非报错）
+    `cargo test --workspace --locked` → **336 passed / 0 failed**；clippy **0 warnings**；
+    实机启动 7 s 无 stderr
+  - 未解决问题：
+    1. 终端渲染目前是纯文本行（未按 ANSI 上色、未用等宽字体）；颜色需要把 SGR 状态带出解析器
+    2. 日志区刷新依赖"行数变化"触发，尚未做 33 ms/16 KiB 合批与可见性门控（阶段 9 记录的剩余项）
+    3. 全局日志搜索视图（跨任务定位 + 点击跳转）仍待做
+

@@ -42,6 +42,9 @@ enum HostUpdate {
         Vec<neohub_core::service::EnvVarView>,
     ),
     EnvError(String),
+    Terminal(TaskId, String),
+    Exported(std::path::PathBuf),
+    ExportError(String),
     Error(String),
 }
 
@@ -60,6 +63,8 @@ pub struct HostBridge {
     /// Environment-variable loads/saves waiting to be folded into the editor.
     last_env: Mutex<(Vec<EnvUpdate>, Option<String>)>,
     session_store: SessionStore,
+    /// Data directory (log exports land in `<data>/logs`).
+    data_dir: PathBuf,
 }
 
 impl HostBridge {
@@ -99,6 +104,7 @@ impl HostBridge {
             last_settings: Mutex::new((None, None)),
             last_env: Mutex::new((Vec::new(), None)),
             session_store,
+            data_dir: data_dir.clone(),
         });
         bridge.refresh_snapshot();
         bridge
@@ -176,6 +182,61 @@ impl HostBridge {
                 Ok(CoreReply::Task(task)) => HostUpdate::TaskSaved(task),
                 Ok(other) => HostUpdate::TaskError(format!("unexpected save reply: {other:?}")),
                 Err(err) => HostUpdate::TaskError(err.to_string()),
+            };
+            let _ = sink.send(message);
+        });
+    }
+
+    /// Where exported logs are written.
+    pub fn logs_dir(&self) -> PathBuf {
+        self.data_dir.join("logs")
+    }
+
+    /// Load one task's parsed terminal text.
+    pub fn load_terminal(&self, task_id: TaskId) {
+        let handle = self.handle.clone();
+        let sink = self.reply_sink.clone();
+        self.runtime.spawn(async move {
+            let reply = handle
+                .request(CoreCommand::GetTerminalText {
+                    task_id: task_id.clone(),
+                })
+                .await;
+            let message = match reply {
+                Ok(CoreReply::Logs(text)) => HostUpdate::Terminal(task_id, text),
+                Ok(_) => HostUpdate::ExportError("unexpected terminal reply".into()),
+                Err(err) => HostUpdate::ExportError(err.to_string()),
+            };
+            let _ = sink.send(message);
+        });
+    }
+
+    /// Export one task's logs into the data directory (`logs/`), returning the written path
+    /// through the update channel.
+    pub fn export_logs(&self, task_id: TaskId, logs_dir: std::path::PathBuf, raw: bool) {
+        let handle = self.handle.clone();
+        let sink = self.reply_sink.clone();
+        self.runtime.spawn(async move {
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_millis())
+                .unwrap_or(0);
+            let name = format!("{}-{stamp}{}.log", task_id, if raw { "-raw" } else { "" });
+            let path = logs_dir.join(name);
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let reply = handle
+                .request(CoreCommand::ExportLogs {
+                    task_id,
+                    path: path.clone(),
+                    raw,
+                })
+                .await;
+            let message = match reply {
+                Ok(CoreReply::Exported(written)) => HostUpdate::Exported(written),
+                Ok(_) => HostUpdate::ExportError("unexpected export reply".into()),
+                Err(err) => HostUpdate::ExportError(err.to_string()),
             };
             let _ = sink.send(message);
         });
@@ -389,6 +450,18 @@ impl HostBridge {
                         env_error_out = Some(message);
                         changed = true;
                     }
+                    HostUpdate::Terminal(task_id, text) => {
+                        store.set_terminal_text(task_id, text);
+                        changed = true;
+                    }
+                    HostUpdate::Exported(path) => {
+                        eprintln!("[ui] exported logs to {}", path.display());
+                        changed = true;
+                    }
+                    HostUpdate::ExportError(message) => {
+                        eprintln!("[ui] log export failed: {message}");
+                        changed = true;
+                    }
                     HostUpdate::Error(message) => {
                         store.set_import_error(message);
                         changed = true;
@@ -479,6 +552,12 @@ pub struct ShellView {
     env_text: TextField,
     env_paste: TextField,
     env_focus: FocusHandle,
+    /// Rendered terminal for the selected task.
+    terminal: Option<crate::terminal::TerminalView>,
+    terminal_follow: bool,
+    terminal_height: usize,
+    /// Task the rendered terminal belongs to (avoids rebuilding every frame).
+    terminal_task: Option<TaskId>,
 }
 
 impl ShellView {
@@ -502,6 +581,10 @@ impl ShellView {
             env_text: TextField::new(""),
             env_paste: TextField::new(""),
             env_focus,
+            terminal: None,
+            terminal_follow: true,
+            terminal_height: 16,
+            terminal_task: None,
         }
     }
 
@@ -2134,39 +2217,189 @@ impl Render for ShellView {
                         main = main.child(panel);
                     }
 
-                    // Log tail from the live event stream.
-                    let logs = {
-                        let store = self.bridge.store.lock().expect("store lock");
-                        store.logs_of(&task.id)
-                    };
-                    let tail: String = logs
-                        .lines()
-                        .rev()
-                        .take(20)
-                        .collect::<Vec<_>>()
-                        .into_iter()
-                        .rev()
-                        .collect::<Vec<_>>()
-                        .join(
-                            "
-",
-                        );
-                    main = main.child(
-                        div()
+                    // Terminal pane: parsed rows from the core, with follow/scroll/export.
+                    {
+                        let source = {
+                            let store = self.bridge.store.lock().expect("store lock");
+                            store.terminal_text(&task.id).map(str::to_string)
+                        };
+                        if self.terminal_task.as_ref() != Some(&task.id) || self.terminal.is_none()
+                        {
+                            self.terminal_task = Some(task.id.clone());
+                            self.terminal = Some(match &source {
+                                Some(text) => crate::terminal::TerminalView::from_text(text),
+                                None => crate::terminal::TerminalView::from_text(""),
+                            });
+                            self.bridge.load_terminal(task.id.clone());
+                        } else if let Some(text) = &source {
+                            let rebuilt = crate::terminal::TerminalView::from_text(text);
+                            let stale = self
+                                .terminal
+                                .as_ref()
+                                .map(|view| view.total_rows() != rebuilt.total_rows())
+                                .unwrap_or(true);
+                            if stale {
+                                self.terminal = Some(rebuilt);
+                            }
+                        }
+
+                        let mut tools = div().flex().gap(px(metrics::GAP_1)).items_center();
+                        {
+                            let entity = cx.entity().downgrade();
+                            tools = tools.child(
+                                div()
+                                    .id("term-follow")
+                                    .px(px(metrics::PAD_2))
+                                    .py(px(1.0))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .bg(if self.terminal_follow {
+                                        palette.accent
+                                    } else {
+                                        palette.bg_elevated
+                                    })
+                                    .text_color(if self.terminal_follow {
+                                        palette.accent_fg
+                                    } else {
+                                        palette.fg_muted
+                                    })
+                                    .text_size(px(metrics::TEXT_XS))
+                                    .cursor_pointer()
+                                    .child("跟随")
+                                    .on_click(move |_, _, cx| {
+                                        let _ = entity.update(cx, |this, cx| {
+                                            this.terminal_follow = true;
+                                            if let Some(view) = this.terminal.as_mut() {
+                                                view.follow_tail();
+                                            }
+                                            cx.notify();
+                                        });
+                                    }),
+                            );
+                        }
+                        {
+                            let entity = cx.entity().downgrade();
+                            tools = tools.child(
+                                div()
+                                    .id("term-up")
+                                    .px(px(metrics::PAD_2))
+                                    .py(px(1.0))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .bg(palette.bg_elevated)
+                                    .text_size(px(metrics::TEXT_XS))
+                                    .cursor_pointer()
+                                    .child("↑")
+                                    .on_click(move |_, _, cx| {
+                                        let _ = entity.update(cx, |this, cx| {
+                                            let height = this.terminal_height;
+                                            if let Some(view) = this.terminal.as_mut() {
+                                                view.scroll_up(5, height);
+                                            }
+                                            this.terminal_follow = false;
+                                            cx.notify();
+                                        });
+                                    }),
+                            );
+                        }
+                        {
+                            let entity = cx.entity().downgrade();
+                            tools = tools.child(
+                                div()
+                                    .id("term-down")
+                                    .px(px(metrics::PAD_2))
+                                    .py(px(1.0))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .bg(palette.bg_elevated)
+                                    .text_size(px(metrics::TEXT_XS))
+                                    .cursor_pointer()
+                                    .child("↓")
+                                    .on_click(move |_, _, cx| {
+                                        let _ = entity.update(cx, |this, cx| {
+                                            let height = this.terminal_height;
+                                            let follow = this
+                                                .terminal
+                                                .as_mut()
+                                                .map(|view| view.scroll_down(5, height).1)
+                                                .unwrap_or(true);
+                                            this.terminal_follow = follow;
+                                            cx.notify();
+                                        });
+                                    }),
+                            );
+                        }
+                        {
+                            let bridge = self.bridge.clone();
+                            let entity = cx.entity().downgrade();
+                            let task_id = task.id.clone();
+                            tools = tools.child(
+                                div()
+                                    .id("term-export")
+                                    .px(px(metrics::PAD_2))
+                                    .py(px(1.0))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .bg(palette.bg_elevated)
+                                    .text_size(px(metrics::TEXT_XS))
+                                    .cursor_pointer()
+                                    .child("导出可读")
+                                    .on_click(move |_, _, cx| {
+                                        bridge.export_logs(
+                                            task_id.clone(),
+                                            bridge.logs_dir(),
+                                            false,
+                                        );
+                                        let _ = entity.update(cx, |_, cx| cx.notify());
+                                    }),
+                            );
+                        }
+                        {
+                            let bridge = self.bridge.clone();
+                            let entity = cx.entity().downgrade();
+                            let task_id = task.id.clone();
+                            tools = tools.child(
+                                div()
+                                    .id("term-export-raw")
+                                    .px(px(metrics::PAD_2))
+                                    .py(px(1.0))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .bg(palette.bg_elevated)
+                                    .text_size(px(metrics::TEXT_XS))
+                                    .cursor_pointer()
+                                    .child("导出原始")
+                                    .on_click(move |_, _, cx| {
+                                        bridge.export_logs(
+                                            task_id.clone(),
+                                            bridge.logs_dir(),
+                                            true,
+                                        );
+                                        let _ = entity.update(cx, |_, cx| cx.notify());
+                                    }),
+                            );
+                        }
+                        main = main.child(tools);
+
+                        let height = self.terminal_height;
+                        let follow = self.terminal_follow;
+                        let rows = self
+                            .terminal
+                            .as_ref()
+                            .map(|view| view.visible(height, follow))
+                            .unwrap_or_default();
+                        let mut pane = div()
                             .flex()
                             .flex_col()
                             .flex_1()
-                            .p(px(metrics::PAD_3))
+                            .p(px(metrics::PAD_2))
                             .rounded(px(metrics::RADIUS_MD))
                             .bg(palette.bg_surface)
                             .text_size(px(metrics::TEXT_XS))
-                            .text_color(palette.fg_muted)
-                            .child(if tail.is_empty() {
-                                "（还没有日志输出）".to_string()
-                            } else {
-                                tail
-                            }),
-                    );
+                            .text_color(palette.fg_muted);
+                        if rows.is_empty() {
+                            pane = pane.child("（还没有日志输出）".to_string());
+                        }
+                        for row in rows {
+                            pane = pane.child(row.text);
+                        }
+                        main = main.child(pane);
+                    }
                 }
 
                 // Run history.
