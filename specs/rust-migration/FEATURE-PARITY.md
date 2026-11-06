@@ -64,9 +64,9 @@
 | # | 功能 | 旧版源码依据 | 旧版基线 | Rust 目标 | Rust 状态 |
 |---|---|---|---|---|---|
 | E1 | 三层作用域 Global → App → Task 覆盖（`env_vars.scope` 部分唯一索引） | `EnvStore.ts`, `EnvBuilder.ts`, `0006_env_scope_unique.sql` | 已验证（`EnvLayering.test.ts` 9 例） | `core/src/environment/env_builder.rs` | 未开始 |
-| E2 | `.env*` 文件优先级 `.env` → `.env.development` → `.env.local` → `.env.development.local` | `src/shared/dotenv.ts` | 已验证（EnvLayering） | `core/src/environment/dotenv.rs` | 未开始 |
-| E3 | 进程控制键保护：项目 `.env` 不能覆盖 `PATH/NODE_OPTIONS/NODE_PATH/DYLD_*/LD_*` | `EnvBuilder.ts` | 已验证 | `core/src/environment/env_builder.rs` | 未开始 |
-| E4 | 强制 `FORCE_COLOR=1`、`TERM=xterm-256color` | `EnvBuilder.ts` | 已验证 | `core/src/environment/env_builder.rs` | 未开始 |
+| E2 | `.env*` 文件优先级 `.env` → `.env.development` → `.env.local` → `.env.development.local` | `src/shared/dotenv.ts` | 已验证（EnvLayering） | `core/src/environment/dotenv.rs` | 已验证（`.env`→`.env.development`→`.env.local`→`.env.development.local`，多行/引号/转义有测试） |
+| E3 | 进程控制键保护：项目 `.env` 不能覆盖 `PATH/NODE_OPTIONS/NODE_PATH/DYLD_*/LD_*` | `EnvBuilder.ts` | 已验证 | `core/src/environment/env_builder.rs` | 已验证（`PATH/NODE_OPTIONS/NODE_PATH/DYLD_*/LD_*` 被项目文件丢弃；UI 变量仍可覆盖） |
+| E4 | 强制 `FORCE_COLOR=1`、`TERM=xterm-256color` | `EnvBuilder.ts` | 已验证 | `core/src/environment/env_builder.rs` | 已验证（`FORCE_COLOR=1`、`TERM=xterm-256color` 强制写入） |
 | E5 | 秘密值加密存储（Electron `safeStorage` → `enc1:` 前缀） | `EnvStore.ts` | 部分（依赖 Keychain，未在测试中断言解密） | `storage/src/secrets.rs` + `platform-macos/src/keychain.rs` | 未开始 |
 | E6 | 密钥不可用时报 `SecretUnavailable` 并阻止受影响任务启动 | 计划要求（旧版行为需在阶段 4 复核） | **待复核** | `core/src/environment/` | 未开始 |
 | E7 | 环境变量编辑 UI：三 tab、启用开关、秘密遮挡、备注、批量粘贴、合并预览 | `EnvEditor.tsx` | 部分（截图 missing，见 BASELINE §5） | `ui/src/views/env_editor.rs` | 未开始 |
@@ -78,7 +78,7 @@
 |---|---|---|---|---|---|
 | N1 | 版本管理器检测 nvm/fnm/volta/asdf/system + `node:list` | `NodeResolver.ts` | 已验证（5 例，含特殊字符路径） | `core/src/environment/node_resolver.rs` | 未开始 |
 | N2 | 版本选择规则 `.nvmrc` / `.node-version` / `engines.node`（semver）+ 不自动安装 | `NodeResolver.ts` | 已验证 | `core/src/environment/node_resolver.rs` | 未开始 |
-| N3 | Finder 启动无终端 PATH：登录 shell PATH 探测（有超时与缓存） | `PathProbe.ts` | 已验证（3 例） | `core/src/environment/path_probe.rs` | 未开始 |
+| N3 | Finder 启动无终端 PATH：登录 shell PATH 探测（有超时与缓存） | `PathProbe.ts` | 已验证（3 例） | `core/src/environment/path_probe.rs` | 部分（探测/哨兵解析/超时/缓存已实现并测试；尚未接到启动流程） |
 | N4 | `node:resolve` 单应用解析 | `ipc/index.ts` | 部分 | `core/src/environment/` | 未开始 |
 
 ## 7. 就绪与编排

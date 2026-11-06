@@ -4,5 +4,6 @@
 //! state. GPUI types must never appear here (`native/docs/interfaces.md`).
 
 pub mod catalog;
+pub mod environment;
 
 pub use catalog::{AppCatalog, CoreError, CoreResult, CreateAppInput, CreateTaskSpec};

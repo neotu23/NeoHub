@@ -140,3 +140,32 @@
   先建 fixture（空格/中文路径、软链、损坏 JSON、monorepo、缺 Node 版本、不同包管理器）再实现。
 
 ---
+
+### 阶段 4：Node 环境、项目检测、环境变量和密钥接口
+- 状态：**开发中**（3/6 子项完成：`.env` 解析、环境分层、登录 shell PATH 探测）
+- 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`，代码在 `native/`
+- 最近提交：`feat: port dotenv parsing and env layering`
+- 已完成并验证：
+  - `native/crates/core/src/environment/dotenv.rs`：`.env` 解析（`export` 前缀、跨行双引号、
+    转义展开、单引号字面、行内注释、非法键跳过、未闭合引号退化为单行），`is_secret_key` 启发式
+  - `native/crates/core/src/environment/env_builder.rs`：五层覆盖（白名单 OS → 计算 PATH →
+    项目 `.env` 文件 → global/app/task → 强制 `FORCE_COLOR`/`TERM`），进程控制键保护，
+    disabled 跳过、空字符串保留
+  - `native/crates/core/src/environment/path_probe.rs`：登录 shell 探测（`-l -i`）、哨兵提取、
+    3 s 超时、成功缓存/失败可重试
+- 验证命令与结果（2026-11-06T13:40Z–14:05Z UTC）：
+  - `cargo test --workspace --locked` → exit 0，**64 passed / 0 failed**
+    （其中 core 单元 25：dotenv 7、env_builder 7、path_probe 5、graph 5、migrations 等）
+  - `cargo clippy -p neohub-core --all-targets --locked` → 0 warnings
+  - `cargo fmt --all` 已执行
+- 未完成（本阶段剩余）：`node_resolver`（nvm/fnm/volta/asdf/system + `.nvmrc`/`.node-version`/
+  `engines.node` + semver 选择）、`detect`（package.json scripts、PM 探测、monorepo workspaces）、
+  `storage/src/secrets.rs` + `platform-macos/src/keychain.rs`（假 SecretStore 正常/锁定/损坏三态 +
+  `SecretUnavailable`），以及 `core/tests/{environment,detection}.rs` 的 fixture 套件。
+- 与旧版不同之处：环境构建改为纯函数（注入 `os_env`/`login_path`/`project_dir`/三层变量），
+  便于在不启动进程的情况下断言；语义与旧版逐层一致（含控制键保护与空值保留）。
+- 下一项具体动作：实现 `node_resolver.rs`（先用假 home 目录构造 nvm/fnm/volta/asdf 布局的 fixture，
+  写 `.nvmrc`/`.node-version`/`engines.node` 失败测试，再实现扫描与选择），然后 `detect.rs`，
+  最后 secrets/keychain + `tests/{environment,detection}.rs`。
+
+---
