@@ -627,7 +627,7 @@
     3. 快捷键 ⌘⇧F/⌘K 的键位绑定待阶段 12 与菜单一起接
 
 ### 阶段 12：窗口销毁、菜单栏、Dock、单实例
-- 状态：**开发中**（生命周期状态机与单实例锁完成并测试；GPUI 窗口销毁/重建、托盘与 Dock 实机接线待做）
+- 状态：**开发中**（生命周期状态机、单实例锁、GPUI 窗口销毁/重建与激活轮询完成；托盘/Dock 实机接线待做）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: add the window lifecycle and single-instance lock`
 - 实际修改文件：新增 `native/crates/desktop/src/{lib,session_lock,window_session}.rs`、
@@ -653,3 +653,20 @@
   4. 第二实例把激活信号送达主实例（当前只写文件，主实例轮询读取的逻辑待接）
 
 ---
+
+- 第二批完成（2026-11-07T04:25Z–04:50Z UTC）：
+  - `desktop/src/app_host.rs`：`open_main_window` / `reopen_or_focus` / `ActivationWatcher`
+    - 关窗拦截用 GPUI 的 `window.on_window_should_close`：返回 false 时窗口保持（保存失败分支），
+      否则捕获 bounds → `AppHost::finish_close` → 允许销毁
+    - 窗口可**再次** `open_window` 创建（同一进程、同一核心），`reopen_or_focus` 在窗口已存在时只激活
+    - `ActivationWatcher` 轮询激活文件（每 500 ms，一次 stat，无 shell、无数据库访问）
+  - `main.rs`：单实例锁 → tokio runtime → CoreService → AppHost/SharedHost → 打开窗口 → 轮询激活
+  - 实机验证：先启动一个实例，再启动第二个 → 第二实例**立即退出**并打印激活文件路径；
+    `/tmp/.../neohub.activate` 被创建；第一个实例仍在运行
+  - `cargo test --workspace --locked` → **354 passed / 0 failed**；clippy **0 warnings**；`cargo fmt --all`
+  - 未解决问题：
+    1. 托盘（NSStatusItem/tray-icon）与 Dock 隐藏/恢复的实机调用、逐项目启停菜单 → 本阶段剩余
+    2. Cmd+W 的键位绑定（当前只有窗口关闭按钮路径）
+    3. 把 `window-state.json` 落盘（现在 bounds 只在进程内捕获）
+    4. 打包 `.app` 上验证 Dock/Finder 激活与"最后窗口关闭后事件循环不退出" → 阶段 15
+

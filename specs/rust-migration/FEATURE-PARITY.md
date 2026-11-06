@@ -104,7 +104,7 @@
 
 | # | 功能 | 旧版源码依据 | 旧版基线 | Rust 目标 | Rust 状态 |
 |---|---|---|---|---|---|
-| S1 | 关窗销毁面板进入菜单栏常驻，Dock 隐藏，后台继续运行 | `index.ts`, `PanelWindow.ts` | 已验证（`panel-lifecycle.test.ts`, `panel-session.test.ts`） | `desktop/src/window_session.rs` + `platform-macos/src/{tray,dock}.rs`| 部分（`AppHost` 生命周期：关窗不 Shutdown、Dock 依据 tray 设置隐藏/恢复、重开恢复选择与 bounds；GPUI 窗口销毁/重建与托盘实机接线待做） |
+| S1 | 关窗销毁面板进入菜单栏常驻，Dock 隐藏，后台继续运行 | `index.ts`, `PanelWindow.ts` | 已验证（`panel-lifecycle.test.ts`, `panel-session.test.ts`） | `desktop/src/window_session.rs` + `platform-macos/src/{tray,dock}.rs`| 部分（`AppHost` + GPUI 窗口可销毁/重建：关窗拦截 `on_window_should_close`、bounds 捕获与恢复、激活轮询重开；托盘与 Dock 实机调用待做） |
 | S2 | 关窗保存屏障 `panel:prepareClose` / `panel:closeReady`（保存失败不关窗） | `panelSaves.ts`, `DebouncedSaveQueue.ts` | 已验证（`DebouncedSaveQueue.test.ts`） | `ui/src/state/save_barrier.rs`| 已验证（`Draft`/`SaveBarrier`：保存失败保留窗口与输入、关窗先 flush；详见阶段 10 的四个测试） |
 | S3 | 菜单栏：聚合状态、逐项目启停、Stop all、Open、Quit | `TrayController.ts` | 已验证（`TrayController.test.ts`） | `platform-macos/src/tray.rs`| 部分（`AppHost` 已有 Open/quit 语义与逐项目状态来源；托盘 UI 与逐项目菜单待做） |
 | S4 | 单实例锁（第二实例只激活不抢库） | `index.ts` requestSingleInstanceLock | 部分 | `desktop/src/session_lock.rs`| 已验证（`flock` 单实例锁 + activation 文件；第二实例只发激活信号并退出，测试覆盖） |
@@ -176,7 +176,7 @@
 | U14 | 主题系统（Radix slate 语义变量、light/dark/system、终端浅色主题） | `styles.css`, `useTheme.ts`, `tailwind.config.ts` | 部分（截图 light/dark） | `ui/src/theme.rs`| 部分（两套调色板 + 间距/圆角/字号常量已接入视图；主题切换跟随设置） |
 | U15 | 国际化 en / zh-CN + `system` 跟随系统（19 组文案命名空间） | `i18n/locales/*`, `useLanguage.ts` | 已验证（`i18n` 4 个测试文件 17 例） | `ui/locales/`| 已验证（中英双语包内嵌，缺 key 回退英文再回退 key；`system` 按 LANG 解析；两语言 key 对齐有测试） |
 | U16 | 无障碍：焦点陷阱 `useDialog`、Esc、键盘可导航菜单、`aria-label`、非颜色状态线索 | `hooks/useDialog.ts` | 部分 | `ui/src/components/`| 部分（Tab/Shift-Tab 焦点与 Esc 清空已接到筛选框；抽屉内焦点陷阱待做） |
-| U17 | 窗口尺寸/位置持久化 `window-state.json` | `index.ts` loadBounds/saveBounds | 部分 | `desktop/src/window_session.rs` | 未开始 |
+| U17 | 窗口尺寸/位置持久化 `window-state.json` | `index.ts` loadBounds/saveBounds | 部分 | `desktop/src/window_session.rs`| 部分（关窗时捕获窗口 bounds 并在重开时恢复；`window-state.json` 落盘待接） |
 | U18 | 导航会话持久化（view/selectedAppId/selectedTaskByApp、排序、分组模式） | `store.ts`, `sortApps.ts` | 已验证（`panel-session.test.ts`） | `ui/src/state/session.rs`| 已验证（`session.json` 持久化 view/selectedAppId/selectedTaskByApp/sort/groupBy，失效引用回退仪表盘） |
 | U19 | 编辑草稿与防抖保存队列（MCP 刷新不覆盖在途编辑） | `DebouncedSaveQueue.ts`, `useDebouncedSave.ts` | 已验证（`DebouncedSaveQueue.test.ts`） | `ui/src/state/{edit_session,save_barrier}.rs`| 已验证（`Draft` 修订号 + `SaveBarrier`：外部刷新不覆盖在途编辑、陈旧保存不覆盖新编辑、失败保留输入） |
 
