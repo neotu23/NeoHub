@@ -410,7 +410,7 @@
        上述 `import_flow` 测试从命令层验证了同一链路
 
 ### 阶段 10：项目详情、任务编辑、环境变量与设置
-- 状态：**开发中**（详情页 + 任务编辑器完成；设置命令面与表单模型完成，面板视图与环境变量编辑器待做）
+- 状态：**开发中**（详情页、任务编辑器、设置面板完成；环境变量编辑器与 db danger zone 待做）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: add edit drafts, save barrier and locales`
 - 实际修改文件：新增 `native/crates/ui/src/state/edit_session.rs`、
@@ -515,4 +515,17 @@
     1. 设置面板的**视图**尚未渲染（模型与命令已就绪）
     2. 依赖系统集成的四项（登录启动/菜单栏/通知/MCP）只存储与展示，实际生效在阶段 12/14/15
     3. 环境变量编辑器（三层 + 秘密遮挡 + 掩码不回写）仍待做
+
+- 第七批完成（2026-11-07T00:30Z–00:50Z UTC）：
+  - 设置面板渲染进窗口：侧栏「设置」开关；主题（深色/浅色/跟随系统）与语言（系统/中文/English）
+    三选一；8 个开关（自动更新/崩溃通知/就绪通知/登录启动/菜单栏/MCP 启用/要求 Token/HTTPS）；
+    6 个数值项用 −/+ 步进（范围由 domain clamp 兜底，不需要自由输入，避免非法中间状态）；
+    「待接入」项以警示条单列；保存后回收结果并 `ack` 清脏
+  - `HostBridge::save_settings` + `HostUpdate::{SettingsSaved,SettingsError}` + `UiStore::{set_settings,settings}`
+  - 验证：`cargo test --workspace --locked` → **299 passed / 0 failed**；clippy **0 warnings**；
+    `cargo fmt --all`；实机启动 7 s 无 stderr（含设置面板的界面不崩）
+  - 未解决问题：
+    1. 设置面板的点击路径（开关/步进/保存）在实机上仍需人工确认一次（本会话无辅助功能权限）
+    2. db danger zone（导出/重置）需要平台对话框与 WAL 安全导出 → 阶段 15
+    3. 环境变量编辑器（Global/App/Task 三层 + 秘密遮挡 + 掩码不回写）仍待做
 

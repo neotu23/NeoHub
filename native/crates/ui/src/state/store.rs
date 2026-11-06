@@ -8,7 +8,7 @@ use crate::state::session::{AppSort, GroupBy, Session};
 use neohub_core::environment::ImportCandidate;
 use neohub_core::events::{CoreEvent, CoreEventKind};
 use neohub_core::snapshot::CoreSnapshot;
-use neohub_domain::{App, AppId, ProcessState, RunHistoryRow, Task, TaskId};
+use neohub_domain::{App, AppId, ProcessState, RunHistoryRow, Settings, Task, TaskId};
 use std::collections::BTreeMap;
 
 /// Cap for the in-memory log tail per task shown in the detail pane.
@@ -127,6 +127,20 @@ impl UiStore {
 
     pub fn filter(&self) -> &str {
         &self.filter
+    }
+
+    /// Adopt settings that were just stored (or arrived from another writer).
+    pub fn set_settings(&mut self, settings: Settings) {
+        if let Some(snapshot) = self.snapshot.as_mut() {
+            snapshot.settings = settings;
+        }
+    }
+
+    pub fn settings(&self) -> Settings {
+        self.snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.settings.clone())
+            .unwrap_or_default()
     }
 
     /// Replace one task in place (after a successful save) so the tabs show the new name.

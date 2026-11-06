@@ -5,6 +5,7 @@
 //! results come back as events, which the pump applies before the next frame.
 
 use crate::state::session::{Session, SessionStore};
+use crate::state::settings_form::{NumberField, SettingsForm, pending_native_fields};
 use crate::state::store::UiStore;
 use crate::state::task_form::{Field, ReadinessChoice, TaskForm};
 use crate::state::text_input::{KeyOutcome, TextField};
@@ -27,6 +28,8 @@ enum HostUpdate {
     History(AppId, Vec<neohub_domain::RunHistoryRow>),
     TaskSaved(Box<neohub_domain::Task>),
     TaskError(String),
+    SettingsSaved(Box<neohub_domain::Settings>),
+    SettingsError(String),
     Error(String),
 }
 
@@ -40,6 +43,8 @@ pub struct HostBridge {
     reply_sink: Arc<std::sync::mpsc::Sender<HostUpdate>>,
     /// Outcome of the last task save, picked up by the editor.
     last_save: Mutex<(Option<neohub_domain::Task>, Option<String>)>,
+    /// Outcome of the last settings save, picked up by the settings panel.
+    last_settings: Mutex<(Option<neohub_domain::Settings>, Option<String>)>,
     session_store: SessionStore,
 }
 
@@ -77,6 +82,7 @@ impl HostBridge {
             updates: Mutex::new(rx),
             reply_sink,
             last_save: Mutex::new((None, None)),
+            last_settings: Mutex::new((None, None)),
             session_store,
         });
         bridge.refresh_snapshot();
@@ -155,6 +161,21 @@ impl HostBridge {
                 Ok(CoreReply::Task(task)) => HostUpdate::TaskSaved(task),
                 Ok(other) => HostUpdate::TaskError(format!("unexpected save reply: {other:?}")),
                 Err(err) => HostUpdate::TaskError(err.to_string()),
+            };
+            let _ = sink.send(message);
+        });
+    }
+
+    /// Persist a settings patch; the reply comes back through the update channel.
+    pub fn save_settings(&self, patch: neohub_domain::SettingsPatch) {
+        let handle = self.handle.clone();
+        let sink = self.reply_sink.clone();
+        self.runtime.spawn(async move {
+            let reply = handle.request(CoreCommand::UpdateSettings { patch }).await;
+            let message = match reply {
+                Ok(CoreReply::Settings(settings)) => HostUpdate::SettingsSaved(settings),
+                Ok(_) => HostUpdate::SettingsError("unexpected settings reply".into()),
+                Err(err) => HostUpdate::SettingsError(err.to_string()),
             };
             let _ = sink.send(message);
         });
@@ -254,6 +275,9 @@ impl HostBridge {
         let mut need_snapshot = false;
         let mut saved_task: Option<neohub_domain::Task> = None;
         let mut save_error: Option<String> = None;
+        let mut saved_settings_out: Option<neohub_domain::Settings> = None;
+        let mut settings_error_out: Option<String> = None;
+
         {
             let mut store = self.store.lock().expect("store lock");
             for update in updates {
@@ -288,6 +312,15 @@ impl HostBridge {
                         save_error = Some(message);
                         changed = true;
                     }
+                    HostUpdate::SettingsSaved(settings) => {
+                        store.set_settings((*settings).clone());
+                        saved_settings_out = Some(*settings);
+                        changed = true;
+                    }
+                    HostUpdate::SettingsError(message) => {
+                        settings_error_out = Some(message);
+                        changed = true;
+                    }
                     HostUpdate::Error(message) => {
                         store.set_import_error(message);
                         changed = true;
@@ -306,6 +339,11 @@ impl HostBridge {
         {
             *guard = (saved_task, save_error);
         }
+        if (saved_settings_out.is_some() || settings_error_out.is_some())
+            && let Ok(mut guard) = self.last_settings.lock()
+        {
+            *guard = (saved_settings_out, settings_error_out);
+        }
         changed
     }
 
@@ -320,6 +358,12 @@ impl HostBridge {
     /// Take the last save outcome (task or error), clearing it.
     pub fn take_save_outcome(&self) -> (Option<neohub_domain::Task>, Option<String>) {
         let mut guard = self.last_save.lock().expect("save outcome");
+        std::mem::take(&mut *guard)
+    }
+
+    /// Take the last settings save outcome (settings or error), clearing it.
+    pub fn take_settings_outcome(&self) -> (Option<neohub_domain::Settings>, Option<String>) {
+        let mut guard = self.last_settings.lock().expect("settings outcome");
         std::mem::take(&mut *guard)
     }
 
@@ -343,12 +387,16 @@ pub struct ShellView {
     /// Open task editor, if any.
     editor: Option<TaskForm>,
     editor_focus: FocusHandle,
+    /// Open settings panel, if any.
+    settings: Option<SettingsForm>,
+    settings_focus: FocusHandle,
 }
 
 impl ShellView {
     pub fn new(bridge: Arc<HostBridge>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search_focus = cx.focus_handle();
         let editor_focus = cx.focus_handle();
+        let settings_focus = cx.focus_handle();
         ShellView {
             bridge,
             search: TextField::new(""),
@@ -356,6 +404,8 @@ impl ShellView {
             history_requested: None,
             editor: None,
             editor_focus,
+            settings: None,
+            settings_focus,
         }
     }
 
@@ -401,6 +451,9 @@ impl ShellView {
     }
 }
 
+/// A settings toggle: the label, its current value and how to flip it.
+type ToggleFn = fn(&mut SettingsForm);
+
 fn state_color(palette: &Palette, state: ProcessState) -> Rgba {
     match state {
         ProcessState::Running => palette.success_strong,
@@ -442,6 +495,15 @@ impl Render for ShellView {
             } else if let Some(message) = save_error.as_ref() {
                 editor.apply_core_error(message);
             }
+        }
+
+        // Fold a completed settings save back into the open panel.
+        let (settings_saved, settings_error) = self.bridge.take_settings_outcome();
+        if let Some(panel) = self.settings.as_mut() {
+            if let Some(saved) = settings_saved {
+                panel.ack(saved);
+            }
+            let _ = &settings_error;
         }
 
         let query = self.search.text().to_string();
@@ -558,6 +620,38 @@ impl Render for ShellView {
                         bridge.with_session(|session| session.go_dashboard());
                     }),
             );
+        }
+
+        {
+            let entity = cx.entity().downgrade();
+            let settings_now = self.bridge.store.lock().expect("store lock").settings();
+            sidebar = sidebar.child(
+                div()
+                    .id("nav-settings")
+                    .mt(px(metrics::GAP_3))
+                    .px(px(metrics::PAD_2))
+                    .py(px(metrics::GAP_1))
+                    .rounded(px(metrics::RADIUS_MD))
+                    .bg(if self.settings.is_some() {
+                        palette.bg_elevated
+                    } else {
+                        palette.bg_surface
+                    })
+                    .text_size(px(metrics::TEXT_SM))
+                    .text_color(palette.fg_muted)
+                    .cursor_pointer()
+                    .child("设置")
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        if this.settings.is_some() {
+                            this.settings = None;
+                        } else {
+                            this.settings = Some(SettingsForm::new(settings_now.clone()));
+                            window.focus(&this.settings_focus, cx);
+                        }
+                        cx.notify();
+                    })),
+            );
+            let _ = entity;
         }
 
         for section in &sections {
@@ -685,7 +779,294 @@ impl Render for ShellView {
             self.bridge.load_history(app_id);
         }
 
-        if import.open {
+        if let Some(panel) = self.settings.as_mut() {
+            let draft = panel.draft().clone();
+            let dirty = panel.is_dirty();
+            let mut body = div()
+                .flex()
+                .flex_col()
+                .gap(px(metrics::GAP_2))
+                .p(px(metrics::PAD_4))
+                .rounded(px(metrics::RADIUS_LG))
+                .border_1()
+                .border_color(palette.border)
+                .bg(palette.bg_surface)
+                .child(div().flex().items_center().justify_between().child(
+                    div().text_size(px(metrics::TEXT_BASE)).child(if dirty {
+                        "设置（未保存）"
+                    } else {
+                        "设置"
+                    }),
+                ));
+
+            // Theme + language.
+            let mut theme_row = div().flex().gap(px(metrics::GAP_1));
+            for (label, theme) in [
+                ("深色", neohub_domain::ThemeSetting::Dark),
+                ("浅色", neohub_domain::ThemeSetting::Light),
+                ("跟随系统", neohub_domain::ThemeSetting::System),
+            ] {
+                let entity = cx.entity().downgrade();
+                let active = draft.theme == theme;
+                theme_row = theme_row.child(
+                    div()
+                        .id(format!("theme-{:?}", theme))
+                        .px(px(metrics::PAD_2))
+                        .py(px(1.0))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(if active {
+                            palette.accent
+                        } else {
+                            palette.bg_elevated
+                        })
+                        .text_color(if active {
+                            palette.accent_fg
+                        } else {
+                            palette.fg_muted
+                        })
+                        .text_size(px(metrics::TEXT_XS))
+                        .cursor_pointer()
+                        .child(label)
+                        .on_click(move |_, _, cx| {
+                            let _ = entity.update(cx, |this, cx| {
+                                if let Some(panel) = this.settings.as_mut() {
+                                    panel.set_theme(theme);
+                                }
+                                cx.notify();
+                            });
+                        }),
+                );
+            }
+            body = body.child(theme_row);
+
+            let mut lang_row = div().flex().gap(px(metrics::GAP_1));
+            for (label, language) in [
+                ("跟随系统", neohub_domain::LanguageSetting::System),
+                ("中文", neohub_domain::LanguageSetting::ZhCn),
+                ("English", neohub_domain::LanguageSetting::En),
+            ] {
+                let entity = cx.entity().downgrade();
+                let active = draft.language == language;
+                lang_row = lang_row.child(
+                    div()
+                        .id(format!("lang-{:?}", language))
+                        .px(px(metrics::PAD_2))
+                        .py(px(1.0))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(if active {
+                            palette.accent
+                        } else {
+                            palette.bg_elevated
+                        })
+                        .text_color(if active {
+                            palette.accent_fg
+                        } else {
+                            palette.fg_muted
+                        })
+                        .text_size(px(metrics::TEXT_XS))
+                        .cursor_pointer()
+                        .child(label)
+                        .on_click(move |_, _, cx| {
+                            let _ = entity.update(cx, |this, cx| {
+                                if let Some(panel) = this.settings.as_mut() {
+                                    panel.set_language(language);
+                                }
+                                cx.notify();
+                            });
+                        }),
+                );
+            }
+            body = body.child(lang_row);
+
+            // Booleans.
+            #[allow(clippy::type_complexity)]
+            let toggles: Vec<(&str, bool, ToggleFn)> = vec![
+                ("自动检查更新", draft.auto_update, |form| {
+                    form.toggle_auto_update()
+                }),
+                ("崩溃时通知", draft.notify_on_crash, |form| {
+                    form.toggle_notify_on_crash()
+                }),
+                ("就绪时通知", draft.notify_on_ready, |form| {
+                    form.toggle_notify_on_ready()
+                }),
+                ("登录时启动", draft.launch_at_login, |form| {
+                    form.toggle_launch_at_login()
+                }),
+                ("显示菜单栏图标", draft.tray_enabled, |form| {
+                    form.toggle_tray()
+                }),
+                ("启用 MCP 服务", draft.mcp_enabled, |form| {
+                    form.toggle_mcp_enabled()
+                }),
+                ("MCP 要求 Token", draft.mcp_require_auth, |form| {
+                    form.toggle_mcp_require_auth()
+                }),
+                ("MCP 使用 HTTPS", draft.mcp_https, |form| {
+                    form.toggle_mcp_https()
+                }),
+            ];
+            for (label, value, apply) in toggles {
+                let entity = cx.entity().downgrade();
+                body = body.child(
+                    div()
+                        .id(format!("toggle-{label}"))
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .px(px(metrics::PAD_2))
+                        .py(px(1.0))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(palette.bg_base)
+                        .text_size(px(metrics::TEXT_XS))
+                        .cursor_pointer()
+                        .child(label)
+                        .child(if value { "开" } else { "关" })
+                        .on_click(move |_, _, cx| {
+                            let _ = entity.update(cx, |this, cx| {
+                                if let Some(panel) = this.settings.as_mut() {
+                                    apply(panel);
+                                }
+                                cx.notify();
+                            });
+                        }),
+                );
+            }
+
+            // Numeric settings with steppers (no free-form input needed; clamps stay central).
+            let steps: [(NumberField, u64); 6] = [
+                (NumberField::LogRingSize, 1_000),
+                (NumberField::KillGraceMs, 500),
+                (NumberField::DashboardRefreshMs, 100),
+                (NumberField::RunHistoryLimit, 50),
+                (NumberField::ReadinessTimeoutMs, 1_000),
+                (NumberField::McpPort, 1),
+            ];
+            for (field, step) in steps {
+                let value = field.value(&draft);
+                let dec = cx.entity().downgrade();
+                let inc = cx.entity().downgrade();
+                body = body.child(
+                    div()
+                        .id(format!("num-{:?}", field))
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(metrics::GAP_2))
+                        .px(px(metrics::PAD_2))
+                        .py(px(1.0))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(palette.bg_base)
+                        .text_size(px(metrics::TEXT_XS))
+                        .child(field.label())
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(metrics::GAP_1))
+                                .child(
+                                    div()
+                                        .id(format!("num-dec-{:?}", field))
+                                        .px(px(metrics::PAD_2))
+                                        .rounded(px(metrics::RADIUS_MD))
+                                        .bg(palette.bg_elevated)
+                                        .cursor_pointer()
+                                        .child("−")
+                                        .on_click(move |_, _, cx| {
+                                            let _ = dec.update(cx, |this, cx| {
+                                                if let Some(panel) = this.settings.as_mut() {
+                                                    let _ = panel.set_number(
+                                                        field,
+                                                        value.saturating_sub(step),
+                                                    );
+                                                }
+                                                cx.notify();
+                                            });
+                                        }),
+                                )
+                                .child(format!("{value}"))
+                                .child(
+                                    div()
+                                        .id(format!("num-inc-{:?}", field))
+                                        .px(px(metrics::PAD_2))
+                                        .rounded(px(metrics::RADIUS_MD))
+                                        .bg(palette.bg_elevated)
+                                        .cursor_pointer()
+                                        .child("+")
+                                        .on_click(move |_, _, cx| {
+                                            let _ = inc.update(cx, |this, cx| {
+                                                if let Some(panel) = this.settings.as_mut() {
+                                                    let _ = panel.set_number(field, value + step);
+                                                }
+                                                cx.notify();
+                                            });
+                                        }),
+                                ),
+                        ),
+                );
+            }
+
+            for pending in pending_native_fields(&draft) {
+                body = body.child(
+                    div()
+                        .px(px(metrics::PAD_2))
+                        .py(px(1.0))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(palette.warn_bg)
+                        .text_size(px(metrics::TEXT_XS))
+                        .text_color(palette.warn_fg)
+                        .child(format!("待接入：{pending}")),
+                );
+            }
+
+            let mut buttons = div().flex().gap(px(metrics::GAP_2));
+            {
+                let bridge = self.bridge.clone();
+                let entity = cx.entity().downgrade();
+                buttons = buttons.child(
+                    div()
+                        .id("settings-save")
+                        .px(px(metrics::PAD_3))
+                        .py(px(metrics::GAP_1))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(palette.success_strong)
+                        .text_color(palette.accent_fg)
+                        .text_size(px(metrics::TEXT_SM))
+                        .cursor_pointer()
+                        .child("保存")
+                        .on_click(move |_, _, cx| {
+                            let _ = entity.update(cx, |this, cx| {
+                                if let Some(panel) = this.settings.as_ref() {
+                                    bridge.save_settings(panel.patch());
+                                }
+                                cx.notify();
+                            });
+                        }),
+                );
+            }
+            {
+                let entity = cx.entity().downgrade();
+                buttons = buttons.child(
+                    div()
+                        .id("settings-close")
+                        .px(px(metrics::PAD_3))
+                        .py(px(metrics::GAP_1))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(palette.bg_elevated)
+                        .text_size(px(metrics::TEXT_SM))
+                        .cursor_pointer()
+                        .child("关闭")
+                        .on_click(move |_, _, cx| {
+                            let _ = entity.update(cx, |this, cx| {
+                                this.settings = None;
+                                cx.notify();
+                            });
+                        }),
+                );
+            }
+            body = body.child(buttons);
+            main = main.child(body);
+        } else if import.open {
             let mut panel = div()
                 .flex()
                 .flex_col()
