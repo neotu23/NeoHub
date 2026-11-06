@@ -16,6 +16,8 @@ security-framework = "3.7"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSRunningApplication"] }
 objc2-foundation = { version = "0.3", features = ["NSString"] }
+tray-icon = "0.26"
+muda = "0.21"
 
 [dependencies]
 neohub-storage = { path = "../storage" }

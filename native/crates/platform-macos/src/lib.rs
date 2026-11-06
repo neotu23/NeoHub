@@ -10,6 +10,8 @@ pub mod dock;
 pub mod keychain;
 #[cfg(target_os = "macos")]
 pub mod tray;
+#[cfg(target_os = "macos")]
+pub mod tray_native;
 
 #[cfg(target_os = "macos")]
 pub use dock::{current_dock_visible, set_dock_visible, sync_dock};

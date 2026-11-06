@@ -26,6 +26,7 @@ neohub-ui.workspace = true
 neohub-core = { path = "../core" }
 neohub-domain = { path = "../domain" }
 neohub-storage = { path = "../storage" }
+neohub-platform-macos = { path = "../platform-macos" }
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 libc = "0.2"
 anyhow = "1"

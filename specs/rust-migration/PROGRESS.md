@@ -960,3 +960,23 @@
   4. S8 通知、S7 Open In、S6 深链接、S10 自动更新、S11 崩溃日志、B4 db 危险区
   5. 真实数据迁移（待用户确认）
 
+### 阶段 12 遗留补齐：菜单栏 NSStatusItem 绑定
+- 状态：**完成（代码与启动验证）**；点击行为需人工确认
+- 最近提交：`feat: install a real menu bar item`
+- 实际修改文件：新增 `native/crates/platform-macos/src/tray_native.rs`；
+  更新 `platform-macos/Cargo.toml`（tray-icon 0.26 + muda 0.21）、`desktop/Cargo.toml`、`desktop/src/main.rs`
+- 做法：用 `tray-icon` + `muda` 而不是手写 AppKit。状态项需要一个被 retain 的 target
+  对象和一组带回调的菜单项，所有权写错表现为**点击时崩溃**而不是编译错误；这两个 crate
+  正好封装了该模式。菜单**规则**仍留在 `tray.rs`（纯函数、可测），`tray_native.rs` 只做映射。
+- 关键修正：`muda::MenuEvent::set_event_handler` 是**进程级单例**，最初在每个菜单项里设置
+  （等价于只有最后一项能点），改为安装一次并查表分发
+- 接入：`main.rs` 在 `run` 内、AppKit 启动后创建；动作在主循环的同一 tick 上 drain，
+  `Open` 走 `reopen_or_focus`，启停/StopAll/Quit 走 `CoreHandle::request`（与 UI 同一条命令路径）
+- 验证：`cargo test -p neohub-platform-macos --lib` → **9 passed**（含菜单与动作映射一致性、
+  无运行时 StopAll 置灰）；`cargo test --workspace --locked` → **412 passed / 0 failed**；clippy 0
+  重新打包（30 MB）并用临时数据目录启动：进程存活、日志无 error/panic
+- 未解决问题：
+  1. **菜单只在启动时构建一次**，应用状态变化后标题与逐项启用状态不会刷新（需按快照变更重建）
+  2. 点击行为无法自动化验证（需要辅助功能/人工点击）
+  3. `launch_at_login` 的 LaunchAgent 注册尚未实现（S9 只完成了每应用 autoStart）
+
