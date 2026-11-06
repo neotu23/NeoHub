@@ -65,6 +65,32 @@ fn opt_str(args: &Value, field: &str) -> Option<String> {
     args.get(field).and_then(Value::as_str).map(str::to_string)
 }
 
+/// Read a field by its legacy camelCase name, falling back to the snake_case alias so clients
+/// written against either shape work.
+fn opt_field<'a>(args: &'a Value, camel: &str, snake: &str) -> Option<&'a Value> {
+    args.get(camel).or_else(|| args.get(snake))
+}
+
+fn opt_field_str(args: &Value, camel: &str, snake: &str) -> Option<String> {
+    opt_field(args, camel, snake)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn opt_field_bool(args: &Value, camel: &str, snake: &str) -> Option<bool> {
+    opt_field(args, camel, snake).and_then(Value::as_bool)
+}
+
+fn opt_field_u64(args: &Value, camel: &str, snake: &str) -> Option<u64> {
+    opt_field(args, camel, snake).and_then(Value::as_u64)
+}
+
+/// `null` explicitly passed in a JSON patch means "clear this field", which is different from
+/// omitting it.
+fn field_present(args: &Value, camel: &str, snake: &str) -> bool {
+    args.get(camel).is_some() || args.get(snake).is_some()
+}
+
 fn opt_bool(args: &Value, field: &str) -> Option<bool> {
     args.get(field).and_then(Value::as_bool)
 }
@@ -543,25 +569,57 @@ pub async fn dispatch(ctx: &ToolContext, tool: ToolName, args: &Value) -> ToolRe
             Ok(json!({"app": app}))
         }
         ToolName::UpdateApp => {
-            let id = app_id(args)?;
+            let id = match opt_field_str(args, "app", "app_id") {
+                Some(needle) => resolve_app(&ctx.handle, &needle).await?,
+                None => app_id(args)?,
+            };
+            let node_version = opt_field_str(args, "nodeVersion", "node_version");
+            let node_version_pref = match node_version.as_deref() {
+                None => None,
+                Some("auto") => Some(neohub_domain::NodeVersionPref::Auto),
+                Some("system") => Some(neohub_domain::NodeVersionPref::System),
+                Some(version) => Some(neohub_domain::NodeVersionPref::Explicit {
+                    version: version.to_string(),
+                }),
+            };
             let reply = ctx
                 .handle
                 .request(CoreCommand::UpdateApp {
                     app_id: id,
                     input: Box::new(UpdateAppInput {
-                        name: opt_str(args, "name"),
-                        folder: args
-                            .get("folder")
-                            .map(|value| value.as_str().map(str::to_string)),
-                        tags: args.get("tags").and_then(Value::as_array).map(|items| {
-                            items
-                                .iter()
-                                .filter_map(Value::as_str)
-                                .map(str::to_string)
-                                .collect()
+                        name: opt_field_str(args, "name", "name"),
+                        node_version_pref,
+                        default_script: field_present(args, "defaultScript", "default_script")
+                            .then(|| opt_field_str(args, "defaultScript", "default_script")),
+                        auto_start: opt_field_bool(args, "autoStart", "auto_start"),
+                        auto_restart_on_change: opt_field_bool(
+                            args,
+                            "autoRestartOnChange",
+                            "auto_restart_on_change",
+                        ),
+                        watch_globs: opt_field(args, "watchGlobs", "watch_globs")
+                            .and_then(Value::as_array)
+                            .map(|items| {
+                                items
+                                    .iter()
+                                    .filter_map(Value::as_str)
+                                    .map(str::to_string)
+                                    .collect()
+                            }),
+                        port_hint: field_present(args, "portHint", "port_hint").then(|| {
+                            opt_field_u64(args, "portHint", "port_hint").map(|value| value as u16)
                         }),
-                        auto_start: opt_bool(args, "auto_start"),
-                        auto_restart_on_change: opt_bool(args, "auto_restart_on_change"),
+                        tags: opt_field(args, "tags", "tags")
+                            .and_then(Value::as_array)
+                            .map(|items| {
+                                items
+                                    .iter()
+                                    .filter_map(Value::as_str)
+                                    .map(str::to_string)
+                                    .collect()
+                            }),
+                        folder: field_present(args, "folder", "folder")
+                            .then(|| opt_field_str(args, "folder", "folder")),
                         ..Default::default()
                     }),
                 })
@@ -570,42 +628,100 @@ pub async fn dispatch(ctx: &ToolContext, tool: ToolName, args: &Value) -> ToolRe
             let CoreReply::App(app) = reply else {
                 return Err(ToolError::new("unexpected update reply"));
             };
-            Ok(json!({"app": app}))
+            Ok(ctx.redactor.scrub_json(&json!({"app": app_brief(&app)})))
         }
         ToolName::RemoveApp => {
-            let id = app_id(args)?;
+            let id = match opt_field_str(args, "app", "app_id") {
+                Some(needle) => resolve_app(&ctx.handle, &needle).await?,
+                None => app_id(args)?,
+            };
+            // Deleting a registration is destructive enough that the legacy tool demanded an
+            // explicit confirmation; keep that, so a stray tool call cannot unregister anything.
+            if !opt_field_bool(args, "confirm", "confirm").unwrap_or(false) {
+                return Err(ToolError::field(
+                    "confirm",
+                    "移除应用需要 confirm: true（只删注册，不动磁盘文件）",
+                ));
+            }
+            let name = app_name_for_scope(&ctx.handle, &EnvScope::App(id.clone()))
+                .await
+                .unwrap_or_else(|| id.to_string());
             ctx.handle
-                .request(CoreCommand::RemoveApp { app_id: id.clone() })
+                .request(CoreCommand::RemoveApp { app_id: id })
                 .await
                 .map_err(core_error)?;
-            Ok(json!({"removed": id}))
+            Ok(json!({
+                "removed": name,
+                "note": "Registration removed. Files on disk are untouched.",
+            }))
         }
         ToolName::AddTask => {
-            let app = app_id(args)?;
+            let app = match opt_field_str(args, "app", "app_id") {
+                Some(needle) => resolve_app(&ctx.handle, &needle).await?,
+                None => app_id(args)?,
+            };
+            let name = require_str(args, "name")?;
+            let script = opt_field_str(args, "script", "script");
+            let command = opt_field_str(args, "command", "command");
+            // Exactly one of script/command, as the legacy tool enforced: both would silently
+            // pick one, and neither leaves a task that cannot run.
+            if script.is_some() == command.is_some() {
+                return Err(ToolError::field(
+                    "script",
+                    "只能给一个：`script` 或 `command`",
+                ));
+            }
+            // Depends-on arrives as task ids or names; names are resolved inside the app.
+            let depends_on: Vec<TaskId> = match opt_field(args, "dependsOn", "depends_on") {
+                Some(Value::Array(items)) => {
+                    let snapshot = ctx
+                        .handle
+                        .request(CoreCommand::GetSnapshot)
+                        .await
+                        .map_err(core_error)?;
+                    let CoreReply::Snapshot(snapshot) = snapshot else {
+                        return Err(ToolError::new("unexpected snapshot reply"));
+                    };
+                    let tasks = snapshot.tasks_by_app.get(&app).cloned().unwrap_or_default();
+                    let mut resolved = Vec::new();
+                    for item in items.iter().filter_map(Value::as_str) {
+                        match tasks
+                            .iter()
+                            .find(|task| task.id.as_str() == item || task.name == item)
+                        {
+                            Some(task) => resolved.push(task.id.clone()),
+                            None => {
+                                return Err(ToolError::field(
+                                    "dependsOn",
+                                    format!("该应用下没有名为 {item} 的任务"),
+                                ));
+                            }
+                        }
+                    }
+                    resolved
+                }
+                _ => Vec::new(),
+            };
+            let one_shot = opt_field_bool(args, "oneShot", "one_shot").unwrap_or(false);
             let reply = ctx
                 .handle
                 .request(CoreCommand::AddTask {
                     app_id: app,
                     input: Box::new(AddTaskInput {
-                        name: require_str(args, "name")?,
-                        command_kind: Some(if opt_str(args, "command").is_some() {
+                        name,
+                        command_kind: Some(if command.is_some() {
                             CommandKind::Custom
                         } else {
                             CommandKind::Script
                         }),
-                        script: opt_str(args, "script"),
-                        custom_command: opt_str(args, "command"),
-                        depends_on: args
-                            .get("depends_on")
-                            .and_then(Value::as_array)
-                            .map(|items| {
-                                items
-                                    .iter()
-                                    .filter_map(Value::as_str)
-                                    .map(TaskId::from_existing)
-                                    .collect()
-                            })
-                            .unwrap_or_default(),
+                        script,
+                        custom_command: command,
+                        working_dir_override: opt_field_str(args, "workingDir", "working_dir"),
+                        depends_on,
+                        // A one-shot task defaults to "exit code 0", so dependents wait for it.
+                        readiness: one_shot.then_some(ReadinessSignal::Exit { code: Some(0) }),
+                        one_shot,
+                        enabled: opt_field_bool(args, "enabled", "enabled"),
                         ..Default::default()
                     }),
                 })
@@ -840,6 +956,22 @@ fn locate(snapshot: &neohub_core::snapshot::CoreSnapshot, task_id: &TaskId) -> (
         }
     }
     (task_id.to_string(), task_id.to_string())
+}
+
+/// Legacy `appBrief`: the shape every app-returning tool uses.
+fn app_brief(app: &neohub_domain::App) -> Value {
+    json!({
+        "id": app.id,
+        "name": app.name,
+        "path": app.path,
+        "ports": Vec::<u16>::new(),
+        "tags": app.tags,
+        "folder": app.folder,
+        "defaultScript": app.default_script,
+        "packageManager": app.package_manager.map(|manager| manager.as_str()),
+        "autoStart": app.auto_start,
+        "lastStartedAt": app.last_started_at,
+    })
 }
 
 /// Confirmed listening ports across every task of one app (the legacy `aggregatePorts`).

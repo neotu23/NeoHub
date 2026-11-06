@@ -176,8 +176,13 @@ async fn logs_and_ports_come_from_the_running_task() {
 
     let stopped = call(&ctx, ToolName::StopApp, json!({"app_id": app_id})).await;
     assert_eq!(stopped["stopped"], true);
-    let removed = call(&ctx, ToolName::RemoveApp, json!({"app_id": app_id})).await;
-    assert_eq!(removed["removed"].as_str(), Some(app_id.as_str()));
+    let removed = call(
+        &ctx,
+        ToolName::RemoveApp,
+        json!({"app_id": app_id, "confirm": true}),
+    )
+    .await;
+    assert_eq!(removed["removed"].as_str(), Some("logger"));
 }
 
 #[tokio::test]
@@ -360,4 +365,78 @@ async fn read_tools_return_the_legacy_field_names() {
             "resolution failed for {argument}"
         );
     }
+}
+
+#[tokio::test]
+async fn mutating_tools_accept_the_legacy_argument_names() {
+    let harness = Harness::new();
+    let ctx = harness.context();
+    let path = harness.project("legacy-args");
+    call(
+        &ctx,
+        ToolName::AddApp,
+        json!({"path": path, "name": "legacy"}),
+    )
+    .await;
+
+    // update_app takes `app` plus camelCase fields.
+    let updated = call(
+        &ctx,
+        ToolName::UpdateApp,
+        json!({"app": "legacy", "tags": ["api"], "autoStart": true, "nodeVersion": "20.11.0"}),
+    )
+    .await;
+    assert_eq!(updated["app"]["name"], "legacy");
+    assert_eq!(updated["app"]["tags"][0], "api");
+    assert_eq!(updated["app"]["autoStart"], true);
+
+    // add_task takes `app`, `command`, `dependsOn` by name and `oneShot`.
+    let first = call(
+        &ctx,
+        ToolName::AddTask,
+        json!({"app": "legacy", "name": "migrate", "command": "true", "oneShot": true}),
+    )
+    .await;
+    assert_eq!(first["task"]["name"], "migrate");
+    assert_eq!(first["task"]["one_shot"], true);
+    assert_eq!(
+        first["task"]["readiness"]["kind"], "exit",
+        "a one-shot task defaults to exit-code readiness"
+    );
+
+    let second = call(
+        &ctx,
+        ToolName::AddTask,
+        json!({"app": "legacy", "name": "web", "script": "dev", "dependsOn": ["migrate"]}),
+    )
+    .await;
+    assert_eq!(second["task"]["depends_on"].as_array().unwrap().len(), 1);
+
+    // Exactly one of script/command is enforced.
+    let both = call(
+        &ctx,
+        ToolName::AddTask,
+        json!({"app": "legacy", "name": "bad", "script": "dev", "command": "node ."}),
+    )
+    .await;
+    assert_eq!(both["error"]["field"], "script");
+
+    let unknown_dep = call(
+        &ctx,
+        ToolName::AddTask,
+        json!({"app": "legacy", "name": "bad2", "script": "dev", "dependsOn": ["nope"]}),
+    )
+    .await;
+    assert_eq!(unknown_dep["error"]["field"], "dependsOn");
+
+    // remove_app demands an explicit confirmation.
+    let unconfirmed = call(&ctx, ToolName::RemoveApp, json!({"app": "legacy"})).await;
+    assert_eq!(unconfirmed["error"]["field"], "confirm");
+    let confirmed = call(
+        &ctx,
+        ToolName::RemoveApp,
+        json!({"app": "legacy", "confirm": true}),
+    )
+    .await;
+    assert_eq!(confirmed["removed"], "legacy");
 }
