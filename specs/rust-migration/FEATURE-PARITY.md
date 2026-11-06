@@ -175,7 +175,7 @@
 | U13 | 通用组件：Toast、ErrorBanner、ErrorBoundary、ContextMenu、PromptModal、StatusDot、PortChip、NodeVersionPicker、OpenInMenu、EmptyState、CrashPin、UpdateBanner | 对应 `components/*.tsx` | 部分（截图） | `ui/src/components/` | 未开始 |
 | U14 | 主题系统（Radix slate 语义变量、light/dark/system、终端浅色主题） | `styles.css`, `useTheme.ts`, `tailwind.config.ts` | 部分（截图 light/dark） | `ui/src/theme.rs`| 部分（两套调色板 + 间距/圆角/字号常量已接入视图；主题切换跟随设置） |
 | U15 | 国际化 en / zh-CN + `system` 跟随系统（19 组文案命名空间） | `i18n/locales/*`, `useLanguage.ts` | 已验证（`i18n` 4 个测试文件 17 例） | `ui/locales/`| 已验证（中英双语包内嵌，缺 key 回退英文再回退 key；`system` 按 LANG 解析；两语言 key 对齐有测试） |
-| U16 | 无障碍：焦点陷阱 `useDialog`、Esc、键盘可导航菜单、`aria-label`、非颜色状态线索 | `hooks/useDialog.ts` | 部分 | `ui/src/components/` | 未开始 |
+| U16 | 无障碍：焦点陷阱 `useDialog`、Esc、键盘可导航菜单、`aria-label`、非颜色状态线索 | `hooks/useDialog.ts` | 部分 | `ui/src/components/`| 部分（Tab/Shift-Tab 焦点与 Esc 清空已接到筛选框；抽屉内焦点陷阱待做） |
 | U17 | 窗口尺寸/位置持久化 `window-state.json` | `index.ts` loadBounds/saveBounds | 部分 | `desktop/src/window_session.rs` | 未开始 |
 | U18 | 导航会话持久化（view/selectedAppId/selectedTaskByApp、排序、分组模式） | `store.ts`, `sortApps.ts` | 已验证（`panel-session.test.ts`） | `ui/src/state/session.rs`| 已验证（`session.json` 持久化 view/selectedAppId/selectedTaskByApp/sort/groupBy，失效引用回退仪表盘） |
 | U19 | 编辑草稿与防抖保存队列（MCP 刷新不覆盖在途编辑） | `DebouncedSaveQueue.ts`, `useDebouncedSave.ts` | 已验证（`DebouncedSaveQueue.test.ts`） | `ui/src/state/{edit_session,save_barrier}.rs`| 已验证（`Draft` 修订号 + `SaveBarrier`：外部刷新不覆盖在途编辑、陈旧保存不覆盖新编辑、失败保留输入） |

@@ -56,8 +56,8 @@ fn main() {
     gpui_kit::application().run(move |cx| {
         gpui_kit::init(cx);
         let bridge = bridge.clone();
-        gpui_kit::open_window(window_options(), cx, move |_, cx| {
-            let view = cx.new(|_| ShellView::new(bridge.clone()));
+        gpui_kit::open_window(window_options(), cx, move |window, cx| {
+            let view = cx.new(|cx| ShellView::new(bridge.clone(), window, cx));
             view.update(cx, |view, cx| view.start_event_pump(cx));
             view
         })

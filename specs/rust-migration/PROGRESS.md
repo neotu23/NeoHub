@@ -410,7 +410,7 @@
        上述 `import_flow` 测试从命令层验证了同一链路
 
 ### 阶段 10：项目详情、任务编辑、环境变量与设置
-- 状态：**开发中**（编辑会话/保存屏障/语言包完成并测试；详情与编辑器视图待做）
+- 状态：**开发中**（编辑会话/保存屏障/语言包/文本输入完成；详情与编辑器视图待做）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: add edit drafts, save barrier and locales`
 - 实际修改文件：新增 `native/crates/ui/src/state/edit_session.rs`、
@@ -439,3 +439,18 @@
   再做 `views/{app_detail,task_editor,settings}.rs`，把 `Draft`/`SaveBarrier` 接进视图。
 
 ---
+
+- 第二批完成（2026-11-06T22:00Z–22:25Z UTC）：
+  - `ui/state/text_input.rs`：单行文本字段模型（插入/退格/删除/左右/Home/End/Esc/Enter，
+    UTF-8 边界安全，控制字符拒绝），6 个单测
+  - 侧栏接入真实筛选输入框（点击聚焦、键入过滤、Esc 清空），`render` 用字段值驱动 `UiStore::set_filter`
+  - **组件库输入控件的尝试与结论**：`gpui_component::input` 的 `InputState`/`Input` 需要其内部
+    状态实体与焦点管线（`InputState::new()` 签名、`Input::new` 参数与文档不符），两轮编译都未对上；
+    为避免把时间花在猜测 UI 库 API 上，改用自绘字段 + `KeyDownEvent`，逻辑因此可单测。
+    这一点已记入下方未解决问题，阶段 11/后续再评估是否切回组件库（需要读其 `input/state.rs` 源码）
+  - 验证：`cargo test --workspace --locked` → **275 passed / 0 failed**；clippy **0 warnings**；
+    `cargo fmt --all`；实机启动 7 s 无 stderr（带筛选框的界面不崩）
+  - 未解决问题：
+    1. 详情页/任务编辑器/设置面板视图仍未做（下一步），依赖文本字段（已具备）与多行日志区
+    2. 组件库输入控件若要用，需要按其源码写一个最小可编译示例并固化 API 版本
+

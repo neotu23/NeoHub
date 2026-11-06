@@ -6,6 +6,7 @@
 
 use crate::state::session::{Session, SessionStore};
 use crate::state::store::UiStore;
+use crate::state::text_input::{KeyOutcome, TextField};
 use crate::theme::{DARK, LIGHT, Palette, metrics};
 use gpui_kit::*;
 use neohub_core::commands::{CoreCommand, CoreReply};
@@ -260,11 +261,19 @@ impl HostBridge {
 /// The window root.
 pub struct ShellView {
     bridge: Arc<HostBridge>,
+    /// Sidebar filter (the ⌘P search box).
+    search: TextField,
+    search_focus: FocusHandle,
 }
 
 impl ShellView {
-    pub fn new(bridge: Arc<HostBridge>) -> Self {
-        ShellView { bridge }
+    pub fn new(bridge: Arc<HostBridge>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let search_focus = cx.focus_handle();
+        ShellView {
+            bridge,
+            search: TextField::new(""),
+            search_focus,
+        }
     }
 
     /// Spawn the event pump that turns core events into repaints.
@@ -337,13 +346,18 @@ fn state_label(state: ProcessState) -> &'static str {
 impl Render for ShellView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = self.palette();
-        let (sections, cards, totals, tags) = {
-            let store = self.bridge.store.lock().expect("store lock");
+        let query = self.search.text().to_string();
+        let (sections, cards, totals, tags, filter) = {
+            let mut store = self.bridge.store.lock().expect("store lock");
+            if store.filter() != query {
+                store.set_filter(query.clone());
+            }
             (
                 store.sidebar_sections(),
                 store.dashboard_cards(),
                 store.totals(),
                 store.all_tags(),
+                store.filter().to_string(),
             )
         };
         let (view, selected, is_empty, import) = {
@@ -372,6 +386,47 @@ impl Render for ShellView {
                 .text_size(px(metrics::TEXT_XS))
                 .text_color(palette.fg_subtle)
                 .child("NEOHUB"),
+        );
+        sidebar = sidebar.child(
+            div().flex().flex_col().gap(px(metrics::GAP_1)).child(
+                div()
+                    .id("sidebar-filter")
+                    .track_focus(&self.search_focus)
+                    .px(px(metrics::PAD_2))
+                    .py(px(metrics::GAP_1))
+                    .rounded(px(metrics::RADIUS_MD))
+                    .border_1()
+                    .border_color(palette.border)
+                    .bg(palette.bg_base)
+                    .text_size(px(metrics::TEXT_SM))
+                    .text_color(if query.is_empty() {
+                        palette.fg_subtle
+                    } else {
+                        palette.fg
+                    })
+                    .child(if query.is_empty() {
+                        "筛选应用（⌘P）".to_string()
+                    } else {
+                        filter.clone()
+                    })
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        window.focus(&this.search_focus, cx);
+                        cx.notify();
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        let keystroke = &event.keystroke;
+                        let characters = keystroke.key_char.as_deref();
+                        match this.search.apply_key(&keystroke.key, characters) {
+                            KeyOutcome::Changed => cx.notify(),
+                            KeyOutcome::Ignored => {}
+                            KeyOutcome::Escape => {
+                                this.search.clear();
+                                cx.notify();
+                            }
+                            KeyOutcome::Submit => {}
+                        }
+                    })),
+            ),
         );
 
         // Dashboard entry.
