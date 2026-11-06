@@ -114,7 +114,7 @@
 | S8 | 崩溃/就绪桌面通知（受设置控制） | `index.ts` Notification | 部分 | `platform-macos/src/notifications.rs` | 未开始 |
 | S9 | 登录启动 `launch_at_login` + 每应用 `autoStart`（迁移 0007） | `Settings.ts`, `0007_app_autostart.sql` | 部分 | `platform-macos/src/login_item.rs`| 已验证（每应用 `autoStart` 在服务启动流程接线；`launch_at_login` 通过自写 LaunchAgent 实现：plist 由当前可执行文件生成、按设置 install/uninstall，主循环每 tick 校正漂移；真实 `launchctl` 往返已验证且无残留） |
 | S10 | 自动更新（electron-updater + UpdateBanner 进度/错误/说明） | `Updater.ts`, `UpdateBanner.tsx` | 已验证（`Updater.test.ts`，无 live feed） | `platform-macos/src/updater.rs` | 未开始 |
-| S11 | 崩溃/未捕获异常日志文件（`~/Library/Logs/…`）+ 打开日志目录 | `Logger.ts` | 部分 | `core/src/` + `platform-macos/`| 部分（`log_file`：`~/Library/Logs/NeoHub/neohub.log`、UTC 时间戳、5 MiB 轮转保留一份 `.1`、**panic hook 写入后仍走默认输出**、`reveal` 打开目录；启动即初始化；设置面板「打开日志目录」按钮待接） |
+| S11 | 崩溃/未捕获异常日志文件（`~/Library/Logs/…`）+ 打开日志目录 | `Logger.ts` | 部分 | `core/src/` + `platform-macos/`| 已验证（`~/Library/Logs/NeoHub/neohub.log`、UTC 时间戳、5 MiB 轮转、panic hook、设置面板「打开日志目录」） |
 
 ## 10. MCP 服务（22 个工具，全量保留）
 
@@ -152,7 +152,7 @@
 | B1 | SQLite（WAL）+ 7 次迁移 `0001_init` → `0007_app_autostart`，`_schema_migrations` 版本记录 | `db/index.ts`, `db/migrations/*` | 已验证（启动即跑） | `storage/src/migrations.rs`| 已验证（7 次迁移原样执行、版本名与旧库一致、重开幂等；导入时同样复用这套迁移） |
 | B2 | TS 补数 `backfill.ts`（老应用 → 单任务、env_overrides 延迟迁移） | `db/backfill.ts` | 部分 | `storage/src/` | 已验证（Rust 重写补数：custom > script，无命令不造任务，幂等） |
 | B3 | 外键与级联（app 删除 → task/env/history） | `0001`–`0007` | 部分 | `storage/src/` | 已验证（删除 app 级联清空 tasks/env/history） |
-| B4 | `db:export` / `db:reset` / `db:path`（WAL 安全导出） | `ipc/index.ts` | 部分 | `storage/src/` + `ui/src/views/settings.rs`| 部分（`CoreService::database_path/export_database/reset_database`：`VACUUM INTO` 一致导出（拒绝覆盖）、重置前**先关连接并 checkpoint**、三件套一起 `.reset-<ts>.bak` 迁移、运行中拒绝重置；**UI 危险区按钮待接**） |
+| B4 | `db:export` / `db:reset` / `db:path`（WAL 安全导出） | `ipc/index.ts` | 部分 | `storage/src/` + `ui/src/views/settings.rs`| 已验证（命令面 `DatabasePath/ExportDatabase/ResetDatabase` + 设置面板「危险区」：打开日志目录、导出到 `<data>/exports/neohub-<ts>.db`、重置需**两次点击**确认；`VACUUM INTO` 一致导出、重置前三件套一起改名） |
 | B5 | 历史用户目录发现（`NeoHub` → `DevHarbor` → `devharbor`，含 `devharbor.db`） | `AppIdentity.ts` | 已验证（`AppIdentity.test.ts` 4 例） | `storage/src/import/legacy_db.rs`| 已验证（`discover_legacy_dir` 按 NeoHub→DevHarbor→devharbor 顺序找含 devharbor.db 的目录） |
 | B6 | 旧库 + 密钥迁移（`enc1:` safeStorage → 新版本前缀密文） | 计划阶段 13 | 未实现（旧版没有导出入口） | `storage/src/import/`| 部分（`enc1:` 原样复制并计数为待重录；旧版 opt-in 导出入口与重新加密待做） |
 

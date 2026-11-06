@@ -1250,6 +1250,15 @@ impl CoreHandle {
                 self.service.remove_app(&app_id)?;
                 Ok(CoreReply::Ack)
             }
+            CoreCommand::ExportDatabase { path } => {
+                let written = self.service.export_database(&path)?;
+                Ok(CoreReply::DatabaseExported(written))
+            }
+            CoreCommand::ResetDatabase => {
+                let outcome = self.service.reset_database()?;
+                Ok(CoreReply::DatabaseReset(outcome))
+            }
+            CoreCommand::DatabasePath => Ok(CoreReply::DatabasePath(self.service.database_path())),
             CoreCommand::ListNodeVersions => {
                 Ok(CoreReply::NodeVersions(self.service.node_versions()))
             }

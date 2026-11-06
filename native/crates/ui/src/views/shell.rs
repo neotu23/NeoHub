@@ -35,6 +35,9 @@ enum HostUpdate {
     History(AppId, Vec<neohub_domain::RunHistoryRow>),
     TaskSaved(Box<neohub_domain::Task>),
     TaskError(String),
+    DatabaseExported(std::path::PathBuf),
+    DatabaseReset(usize),
+    DatabaseError(String),
     AppSaved(Box<neohub_domain::App>),
     AppSaveError(String),
     SettingsSaved(Box<neohub_domain::Settings>),
@@ -63,6 +66,8 @@ pub struct HostBridge {
     last_save: Mutex<(Option<neohub_domain::Task>, Option<String>)>,
     /// Outcome of the last app-configuration save: (saved app, error).
     last_app_save: Mutex<(Option<neohub_domain::App>, Option<String>)>,
+    /// Message from the last database operation (export/reset/error).
+    last_db_notice: Mutex<Option<String>>,
     /// Outcome of the last settings save, picked up by the settings panel.
     last_settings: Mutex<(Option<neohub_domain::Settings>, Option<String>)>,
     /// Environment-variable loads/saves waiting to be folded into the editor.
@@ -107,6 +112,7 @@ impl HostBridge {
             reply_sink,
             last_save: Mutex::new((None, None)),
             last_app_save: Mutex::new((None, None)),
+            last_db_notice: Mutex::new(None),
             last_settings: Mutex::new((None, None)),
             last_env: Mutex::new((Vec::new(), None)),
             session_store,
@@ -355,6 +361,57 @@ impl HostBridge {
         });
     }
 
+    /// Reveal the app's own log file in Finder (creates the folder first).
+    pub fn open_log_dir(&self) {
+        let dir = self.data_dir.join("logs");
+        // The process log lives under ~/Library/Logs; fall back to the data dir if unavailable.
+        let target = neohub_platform_macos::log_file::log_dir().unwrap_or(dir);
+        if let Err(error) = neohub_platform_macos::log_file::reveal(&target) {
+            eprintln!("[ui] could not open the log folder: {error}");
+        }
+    }
+
+    /// Where an export goes: `<data-dir>/exports/neohub-<stamp>.db`.
+    pub fn export_target(&self) -> std::path::PathBuf {
+        self.data_dir.join("exports").join(format!(
+            "neohub-{}.db",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_millis())
+                .unwrap_or(0)
+        ))
+    }
+
+    /// Export the database to `path` (refuses to overwrite).
+    pub fn export_database(&self, path: std::path::PathBuf) {
+        let handle = self.handle.clone();
+        let sink = self.reply_sink.clone();
+        self.runtime.spawn(async move {
+            let message = match handle.request(CoreCommand::ExportDatabase { path }).await {
+                Ok(CoreReply::DatabaseExported(path)) => HostUpdate::DatabaseExported(path),
+                Ok(_) => HostUpdate::DatabaseError("unexpected export reply".into()),
+                Err(error) => HostUpdate::DatabaseError(error.to_string()),
+            };
+            let _ = sink.send(message);
+        });
+    }
+
+    /// Reset the database (the old file is moved aside, not deleted).
+    pub fn reset_database(&self) {
+        let handle = self.handle.clone();
+        let sink = self.reply_sink.clone();
+        self.runtime.spawn(async move {
+            let message = match handle.request(CoreCommand::ResetDatabase).await {
+                Ok(CoreReply::DatabaseReset(outcome)) => {
+                    HostUpdate::DatabaseReset(outcome.moved.len())
+                }
+                Ok(_) => HostUpdate::DatabaseError("unexpected reset reply".into()),
+                Err(error) => HostUpdate::DatabaseError(error.to_string()),
+            };
+            let _ = sink.send(message);
+        });
+    }
+
     /// Load the run history the detail pane renders.
     pub fn load_history(&self, app_id: AppId) {
         let handle = self.handle.clone();
@@ -448,6 +505,7 @@ impl HostBridge {
         let mut changed = false;
         let mut need_snapshot = false;
         let mut saved_task: Option<neohub_domain::Task> = None;
+        let mut db_notice_out: Option<String> = None;
         let mut app_saved_out: Option<neohub_domain::App> = None;
         let mut app_save_error_out: Option<String> = None;
         let mut save_error: Option<String> = None;
@@ -532,6 +590,19 @@ impl HostBridge {
                         eprintln!("[ui] log export failed: {message}");
                         changed = true;
                     }
+                    HostUpdate::DatabaseExported(path) => {
+                        db_notice_out = Some(format!("数据库已导出到 {}", path.display()));
+                        changed = true;
+                    }
+                    HostUpdate::DatabaseReset(moved) => {
+                        db_notice_out = Some(format!("数据库已重置（{moved} 个旧文件已改名保存）"));
+                        need_snapshot = true;
+                        changed = true;
+                    }
+                    HostUpdate::DatabaseError(message) => {
+                        db_notice_out = Some(format!("数据库操作失败：{message}"));
+                        changed = true;
+                    }
                     HostUpdate::Error(message) => {
                         store.set_import_error(message);
                         changed = true;
@@ -545,6 +616,11 @@ impl HostBridge {
             changed = true;
         }
         // Hand the app form outcome back the same way the task editor gets its result.
+        if let Some(notice) = db_notice_out
+            && let Ok(mut guard) = self.last_db_notice.lock()
+        {
+            *guard = Some(notice);
+        }
         if (app_saved_out.is_some() || app_save_error_out.is_some())
             && let Ok(mut guard) = self.last_app_save.lock()
         {
@@ -663,6 +739,8 @@ pub struct ShellView {
     terminal_height: usize,
     /// Task the rendered terminal belongs to (avoids rebuilding every frame).
     terminal_task: Option<TaskId>,
+    /// Database reset needs two clicks: the first arms, the second acts.
+    db_reset_armed: bool,
     /// Global log search input.
     search_input: TextField,
     log_search_focus: FocusHandle,
@@ -709,6 +787,7 @@ impl ShellView {
             terminal_follow: true,
             terminal_height: 16,
             terminal_task: None,
+            db_reset_armed: false,
             search_input: TextField::new(""),
             log_search_focus,
         }
@@ -824,6 +903,15 @@ impl ShellView {
             }
         }
         cx.notify();
+    }
+
+    /// Message from the last database operation, drained once per frame.
+    fn take_db_notice(&self) -> Option<String> {
+        self.bridge
+            .last_db_notice
+            .lock()
+            .map(|mut guard| guard.take())
+            .unwrap_or(None)
     }
 
     /// Outcome of the last app-configuration save, drained once per frame.
@@ -1886,6 +1974,100 @@ impl Render for ShellView {
                 );
             }
             body = body.child(buttons);
+
+            // Danger zone: diagnostics and the two operations that touch the database itself.
+            let notice = self.take_db_notice();
+            let armed = self.db_reset_armed;
+            let bridge = self.bridge.clone();
+            let entity = cx.entity().downgrade();
+            body = body.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(metrics::GAP_2))
+                    .mt(px(metrics::GAP_3))
+                    .pt(px(metrics::PAD_3))
+                    .border_t_1()
+                    .border_color(palette.border)
+                    .child(
+                        div()
+                            .text_size(px(metrics::TEXT_XS))
+                            .text_color(palette.fg_muted)
+                            .child("诊断与危险区"),
+                    )
+                    .child({
+                        let log_bridge = bridge.clone();
+                        div()
+                            .id("settings-open-logs")
+                            .px(px(metrics::PAD_2))
+                            .py(px(metrics::GAP_1))
+                            .rounded(px(metrics::RADIUS_MD))
+                            .bg(palette.bg_elevated)
+                            .text_size(px(metrics::TEXT_SM))
+                            .cursor_pointer()
+                            .child("打开日志目录")
+                            .on_click(move |_, _, _| {
+                                log_bridge.open_log_dir();
+                            })
+                    })
+                    .child({
+                        let export_bridge = bridge.clone();
+                        let target = bridge.export_target();
+                        let _ = &target;
+                        div()
+                            .id("settings-export-db")
+                            .px(px(metrics::PAD_2))
+                            .py(px(metrics::GAP_1))
+                            .rounded(px(metrics::RADIUS_MD))
+                            .bg(palette.bg_elevated)
+                            .text_size(px(metrics::TEXT_SM))
+                            .cursor_pointer()
+                            .child("导出数据库…")
+                            .on_click(move |_, _, _| {
+                                export_bridge.export_database(export_bridge.export_target());
+                            })
+                    })
+                    .child({
+                        let reset_bridge = bridge.clone();
+                        let entity = entity.clone();
+                        div()
+                            .id("settings-reset-db")
+                            .px(px(metrics::PAD_2))
+                            .py(px(metrics::GAP_1))
+                            .rounded(px(metrics::RADIUS_MD))
+                            .bg(if armed {
+                                palette.danger_bg
+                            } else {
+                                palette.bg_elevated
+                            })
+                            .text_color(if armed { palette.danger_fg } else { palette.fg })
+                            .text_size(px(metrics::TEXT_SM))
+                            .cursor_pointer()
+                            .child(if armed {
+                                "再点一次确认重置（旧库会改名保存）"
+                            } else {
+                                "重置数据库…"
+                            })
+                            .on_click(move |_, _, cx| {
+                                let _ = entity.update(cx, |this, cx| {
+                                    if this.db_reset_armed {
+                                        this.db_reset_armed = false;
+                                        reset_bridge.reset_database();
+                                    } else {
+                                        this.db_reset_armed = true;
+                                    }
+                                    cx.notify();
+                                });
+                            })
+                    })
+                    .child(
+                        div()
+                            .text_size(px(metrics::TEXT_XS))
+                            .text_color(palette.fg_subtle)
+                            .child(notice.unwrap_or_default()),
+                    ),
+            );
+
             main = main.child(body);
         } else if import.open {
             let mut panel = div()

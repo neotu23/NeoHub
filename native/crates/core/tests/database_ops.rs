@@ -125,3 +125,46 @@ async fn a_reset_moves_the_old_database_aside_and_starts_empty() {
     seed(&service, dir.path());
     assert_eq!(service.snapshot().unwrap().apps.len(), 1, "and writable");
 }
+
+#[tokio::test]
+async fn the_command_surface_reaches_the_same_operations() {
+    // The UI and MCP only see commands, so the maintenance helpers must be reachable there.
+    use neohub_core::commands::{CoreCommand, CoreReply};
+
+    let dir = tempfile::tempdir().unwrap();
+    let service = CoreService::open(DataDir::new(dir.path())).expect("core");
+    seed(&service, dir.path());
+    let handle = service.handle();
+
+    let path = handle
+        .request(CoreCommand::DatabasePath)
+        .await
+        .expect("path");
+    let CoreReply::DatabasePath(Some(live)) = path else {
+        panic!("expected a live database path");
+    };
+    assert_eq!(live, dir.path().join("devharbor.db"));
+
+    let export = dir.path().join("via-command.db");
+    let reply = handle
+        .request(CoreCommand::ExportDatabase {
+            path: export.clone(),
+        })
+        .await
+        .expect("export");
+    assert!(matches!(reply, CoreReply::DatabaseExported(_)));
+    assert!(export.exists());
+
+    let reply = handle
+        .request(CoreCommand::ResetDatabase)
+        .await
+        .expect("reset");
+    let CoreReply::DatabaseReset(outcome) = reply else {
+        panic!("expected a reset outcome");
+    };
+    assert!(!outcome.moved.is_empty());
+    assert!(
+        service.snapshot().unwrap().apps.is_empty(),
+        "fresh database"
+    );
+}

@@ -1178,3 +1178,27 @@
   1. 设置面板没有「打开日志目录」按钮（`log_file::reveal` 已实现，等 UI 接线）
   2. 只有 host 写日志；runner/UI 的 warn/error 尚未接入同一 sink
 
+### B4 + S11 的 UI 收口（设置面板危险区）
+- 状态：**B4、S11 完成**
+- 最近提交：`feat: add the settings danger zone`
+- 实际修改文件：`core/src/{commands,service}.rs`（数据库命令）、
+  `ui/src/views/shell.rs`（桥接方法、危险区渲染、重置二次确认、通知通道）、
+  `core/tests/database_ops.rs`（命令面测试）
+- 内容：
+  1. 命令面补齐：`DatabasePath` / `ExportDatabase { path }` / `ResetDatabase`，
+     `ResetDatabase` 计入 `mutates_catalog`（重置后广播 `CatalogChanged`，窗口自动刷新）
+  2. 设置面板底部「诊断与危险区」：
+     - **打开日志目录**（`log_file::reveal`，先建目录再 reveal）
+     - **导出数据库…** → `<data-dir>/exports/neohub-<stamp>.db`（自动取名，不需要原生保存对话框）
+     - **重置数据库…** → **两次点击**：第一次按钮变红并提示"再点一次确认重置（旧库会改名保存）"，
+       第二次才执行
+  3. 操作结果显示在面板里（成功路径含具体文件/备份数量，失败显示错误原文）
+- 验证：`cargo test -p neohub-core --test database_ops` → **5 passed**（新增命令面往返：
+  路径 → 导出 → 重置，且重置后快照为空）
+  `cargo test -p neohub-ui --locked` → **98 + 4 + 4 + 6 passed**
+  `cargo test --workspace --locked` → **449 passed / 0 failed**；clippy 0；
+  重新打包（30 MB）并启动，日志无 error/panic
+- 未解决问题：
+  1. 导出没有原生保存对话框（固定落在数据目录的 `exports/`），用户不能选位置
+  2. 重置后不自动重启：当前会话已用新库继续运行（旧库在磁盘上，重启也可）
+

@@ -59,6 +59,14 @@ pub enum CoreCommand {
     },
     /// Node installations discovered on this machine.
     ListNodeVersions,
+    /// Write a consistent copy of the database to `path` (refuses to overwrite).
+    ExportDatabase {
+        path: std::path::PathBuf,
+    },
+    /// Move the current database aside and start from an empty one.
+    ResetDatabase,
+    /// Where the live database file is.
+    DatabasePath,
     /// Task CRUD through the command surface (the UI never touches the catalog directly).
     AddTask {
         app_id: AppId,
@@ -139,6 +147,7 @@ impl CoreCommand {
                 | CoreCommand::ReorderTasks { .. }
                 | CoreCommand::SetEnvVars { .. }
                 | CoreCommand::UpdateSettings { .. }
+                | CoreCommand::ResetDatabase
         )
     }
 }
@@ -155,6 +164,9 @@ pub enum CoreReply {
     EnvVars(Vec<crate::service::EnvVarView>),
     RunHistory(Vec<neohub_domain::RunHistoryRow>),
     NodeVersions(Vec<crate::environment::NodeInstallation>),
+    DatabaseExported(std::path::PathBuf),
+    DatabaseReset(crate::database::ResetOutcome),
+    DatabasePath(Option<std::path::PathBuf>),
     LogBootstrap(LogSubscriptionOutcome),
     LogMatches(Vec<(TaskId, LineMatch)>),
     /// Absolute path written by `ExportLogs`.
