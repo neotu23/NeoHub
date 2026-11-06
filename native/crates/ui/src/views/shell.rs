@@ -24,6 +24,8 @@ enum HostUpdate {
     Candidates(Vec<ImportCandidate>),
     Imported,
     History(AppId, Vec<neohub_domain::RunHistoryRow>),
+    TaskSaved(Box<neohub_domain::Task>),
+    TaskError(String),
     Error(String),
 }
 
@@ -35,6 +37,8 @@ pub struct HostBridge {
     updates: Mutex<std::sync::mpsc::Receiver<HostUpdate>>,
     /// Command replies are pushed onto the same channel the event stream uses.
     reply_sink: Arc<std::sync::mpsc::Sender<HostUpdate>>,
+    /// Outcome of the last task save, picked up by the editor.
+    last_save: Mutex<(Option<neohub_domain::Task>, Option<String>)>,
     session_store: SessionStore,
 }
 
@@ -71,6 +75,7 @@ impl HostBridge {
             store: Mutex::new(UiStore::new(session)),
             updates: Mutex::new(rx),
             reply_sink,
+            last_save: Mutex::new((None, None)),
             session_store,
         });
         bridge.refresh_snapshot();
@@ -129,6 +134,26 @@ impl HostBridge {
                 Ok(CoreReply::ImportCandidates(candidates)) => HostUpdate::Candidates(candidates),
                 Ok(other) => HostUpdate::Error(format!("unexpected scan reply: {other:?}")),
                 Err(err) => HostUpdate::Error(format!("scan failed: {err}")),
+            };
+            let _ = sink.send(message);
+        });
+    }
+
+    /// Save one task from the editor; the reply feeds back through the update channel.
+    pub fn save_task(&self, task_id: TaskId, input: neohub_core::catalog::UpdateTaskInput) {
+        let handle = self.handle.clone();
+        let sink = self.reply_sink.clone();
+        self.runtime.spawn(async move {
+            let reply = handle
+                .request(CoreCommand::UpdateTask {
+                    task_id,
+                    input: Box::new(input),
+                })
+                .await;
+            let message = match reply {
+                Ok(CoreReply::Task(task)) => HostUpdate::TaskSaved(task),
+                Ok(other) => HostUpdate::TaskError(format!("unexpected save reply: {other:?}")),
+                Err(err) => HostUpdate::TaskError(err.to_string()),
             };
             let _ = sink.send(message);
         });
@@ -226,6 +251,8 @@ impl HostBridge {
         }
         let mut changed = false;
         let mut need_snapshot = false;
+        let mut saved_task: Option<neohub_domain::Task> = None;
+        let mut save_error: Option<String> = None;
         {
             let mut store = self.store.lock().expect("store lock");
             for update in updates {
@@ -251,6 +278,15 @@ impl HostBridge {
                         store.set_history(app_id, rows);
                         changed = true;
                     }
+                    HostUpdate::TaskSaved(task) => {
+                        store.upsert_task((*task).clone());
+                        saved_task = Some(*task);
+                        changed = true;
+                    }
+                    HostUpdate::TaskError(message) => {
+                        save_error = Some(message);
+                        changed = true;
+                    }
                     HostUpdate::Error(message) => {
                         store.set_import_error(message);
                         changed = true;
@@ -263,6 +299,12 @@ impl HostBridge {
             self.refresh_snapshot();
             changed = true;
         }
+        // Hand the save outcome back to the editor that is waiting for it.
+        if (saved_task.is_some() || save_error.is_some())
+            && let Ok(mut guard) = self.last_save.lock()
+        {
+            *guard = (saved_task, save_error);
+        }
         changed
     }
 
@@ -272,6 +314,12 @@ impl HostBridge {
         if let Err(err) = self.session_store.save(&session) {
             eprintln!("[ui] could not save the session: {err}");
         }
+    }
+
+    /// Take the last save outcome (task or error), clearing it.
+    pub fn take_save_outcome(&self) -> (Option<neohub_domain::Task>, Option<String>) {
+        let mut guard = self.last_save.lock().expect("save outcome");
+        std::mem::take(&mut *guard)
     }
 
     fn with_session(&self, f: impl FnOnce(&mut Session)) {

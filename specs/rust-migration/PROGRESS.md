@@ -410,7 +410,7 @@
        上述 `import_flow` 测试从命令层验证了同一链路
 
 ### 阶段 10：项目详情、任务编辑、环境变量与设置
-- 状态：**开发中**（编辑会话/保存屏障/语言包/文本输入/详情页完成；任务编辑器与设置面板待做）
+- 状态：**开发中**（编辑会话/保存屏障/语言包/文本输入/详情页/任务编辑器表单完成；编辑面板渲染与设置面板待做）
 - 工作分支与目录：`rewrite/rust-gpui` @ `/Users/neil/Code/NeoHub-Rust`
 - 最近提交：`feat: add edit drafts, save barrier and locales`
 - 实际修改文件：新增 `native/crates/ui/src/state/edit_session.rs`、
@@ -470,4 +470,18 @@
 - 未解决问题：
   1. 任务编辑器视图（表单：命令/工作目录/依赖/readiness/oneShot/enabled）与设置面板 → 本阶段剩余
   2. Open In、崩溃日志钉住、`.env` 变化横幅 → 阶段 12/15
+
+- 第四批完成（2026-11-06T23:10Z–23:35Z UTC）：
+  - `ui/state/task_form.rs`：`TaskForm`（名称/命令/工作目录/readiness 参数 + 六种 readiness /
+    oneShot / enabled），Tab 循环焦点，`to_update_input()` 产出 `UpdateTaskInput`，
+    本地校验与**后端错误映射到具体字段**（`FieldError`），`apply_external` 在脏状态下保留本地文本
+  - oneShot 勾选自动切换为 exit readiness（避免保存时必然失败）
+  - `HostBridge::save_task` + `HostUpdate::{TaskSaved,TaskError}` + `UiStore::upsert_task`，
+    保存结果回到界面并刷新任务 tab
+  - 测试：`cargo test -p neohub-ui --lib task_form` → **9 passed**
+    （输入→脏→载荷；Tab 循环；空名/端口 0 定位字段；oneShot→exit；六种 readiness 往返；
+    后端错误归因；脏状态外部刷新保留；干净状态跟随刷新；ack 清脏）
+  - `cargo test --workspace --locked` → **288 passed / 0 failed**；clippy **0 warnings**；`cargo fmt --all`
+  - 未解决问题：编辑面板的**视图渲染**（点击"编辑任务"展开表单、字段聚焦/键入、保存按钮）
+    仍是本阶段剩余；表单模型与保存通道已就绪，接线不需要新的核心能力
 

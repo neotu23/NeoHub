@@ -129,6 +129,24 @@ impl UiStore {
         &self.filter
     }
 
+    /// Replace one task in place (after a successful save) so the tabs show the new name.
+    pub fn upsert_task(&mut self, task: Task) {
+        let Some(snapshot) = self.snapshot.as_mut() else {
+            return;
+        };
+        match snapshot.tasks_by_app.get_mut(&task.app_id) {
+            Some(tasks) => match tasks.iter_mut().find(|existing| existing.id == task.id) {
+                Some(existing) => *existing = task,
+                None => tasks.push(task),
+            },
+            None => {
+                snapshot
+                    .tasks_by_app
+                    .insert(task.app_id.clone(), vec![task]);
+            }
+        }
+    }
+
     pub fn set_history(&mut self, app_id: AppId, rows: Vec<RunHistoryRow>) {
         self.history.insert(app_id, rows);
     }
