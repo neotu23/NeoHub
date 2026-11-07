@@ -785,6 +785,7 @@ enum Shortcut {
     Filter,
     GlobalSearch,
     RestartSelected,
+    Palette,
 }
 
 gpui_kit::actions!(
@@ -800,6 +801,8 @@ gpui_kit::actions!(
         GlobalSearch,
         /// ⌘R - restart the selected app.
         RestartSelected,
+        /// ⌘K - open the command palette.
+        OpenCommandPalette,
     ]
 );
 
@@ -838,6 +841,9 @@ pub struct ShellView {
     terminal_task: Option<TaskId>,
     /// Database reset needs two clicks: the first arms, the second acts.
     db_reset_armed: bool,
+    /// Open command palette, if any.
+    palette: Option<crate::state::command_palette::CommandPalette>,
+    palette_focus: FocusHandle,
     /// Global log search input.
     search_input: TextField,
     log_search_focus: FocusHandle,
@@ -852,12 +858,14 @@ impl ShellView {
             gpui_kit::KeyBinding::new("cmd-p", FocusFilter, None),
             gpui_kit::KeyBinding::new("cmd-shift-f", GlobalSearch, None),
             gpui_kit::KeyBinding::new("cmd-r", RestartSelected, None),
+            gpui_kit::KeyBinding::new("cmd-k", OpenCommandPalette, None),
         ]);
     }
 
     pub fn new(bridge: Arc<HostBridge>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self::bind_shortcuts(cx);
         let search_focus = cx.focus_handle();
+        let palette_focus = cx.focus_handle();
         let editor_focus = cx.focus_handle();
         let settings_focus = cx.focus_handle();
         let app_form_focus = cx.focus_handle();
@@ -885,6 +893,8 @@ impl ShellView {
             terminal_height: 16,
             terminal_task: None,
             db_reset_armed: false,
+            palette: None,
+            palette_focus,
             search_input: TextField::new(""),
             log_search_focus,
         }
@@ -961,6 +971,64 @@ fn state_label(state: ProcessState) -> &'static str {
 }
 
 impl ShellView {
+    /// Run the palette row the user clicked (matched by its label).
+    fn run_palette_row(&mut self, label: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let action = self.palette.as_ref().and_then(|state| {
+            state
+                .visible()
+                .iter()
+                .find(|item| item.label == label)
+                .map(|item| item.action.clone())
+        });
+        self.palette = None;
+        if let Some(action) = action {
+            self.perform_palette_action(action, window, cx);
+        }
+        cx.notify();
+    }
+
+    /// Carry out a palette action through the same paths the buttons use.
+    fn perform_palette_action(
+        &mut self,
+        action: crate::state::command_palette::PaletteAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::state::command_palette::PaletteAction;
+        match action {
+            PaletteAction::OpenApp(app_id) => {
+                self.bridge
+                    .store
+                    .lock()
+                    .expect("store lock")
+                    .session_mut()
+                    .select_app(app_id, None);
+            }
+            PaletteAction::StartApp(app_id) => {
+                self.bridge.send(CoreCommand::StartApp { app_id });
+            }
+            PaletteAction::StopApp(app_id) => {
+                self.bridge.send(CoreCommand::StopApp { app_id });
+            }
+            PaletteAction::RestartApp(app_id) => {
+                self.bridge.send(CoreCommand::RestartApp { app_id });
+            }
+            PaletteAction::Settings => {
+                self.on_shortcut(Shortcut::Settings, window, cx);
+                return;
+            }
+            PaletteAction::Import => {
+                self.on_shortcut(Shortcut::Import, window, cx);
+                return;
+            }
+            PaletteAction::GlobalSearch => {
+                self.on_shortcut(Shortcut::GlobalSearch, window, cx);
+                return;
+            }
+        }
+        cx.notify();
+    }
+
     /// Apply a shortcut. Kept as one method so the bindings and the behaviour are adjacent.
     fn on_shortcut(&mut self, action: Shortcut, window: &mut Window, cx: &mut Context<Self>) {
         match action {
@@ -984,6 +1052,19 @@ impl ShellView {
                     .expect("store lock")
                     .open_search(String::new());
                 self.search_input.clear();
+            }
+            Shortcut::Palette => {
+                let snapshot = self
+                    .bridge
+                    .store
+                    .lock()
+                    .expect("store lock")
+                    .snapshot_for_palette();
+                self.palette = Some(crate::state::command_palette::CommandPalette::new(
+                    snapshot.as_ref(),
+                ));
+                let focus = self.palette_focus.clone();
+                window.focus(&focus, cx);
             }
             Shortcut::RestartSelected => {
                 // Clone out of the lock: `send` must not run while the store is borrowed.
@@ -1571,6 +1652,117 @@ impl Render for ShellView {
                 }
             }));
             main = main.child(panel);
+        } else if let Some(palette_state) = self.palette.as_mut() {
+            // `palette` (the colour palette) is already bound above; this is the command palette.
+            let query = palette_state.query().to_string();
+            let cursor = palette_state.cursor();
+            let empty = palette_state.is_empty();
+            let rows: Vec<(String, String)> = palette_state
+                .visible()
+                .iter()
+                .enumerate()
+                .map(|(index, item)| {
+                    let label = if index == cursor {
+                        format!("› {}", item.label)
+                    } else {
+                        format!("   {}", item.label)
+                    };
+                    (label, item.detail.clone())
+                })
+                .collect();
+
+            let mut body = div()
+                .id("command-palette")
+                .track_focus(&self.palette_focus)
+                .flex()
+                .flex_col()
+                .gap(px(metrics::GAP_1))
+                .p(px(metrics::PAD_3))
+                .rounded(px(metrics::RADIUS_LG))
+                .border_1()
+                .border_color(palette.border_strong)
+                .bg(palette.bg_surface);
+
+            body = body.child(
+                div()
+                    .px(px(metrics::PAD_2))
+                    .py(px(metrics::GAP_1))
+                    .rounded(px(metrics::RADIUS_MD))
+                    .bg(palette.bg_base)
+                    .text_size(px(metrics::TEXT_BASE))
+                    .child(if query.is_empty() {
+                        "输入命令…".to_string()
+                    } else {
+                        format!("{query}▌")
+                    }),
+            );
+
+            if empty {
+                body = body.child(
+                    div()
+                        .text_size(px(metrics::TEXT_XS))
+                        .text_color(palette.fg_muted)
+                        .child("没有匹配项"),
+                );
+            }
+
+            for (label, detail) in rows {
+                let entity = cx.entity().downgrade();
+                // The label carries the cursor marker; strip it to find the row again.
+                let plain = label
+                    .trim_start_matches("› ")
+                    .trim_start_matches("   ")
+                    .to_string();
+                body = body.child(
+                    div()
+                        .id(format!("palette-row-{plain}"))
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .px(px(metrics::PAD_2))
+                        .py(px(1.0))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(palette.bg_elevated)
+                        .text_size(px(metrics::TEXT_SM))
+                        .cursor_pointer()
+                        .child(label)
+                        .child(
+                            div()
+                                .text_size(px(metrics::TEXT_XS))
+                                .text_color(palette.fg_subtle)
+                                .child(detail),
+                        )
+                        .on_click(move |_, window, cx| {
+                            let plain = plain.clone();
+                            let _ = entity.update(cx, |this, cx| {
+                                this.run_palette_row(&plain, window, cx);
+                            });
+                        }),
+                );
+            }
+
+            body = body.on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                let characters = event.keystroke.key_char.as_deref();
+                let key = event.keystroke.key.clone();
+                let outcome = match this.palette.as_mut() {
+                    Some(state) => state.apply_key(&key, characters),
+                    None => return,
+                };
+                match outcome {
+                    crate::state::command_palette::PaletteOutcome::Run(action) => {
+                        this.palette = None;
+                        this.perform_palette_action(action, window, cx);
+                    }
+                    crate::state::command_palette::PaletteOutcome::Close => {
+                        this.palette = None;
+                    }
+                    crate::state::command_palette::PaletteOutcome::Moved
+                    | crate::state::command_palette::PaletteOutcome::Ignored => {}
+                }
+                cx.notify();
+            }));
+
+            main = main.child(body);
         } else if let Some(form) = self.app_form.as_mut() {
             // App configuration: nine fields, same layout language as the task editor.
             let fields = form.fields().clone();
@@ -3643,6 +3835,9 @@ impl Render for ShellView {
             }))
             .on_action(cx.listener(|this, _: &RestartSelected, window, cx| {
                 this.on_shortcut(Shortcut::RestartSelected, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenCommandPalette, window, cx| {
+                this.on_shortcut(Shortcut::Palette, window, cx);
             }))
     }
 }

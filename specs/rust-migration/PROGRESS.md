@@ -1337,3 +1337,20 @@
   `cargo test --workspace --locked` → **485 passed / 0 failed**；clippy 0
 - 未解决问题：⌘K 快捷键与面板渲染（下一批）
 
+### U11 命令面板（第二批：⌘K 与面板）
+- 状态：**完成**
+- 最近提交：`feat: open the command palette with cmd-K`
+- 实际修改文件：`ui/src/views/shell.rs`（⌘K 动作与绑定、面板渲染、行点击、动作执行、
+  `palette`/`palette_focus` 状态）、`ui/src/state/store.rs`（`snapshot_for_palette`）
+- 接线内容：
+  1. ⌘K 打开，查询框 + 行列表，每行右侧显示状态或对应快捷键
+  2. 键盘：输入过滤、↑↓ 环绕、Enter 执行、Esc 关闭；鼠标点击任意行也能执行
+  3. 动作**复用已有路径**：打开应用走会话导航，启停/重启走 `CoreCommand`，
+     设置/导入/搜索走 `on_shortcut`（与按钮、快捷键完全同一条路）
+- 实现中踩到并修掉的坑：局部变量 `palette` 遮蔽了调色板 `palette`，导致一片"找不到函数"的
+  编译错误 —— 改名为 `palette_state` 并加注释说明谁是谁
+- 验证：`cargo test --workspace --locked` → **485 passed / 0 failed**；
+  命令面板模型 9 项测试全绿；clippy 0；重新打包（30 MB）并启动，日志无 error/panic
+- 对照表现在是 **65 已验证 / 24 部分 / 0 未开始**（共 94 项），`DELIVERY.md` 同步更新
+- 未解决问题：键盘/鼠标的实际交互需人工确认（无法自动化按键）
+

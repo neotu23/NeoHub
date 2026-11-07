@@ -681,6 +681,11 @@ impl UiStore {
             .cloned()
     }
 
+    /// The snapshot itself, for views that need to build from it (the command palette).
+    pub fn snapshot_for_palette(&self) -> Option<CoreSnapshot> {
+        self.snapshot.clone()
+    }
+
     /// Apps from the last snapshot (empty before the first one arrives).
     pub fn apps(&self) -> Vec<App> {
         self.snapshot
