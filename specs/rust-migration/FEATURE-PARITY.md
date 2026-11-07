@@ -51,7 +51,7 @@
 |---|---|---|---|---|---|
 | L1 | 主进程有界日志环：每任务 5 MiB / `log_ring_size` 行、全局 100 MiB、退出后淘汰 | `LogBuffer.ts` | 已验证（`LogBuffer.test.ts`） | `core/src/logs/buffer.rs`| 已验证（每任务 5 MiB / 全局 100 MiB / 单 chunk 10 KiB / 退出 10 分钟淘汰，按真实 UTF-8 字节计） |
 | L2 | 可见性订阅 `task:subscribeLogs/unsubscribeLogs`，只为可见任务推送 | `ipc/index.ts` | 部分 | `core/src/logs/subscription.rs`| 已验证（`SetLogFocus`：窗口只推送**当前可见任务**的日志事件；搜索面板打开或未选应用时推送全部；**字节永不丢弃** —— 环形缓冲仍完整，切换任务后可 bootstrap 取回） |
-| L3 | 合批推送 ~30 Hz / 16 KiB | `ipc/index.ts` | 部分 | `core/src/logs/buffer.rs`| 部分（事件泵按 100 ms 合并 `Log` 事件后批量应用，减少刷新次数；未按 16 KiB 分块上限） |
+| L3 | 合批推送 ~30 Hz / 16 KiB | `ipc/index.ts` | 部分 | `core/src/logs/buffer.rs`| 已验证（单次推送上限 **10 KiB**（`CHUNK_LIMIT`），低于旧版 ~16 KiB；一次 64 KiB 写入会被切成 ≥4 条事件且每字节不丢、seq 严格递增；UI 侧事件泵再按 100 ms 合并应用） |
 | L4 | 读取/尾读/清空缓冲 `readBuffer`/`tailBuffer`/`clearBuffer` | `ipc/index.ts` | 部分 | `core/src/logs/`| 已验证（`GetLogs`/`ClearLogs`/`BootstrapLogs` 命令；清空不影响进程） |
 | L5 | 跨任务全局日志搜索 `logs:searchAll`（正则 + limit） | `mcp/tools.ts`, `GlobalLogSearch.tsx` | 部分 | `core/src/logs/search.rs`| 已验证（`SearchLogs` 支持单任务与全局，字面量/正则/大小写/limit，非法正则报错） |
 | L6 | 单任务日志过滤视图（虚拟化 + 高亮 + 行号） | `LogSearchView.tsx` | 部分 | `ui/src/views/log_search.rs`| 部分（详情页终端面板 + 全局日志搜索面板：跨任务结果按 app/任务/行号定位、点击跳转选中项目与任务 tab；普通/正则、limit 复用核心匹配器） |

@@ -1671,3 +1671,19 @@
 - 未解决问题：字体渲染的观感需人工确认；若用户系统两者都没有，会退回系统默认（比例字体），
   此时列对齐仍会偏 —— GPUI 侧暂无字体回退链的显式 API
 
+### L3 日志推送分块上限（核实 + 锁定）
+- 状态：**完成**（实现早已满足，本轮补上核实与防回归）
+- 最近提交：`test: pin the log push chunk limit`
+- **核实结果**：`CHUNK_LIMIT = 10 KiB`，`LogStore::append` 按它切块，事件泵逐块发送 —— 已经
+  低于旧版 ~16 KiB 的上限。之前标"部分"是表过期，不是实现缺失
+- 本轮补的：
+  1. `the_push_chunk_limit_stays_under_the_legacy_cap`：常量若被调大就报错
+  2. `one_big_write_becomes_several_small_events`：64 KiB 一次写入 → ≥4 条事件、每条 ≤16 KiB、
+     seq 严格递增
+  3. `the_split_keeps_every_byte`：切分后拼回去与原文**逐字节相同**（顺序也一致）
+- 验证：`cargo test -p neohub-core --lib push_chunking` → **3 passed**
+  `cargo test --workspace --locked` → **553 passed / 0 failed**；clippy 0；打包自检通过；
+  启动日志无 error/panic
+- 备注：clippy 提示"常量断言恒为真"，改成对运行时副本断言（保留了检查意图，也不引入
+  `const` 断言的编译期噪音）
+

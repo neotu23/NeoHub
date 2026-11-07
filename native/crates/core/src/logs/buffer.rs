@@ -604,3 +604,58 @@ mod tests {
         assert_eq!(snapshot.parsed_bytes, 12);
     }
 }
+
+#[cfg(test)]
+mod push_chunking_tests {
+    use super::*;
+
+    #[test]
+    fn the_push_chunk_limit_stays_under_the_legacy_cap() {
+        // The legacy server capped a single log push at ~16 KiB so one burst could not stall the
+        // renderer. Ours is smaller; this check exists so nobody "optimises" the constant upward
+        // without noticing the contract it breaks. `const` asserts are compile-time, which is why
+        // this is an assertion on a runtime copy of the value.
+        let limit = CHUNK_LIMIT;
+        assert!(limit <= 16 * 1024, "CHUNK_LIMIT is {limit}, above the cap");
+    }
+
+    #[test]
+    fn one_big_write_becomes_several_small_events() {
+        let mut store = LogStore::with_budgets(1024 * 1024, 4 * 1024 * 1024, CHUNK_LIMIT);
+        let task = TaskId::from_existing("t1");
+        let run = RunId::from_existing("r1");
+        // 64 KiB in one go: the reader gets it as one read, the UI must not.
+        let burst = vec![b'x'; 64 * 1024];
+        let outcome = store.append(&task, &run, &burst);
+        assert!(
+            outcome.chunks.len() >= 4,
+            "a 64 KiB write must be split, got {} chunks",
+            outcome.chunks.len()
+        );
+        for (_, bytes) in &outcome.chunks {
+            assert!(
+                bytes.len() <= 16 * 1024,
+                "a single push was {} bytes",
+                bytes.len()
+            );
+        }
+        // Sequence numbers stay strictly increasing so a subscriber can order them.
+        let seqs: Vec<u64> = outcome.chunks.iter().map(|(seq, _)| *seq).collect();
+        assert!(seqs.windows(2).all(|pair| pair[1] > pair[0]), "{seqs:?}");
+    }
+
+    #[test]
+    fn the_split_keeps_every_byte() {
+        let mut store = LogStore::with_budgets(1024 * 1024, 4 * 1024 * 1024, CHUNK_LIMIT);
+        let task = TaskId::from_existing("t1");
+        let run = RunId::from_existing("r1");
+        let burst: Vec<u8> = (0..40_000u32).map(|index| (index % 251) as u8).collect();
+        let outcome = store.append(&task, &run, &burst);
+        let rejoined: Vec<u8> = outcome
+            .chunks
+            .iter()
+            .flat_map(|(_, bytes)| bytes.clone())
+            .collect();
+        assert_eq!(rejoined, burst, "splitting must not lose or reorder bytes");
+    }
+}
