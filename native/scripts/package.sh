@@ -108,4 +108,15 @@ if [ "${SKIP_DMG:-0}" != "1" ]; then
   echo "    dmg: $DIST/NeoHub-$VERSION.dmg ($(du -h "$DIST/NeoHub-$VERSION.dmg" | cut -f1))"
 fi
 
+# A bundle that is older than the sources is the failure mode that looks like success: the app
+# launches, runs the previous build, and nobody notices until a feature "does not work".
+echo "==> checking the bundle is not behind the sources"
+stale="$(find "$ROOT/crates" -name '*.rs' -newer "$APP/Contents/MacOS/neohub-desktop" 2>/dev/null)"
+if [ -n "$stale" ]; then
+  echo "ERROR: the bundle is older than these sources:" >&2
+  echo "$stale" | sed 's|^|  |' >&2
+  exit 1
+fi
+echo "    up to date with $ROOT/crates"
+
 echo "==> done: $APP"
