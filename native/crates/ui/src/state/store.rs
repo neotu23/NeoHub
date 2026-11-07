@@ -36,6 +36,8 @@ pub struct SidebarSection {
     /// True for the catch-all section, which always sorts last.
     pub is_catch_all: bool,
     pub apps: Vec<SidebarApp>,
+    /// True when the user collapsed this section.
+    pub collapsed: bool,
 }
 
 /// One dashboard card.
@@ -93,6 +95,9 @@ pub struct UiStore {
     snapshot: Option<CoreSnapshot>,
     /// Recent CPU samples per app (dashboard sparklines).
     cpu_history: std::collections::BTreeMap<AppId, Sparkline>,
+    /// Sections the user collapsed, by title. Kept in memory only: a collapsed folder is a
+    /// passing convenience, not a preference worth writing to `session.json`.
+    collapsed_sections: std::collections::BTreeSet<String>,
     session: Session,
     /// Tail of each task's raw output for the detail pane.
     logs: BTreeMap<TaskId, Vec<u8>>,
@@ -125,6 +130,7 @@ impl UiStore {
         UiStore {
             snapshot: None,
             cpu_history: std::collections::BTreeMap::new(),
+            collapsed_sections: std::collections::BTreeSet::new(),
             session,
             logs: BTreeMap::new(),
             filter: String::new(),
@@ -485,10 +491,33 @@ impl UiStore {
     /// Sidebar sections for the current grouping mode.
     pub fn sidebar_sections(&self) -> Vec<SidebarSection> {
         let apps = self.filtered_apps();
-        match self.session.group_by {
+        let mut sections = match self.session.group_by {
             GroupBy::Folder => self.group_by_folder(&apps),
             GroupBy::Tag => self.group_by_tag(&apps),
+        };
+        for section in &mut sections {
+            section.collapsed = self.collapsed_sections.contains(&section.title);
         }
+        sections
+    }
+
+    /// Collapse or expand one section by title.
+    pub fn toggle_section(&mut self, title: &str) {
+        if !self.collapsed_sections.remove(title) {
+            self.collapsed_sections.insert(title.to_string());
+        }
+    }
+
+    pub fn is_section_collapsed(&self, title: &str) -> bool {
+        self.collapsed_sections.contains(title)
+    }
+
+    /// Nothing to show at all (no apps registered).
+    pub fn has_no_apps(&self) -> bool {
+        self.snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.apps.is_empty())
+            .unwrap_or(true)
     }
 
     fn group_by_folder(&self, apps: &[&App]) -> Vec<SidebarSection> {
@@ -512,6 +541,7 @@ impl UiStore {
                 title: name,
                 is_catch_all: false,
                 apps: rows,
+                collapsed: false,
             });
         }
         if !ungrouped.is_empty() {
@@ -520,6 +550,7 @@ impl UiStore {
                 title: "(Ungrouped)".to_string(),
                 is_catch_all: true,
                 apps: ungrouped,
+                collapsed: false,
             });
         }
         out
@@ -548,6 +579,7 @@ impl UiStore {
                 title: name,
                 is_catch_all: false,
                 apps: rows,
+                collapsed: false,
             });
         }
         if !untagged.is_empty() {
@@ -556,6 +588,7 @@ impl UiStore {
                 title: "(Untagged)".to_string(),
                 is_catch_all: true,
                 apps: untagged,
+                collapsed: false,
             });
         }
         out
@@ -1328,5 +1361,112 @@ mod sparkline_sampling_tests {
             store.cpu_history.is_empty(),
             "a long session must not accumulate dead apps"
         );
+    }
+}
+
+#[cfg(test)]
+mod section_tests {
+    use super::*;
+
+    fn app_with_folder(id: &str, folder: Option<&str>) -> App {
+        App {
+            id: AppId::from_existing(id),
+            name: id.into(),
+            path: format!("/tmp/{id}"),
+            color: "#fff".into(),
+            icon: None,
+            node_version_pref: neohub_domain::NodeVersionPref::Auto,
+            package_manager: None,
+            default_script: None,
+            custom_command: None,
+            working_dir: "/tmp".into(),
+            auto_restart_on_change: false,
+            auto_start: false,
+            watch_globs: Vec::new(),
+            port_hint: None,
+            tags: Vec::new(),
+            folder: folder.map(str::to_string),
+            last_started_at: None,
+            last_exit_code: None,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn store_with(apps: Vec<App>) -> UiStore {
+        let mut store = UiStore::new(Session::default());
+        store.apply_snapshot(CoreSnapshot {
+            revision: 1,
+            apps: apps.clone(),
+            tasks_by_app: Default::default(),
+            running_tasks: Vec::new(),
+            app_states: Default::default(),
+            settings: Default::default(),
+            task_stats: Default::default(),
+            task_ports: Default::default(),
+            task_ready: Default::default(),
+        });
+        store
+    }
+
+    #[test]
+    fn collapsing_a_section_marks_only_that_section() {
+        let mut store = store_with(vec![
+            app_with_folder("a", Some("Work")),
+            app_with_folder("b", Some("Home")),
+        ]);
+        let titles: Vec<String> = store
+            .sidebar_sections()
+            .into_iter()
+            .map(|section| section.title)
+            .collect();
+        assert_eq!(titles.len(), 2);
+
+        store.toggle_section("Work");
+        let sections = store.sidebar_sections();
+        let work = sections.iter().find(|s| s.title == "Work").expect("work");
+        let home = sections.iter().find(|s| s.title == "Home").expect("home");
+        assert!(work.collapsed);
+        assert!(!home.collapsed, "only the clicked section collapses");
+        assert_eq!(
+            work.apps.len(),
+            1,
+            "the rows stay in the model, just hidden"
+        );
+
+        store.toggle_section("Work");
+        assert!(
+            !store
+                .sidebar_sections()
+                .iter()
+                .find(|s| s.title == "Work")
+                .expect("work")
+                .collapsed,
+            "toggling again expands"
+        );
+    }
+
+    #[test]
+    fn the_catch_all_section_collapses_like_any_other() {
+        let mut store = store_with(vec![app_with_folder("a", None)]);
+        let title = store
+            .sidebar_sections()
+            .into_iter()
+            .find(|section| section.is_catch_all)
+            .map(|section| section.title)
+            .expect("a catch-all section");
+        store.toggle_section(&title);
+        assert!(store.is_section_collapsed(&title));
+    }
+
+    #[test]
+    fn no_apps_is_reported_explicitly() {
+        let empty = UiStore::new(Session::default());
+        assert!(
+            empty.has_no_apps(),
+            "before the first snapshot there is nothing to show"
+        );
+        let filled = store_with(vec![app_with_folder("a", None)]);
+        assert!(!filled.has_no_apps());
     }
 }

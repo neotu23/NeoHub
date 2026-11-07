@@ -1165,6 +1165,51 @@ impl Render for ShellView {
             let _ = &settings_error;
         }
 
+        // Nothing registered yet: say what to do instead of showing an empty grid.
+        let no_apps = self.bridge.store.lock().expect("store lock").has_no_apps();
+        let empty_state_notice = if no_apps {
+            let entity = cx.entity().downgrade();
+            div()
+                .id("empty-state")
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(metrics::GAP_2))
+                .p(px(metrics::PAD_4))
+                .rounded(px(metrics::RADIUS_LG))
+                .border_1()
+                .border_color(palette.border)
+                .bg(palette.bg_surface)
+                .child(div().text_size(px(metrics::TEXT_BASE)).child("还没有项目"))
+                .child(
+                    div()
+                        .text_size(px(metrics::TEXT_SM))
+                        .text_color(palette.fg_muted)
+                        .child("扫描一个目录，把本地 Node 项目加进来"),
+                )
+                .child(
+                    div()
+                        .id("empty-state-import")
+                        .px(px(metrics::PAD_3))
+                        .py(px(metrics::GAP_1))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(palette.accent)
+                        .text_color(palette.accent_fg)
+                        .text_size(px(metrics::TEXT_SM))
+                        .cursor_pointer()
+                        .child("导入项目…")
+                        .on_click(move |_, _, cx| {
+                            let _ = entity.update(cx, |this, cx| {
+                                let dir = HostBridge::default_import_dir();
+                                this.bridge.begin_import(dir);
+                                cx.notify();
+                            });
+                        }),
+                )
+        } else {
+            div().id("empty-state-placeholder").w(px(0.0)).h(px(0.0))
+        };
+
         let query = self.search.text().to_string();
         let (sections, cards, totals, tags, filter) = {
             let mut store = self.bridge.store.lock().expect("store lock");
@@ -1314,13 +1359,38 @@ impl Render for ShellView {
         }
 
         for section in &sections {
+            let entity = cx.entity().downgrade();
+            let title = section.title.clone();
+            let collapsed = section.collapsed;
             sidebar = sidebar.child(
                 div()
+                    .id(format!("nav-section-{title}"))
                     .mt(px(metrics::GAP_2))
+                    .flex()
+                    .items_center()
+                    .gap(px(metrics::GAP_1))
                     .text_size(px(metrics::TEXT_XS))
                     .text_color(palette.fg_subtle)
-                    .child(section.title.clone()),
+                    .cursor_pointer()
+                    // The marker says which way the click will go, so the header is readable
+                    // without hovering it.
+                    .child(if collapsed { "▸" } else { "▾" })
+                    .child(title.clone())
+                    .on_click(move |_, _, cx| {
+                        let title = title.clone();
+                        let _ = entity.update(cx, |this, cx| {
+                            this.bridge
+                                .store
+                                .lock()
+                                .expect("store lock")
+                                .toggle_section(&title);
+                            cx.notify();
+                        });
+                    }),
             );
+            if collapsed {
+                continue;
+            }
             for row in &section.apps {
                 let bridge = self.bridge.clone();
                 let app_id = row.app_id.clone();
@@ -3832,6 +3902,7 @@ impl Render for ShellView {
             .bg(palette.bg_base)
             .child(sidebar)
             .child(main)
+            .child(empty_state_notice)
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
                 this.on_shortcut(Shortcut::Settings, window, cx);
             }))

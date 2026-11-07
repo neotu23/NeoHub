@@ -1373,3 +1373,20 @@
   重新打包（30 MB）并启动，日志无 error/panic
 - 未解决问题：卡片空态文案（没有应用时的提示）仍未做
 
+### U1/U2 侧栏折叠与空态（UI 细节第二批）
+- 状态：**完成**
+- 最近提交：`feat: collapse sidebar sections and guide an empty dashboard`
+- 实际修改文件：`ui/src/state/store.rs`（`SidebarSection.collapsed`、`toggle_section`、`has_no_apps`）、
+  `ui/src/views/shell.rs`（分组头可点击、空态面板）
+- 内容：
+  1. **分组折叠**：点分组标题折叠/展开，标题前用 `▸`/`▾` 指示方向（不悬停也能看懂点击会怎样）。
+     折叠只影响显示，行仍在模型里 —— 快照刷新不会把状态弄丢
+  2. 折叠状态**只存内存**：折叠一个文件夹是随手动作，不值得写进 `session.json`
+  3. **空态引导**：没有项目时显示"还没有项目 / 扫描一个目录…"与「导入项目…」按钮，
+     而不是一片空白网格
+- 验证：`cargo test -p neohub-ui --lib section_tests` → **3 passed**
+  （折叠只影响被点的分组、再次点击展开、兜底分组也可折叠、无应用时明确报告）
+  `cargo test --workspace --locked` → **498 passed / 0 failed**；clippy 0；
+  重新打包（30 MB）并启动，日志无 error/panic
+- 未解决问题：⋮ 菜单与拖拽分组（U1 剩余部分）
+
