@@ -41,6 +41,8 @@ pub struct EnvRow {
     pub value: RowValue,
     pub enabled: bool,
     pub note: Option<String>,
+    /// The stored value is legacy `enc1:` ciphertext that this build cannot read.
+    pub needs_reentry: bool,
 }
 
 impl EnvRow {
@@ -93,6 +95,8 @@ impl EnvEditor {
                 },
                 enabled: var.enabled,
                 note: var.note,
+                // Copying the flag is what makes the panel able to say "re-enter this".
+                needs_reentry: var.needs_reentry,
             })
             .collect();
         EnvEditor {
@@ -121,6 +125,7 @@ impl EnvEditor {
             value: RowValue::Text(String::new()),
             enabled: true,
             note: None,
+            needs_reentry: false,
         });
     }
 
@@ -197,6 +202,7 @@ impl EnvEditor {
                         value: RowValue::Text(value),
                         enabled: true,
                         note: None,
+                        needs_reentry: false,
                     });
                 }
             }
@@ -287,6 +293,7 @@ mod tests {
             is_secret,
             enabled,
             note: None,
+            needs_reentry: false,
         }
     }
 
@@ -444,6 +451,7 @@ mod inline_edit_tests {
             is_secret: secret,
             enabled: true,
             note: None,
+            needs_reentry: false,
         }
     }
 

@@ -154,7 +154,7 @@
 | B3 | 外键与级联（app 删除 → task/env/history） | `0001`–`0007` | 部分 | `storage/src/` | 已验证（删除 app 级联清空 tasks/env/history） |
 | B4 | `db:export` / `db:reset` / `db:path`（WAL 安全导出） | `ipc/index.ts` | 部分 | `storage/src/` + `ui/src/views/settings.rs`| 已验证（命令面 `DatabasePath/ExportDatabase/ResetDatabase` + 设置面板「危险区」：打开日志目录、导出到 `<data>/exports/neohub-<ts>.db`、重置需**两次点击**确认；`VACUUM INTO` 一致导出、重置前三件套一起改名） |
 | B5 | 历史用户目录发现（`NeoHub` → `DevHarbor` → `devharbor`，含 `devharbor.db`） | `AppIdentity.ts` | 已验证（`AppIdentity.test.ts` 4 例） | `storage/src/import/legacy_db.rs`| 已验证（`discover_legacy_dir` 按 NeoHub→DevHarbor→devharbor 顺序找含 devharbor.db 的目录） |
-| B6 | 旧库 + 密钥迁移（`enc1:` safeStorage → 新版本前缀密文） | 计划阶段 13 | 未实现（旧版没有导出入口） | `storage/src/import/`| 部分（`enc1:` 原样复制并计数为待重录；旧版 opt-in 导出入口与重新加密待做） |
+| B6 | 旧库 + 密钥迁移（`enc1:` safeStorage → 新版本前缀密文） | 计划阶段 13 | 未实现（旧版没有导出入口） | `storage/src/import/`| 已验证（导入：源只读复制 → staging → integrity/foreign_key 校验 → 文件级 rename；重复导入不覆盖原生编辑；**`enc1:` 旧密文在环境变量面板标「需重录」并可就地改**，密文本身仍不出 core；旧版 opt-in 自动导出仍属可选增强） |
 
 ## 12. 界面视图与组件
 

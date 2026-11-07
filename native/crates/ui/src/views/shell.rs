@@ -3850,6 +3850,17 @@ impl Render for ShellView {
                                             }),
                                     )
                                     .child({
+                                        // A row whose value is legacy ciphertext cannot be
+                                        // decrypted here; the only fix is typing it again, so
+                                        // the row says that instead of looking merely "set".
+                                        let reentry = row.needs_reentry;
+                                        div()
+                                            .id(format!("env-reentry-{index}"))
+                                            .text_size(px(metrics::TEXT_XS))
+                                            .text_color(palette.warn_fg)
+                                            .child(if reentry { "需重录" } else { "" })
+                                    })
+                                    .child({
                                         let entity = cx.entity().downgrade();
                                         let focus = self.env_focus.clone();
                                         let editing = matches!(env_editing, Some((index_now, false)) if index_now == index);

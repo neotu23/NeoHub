@@ -347,3 +347,60 @@ async fn an_undecryptable_secret_blocks_the_start() {
         .await
         .expect("shutdown");
 }
+
+#[tokio::test]
+async fn a_legacy_ciphertext_is_reported_as_needing_re_entry() {
+    // Imported `enc1:` values cannot be decrypted, so the row must say "re-enter me" rather than
+    // looking like a secret that is simply set. The ciphertext itself still never reaches a view.
+    use neohub_core::commands::{CoreCommand, CoreReply};
+    use neohub_core::service::EnvScope;
+    use neohub_storage::db::DataDir;
+
+    let dir = tempfile::tempdir().unwrap();
+    // Write the legacy row the way the importer does - straight into the table, bypassing the
+    // encryption that `SetEnvVars` applies (which would turn it into nhk1:).
+    {
+        let storage = neohub_storage::Storage::open(DataDir::new(dir.path())).expect("storage");
+        let row = |key: &str, value: &str, secret: bool| neohub_domain::EnvVar {
+            id: neohub_domain::EnvVarId::new(),
+            app_id: None,
+            task_id: None,
+            key: key.to_string(),
+            value: value.to_string(),
+            enabled: true,
+            is_secret: secret,
+            note: None,
+            created_at: 0,
+            updated_at: 0,
+        };
+        storage
+            .env_store()
+            .set_global(
+                &[
+                    row("OLD_TOKEN", "enc1:v10:AAAA", true),
+                    row("PLAIN", "visible", false),
+                ],
+                1,
+            )
+            .expect("legacy rows");
+    }
+    let service = neohub_core::service::CoreService::open(DataDir::new(dir.path())).expect("core");
+    let handle = service.handle();
+
+    let reply = handle
+        .request(CoreCommand::ListEnvVars {
+            scope: EnvScope::Global,
+        })
+        .await
+        .expect("list");
+    let CoreReply::EnvVars(rows) = reply else {
+        panic!("unexpected reply");
+    };
+    let legacy = rows.iter().find(|row| row.key == "OLD_TOKEN").expect("row");
+    let plain = rows.iter().find(|row| row.key == "PLAIN").expect("row");
+
+    assert!(legacy.needs_reentry, "the enc1: row is flagged");
+    assert!(legacy.value.is_none(), "and its text stays in the core");
+    assert!(!plain.needs_reentry);
+    assert_eq!(plain.value.as_deref(), Some("visible"));
+}

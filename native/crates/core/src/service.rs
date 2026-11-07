@@ -719,6 +719,8 @@ impl CoreService {
         Ok(vars
             .into_iter()
             .map(|var| EnvVarView {
+                // Read before the value is hidden below: only the prefix is inspected.
+                needs_reentry: var.value.starts_with("enc1:"),
                 key: var.key,
                 // A secret never leaves the core as text; the UI only learns that it is set.
                 value: if var.is_secret { None } else { Some(var.value) },
@@ -1242,6 +1244,11 @@ pub struct EnvVarView {
     pub is_secret: bool,
     pub enabled: bool,
     pub note: Option<String>,
+    /// True when the stored value is legacy `enc1:` ciphertext, which this build cannot read.
+    ///
+    /// The only fix is re-entering the value, so the row says so instead of looking like a secret
+    /// that is simply set. `list_env_vars` reports the flag; nothing else ever sees the ciphertext.
+    pub needs_reentry: bool,
 }
 
 /// One row to write. `value: None` means "keep whatever is stored".

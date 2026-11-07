@@ -1744,3 +1744,20 @@
   启动日志无 error/panic
 - 未解决问题：高亮的实际观感需人工确认；高亮只跟随全局搜索词，详情页尚无独立搜索框
 
+### B6 `enc1:` 密钥重录
+- 状态：**完成**（重录路径可用；自动解密仍需要旧版配合，但不再阻塞用户）
+- 最近提交：`feat: flag legacy ciphertext so it can be re-entered`
+- 为什么这样收口：`enc1:` 只有旧版进程能解。与其等一个需要旧版改动的自动导出，不如把
+  **用户本来就必须做的那一步**做顺：在环境变量面板里明确指出哪一行需要重录，并允许就地编辑
+  （行内编辑上一轮已完成）。改完即写成 `nhk1:` 新密文
+- 实现：
+  1. `EnvVarView.needs_reentry`：core 只看前缀是否为 `enc1:`，**密文本身仍不出 core**
+  2. `EnvRow.needs_reentry` 传递到面板，行上显示 `需重录`（`warn` 色）
+  3. 用户就地改值 → `SetEnvVars` 用新密钥重新加密
+- 验证：`cargo test -p neohub-core --test core_service a_legacy…` → **1 passed**
+  （`enc1:` 行被标记、其文本仍为 `None`；普通行不受影响）
+  `cargo test --workspace --locked` → **567 passed / 0 failed**；clippy 0；打包自检通过；
+  启动日志无 error/panic
+- 未解决问题：没有"自动批量重录"（需要旧版导出明文）；启动流程对 `enc1:` 的拦截仍会让任务
+  起不来（这是正确的，错误已能说明原因并可引导重录）
+
