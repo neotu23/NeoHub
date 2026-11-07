@@ -158,6 +158,8 @@ impl SettingsForm {
                 .then_some(self.draft.mcp_require_auth),
             mcp_https: differs(self.draft.mcp_https, self.baseline.mcp_https)
                 .then_some(self.draft.mcp_https),
+            // Not edited here: the update row owns the skip, so a settings save never touches it.
+            skipped_update_version: None,
         }
     }
 }

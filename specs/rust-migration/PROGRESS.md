@@ -1568,3 +1568,21 @@
   启动日志无 error/panic
 - 未解决问题：通知实际弹出需人工确认（自动化不能看横幅）
 
+### S10 忽略此版本
+- 状态：**完成**
+- 最近提交：`feat: let the user skip an update version`
+- 实际修改文件：`domain/src/settings.rs`（`skipped_update_version: Option<String>` + patch 的
+  `Option<Option<String>>`）、`storage/src/settings.rs`（读写该键）、`core/src/update.rs`
+  （`respect_skip`）、`ui/src/views/shell.rs`（应用跳过 + 「忽略 X」按钮）
+- 语义要点：
+  1. **跳过一个版本 ≠ 关掉更新检查**：跳过 1.5.0 之后 1.6.0 仍然会提示（有测试）
+  2. 跳过值存**归一化后的版本号**，`v1.5.0` 与 `1.5.0` 视为同一个
+  3. 无法解析的跳过值**不会**静默隐藏更新（有测试）
+  4. `Option<Option<String>>` 让"清除跳过"与"没提到该字段"区分开（设置表单保存时不碰它）
+- 顺带修的结构问题：`write_settings` 原本是固定长度数组，加键时改成了 `Vec`
+- 验证：`cargo test -p neohub-domain --lib settings` → **6 passed**（含跳过/保留/清除三级语义）
+  `cargo test -p neohub-core --lib update` → **9 passed**（含跳过不再提示、更新版本仍提示、坏值被忽略）
+  `cargo test --workspace --locked` → **538 passed / 0 failed**；clippy 0；打包自检通过；
+  启动日志无 error/panic
+- 未解决问题：「忽略 X」按钮的实际点击需人工确认
+

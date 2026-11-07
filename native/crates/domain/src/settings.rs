@@ -85,6 +85,12 @@ pub struct Settings {
     pub mcp_port: u16,
     pub mcp_require_auth: bool,
     pub mcp_https: bool,
+    /// Version the user asked not to be told about again ("skip this release").
+    ///
+    /// Stored as the normalised version string, so a re-tagged release with the same number
+    /// stays skipped while a genuinely newer one still shows up.
+    #[serde(default)]
+    pub skipped_update_version: Option<String>,
 }
 
 impl Default for Settings {
@@ -107,6 +113,7 @@ impl Default for Settings {
             mcp_port: 6872,
             mcp_require_auth: true,
             mcp_https: false,
+            skipped_update_version: None,
         }
     }
 }
@@ -132,6 +139,9 @@ pub struct SettingsPatch {
     pub mcp_port: Option<u16>,
     pub mcp_require_auth: Option<bool>,
     pub mcp_https: Option<bool>,
+    /// `Some(Some(version))` skips that version, `Some(None)` clears the skip.
+    #[serde(default)]
+    pub skipped_update_version: Option<Option<String>>,
 }
 
 impl Settings {
@@ -191,12 +201,48 @@ impl Settings {
         if let Some(v) = patch.mcp_https {
             self.mcp_https = v;
         }
+        if let Some(v) = &patch.skipped_update_version {
+            // `Some(None)` is an explicit "clear", which is different from "not mentioned".
+            self.skipped_update_version = v.clone();
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skipping_an_update_version_can_also_be_cleared() {
+        let mut settings = Settings::default();
+        assert!(
+            settings.skipped_update_version.is_none(),
+            "nothing skipped yet"
+        );
+
+        settings.apply(&SettingsPatch {
+            skipped_update_version: Some(Some("1.5.0".into())),
+            ..Default::default()
+        });
+        assert_eq!(settings.skipped_update_version.as_deref(), Some("1.5.0"));
+
+        // A patch that does not mention the field leaves it alone.
+        settings.apply(&SettingsPatch::default());
+        assert_eq!(
+            settings.skipped_update_version.as_deref(),
+            Some("1.5.0"),
+            "an unrelated patch must not forget the skip"
+        );
+
+        settings.apply(&SettingsPatch {
+            skipped_update_version: Some(None),
+            ..Default::default()
+        });
+        assert!(
+            settings.skipped_update_version.is_none(),
+            "an explicit clear removes the skip"
+        );
+    }
 
     #[test]
     fn defaults_match_the_electron_service() {

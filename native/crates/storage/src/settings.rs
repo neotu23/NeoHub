@@ -68,6 +68,11 @@ impl<'c> SettingsStore<'c> {
             mcp_port: num("mcp_port", defaults.mcp_port as u64) as u16,
             mcp_require_auth: boolean("mcp_require_auth", defaults.mcp_require_auth),
             mcp_https: boolean("mcp_https", defaults.mcp_https),
+            skipped_update_version: map
+                .get("skipped_update_version")
+                .filter(|value| !value.is_empty())
+                .cloned()
+                .or_else(|| defaults.skipped_update_version.clone()),
         })
     }
 
@@ -85,7 +90,7 @@ impl<'c> SettingsStore<'c> {
 }
 
 fn write_settings(conn: &Connection, settings: &Settings) -> Result<()> {
-    let pairs: [(&str, String); 16] = [
+    let mut pairs: Vec<(&str, String)> = vec![
         ("log_ring_size", settings.log_ring_size.to_string()),
         ("kill_grace_ms", settings.kill_grace_ms.to_string()),
         ("auto_update", bool_str(settings.auto_update)),
@@ -109,6 +114,11 @@ fn write_settings(conn: &Connection, settings: &Settings) -> Result<()> {
         ("mcp_require_auth", bool_str(settings.mcp_require_auth)),
         ("mcp_https", bool_str(settings.mcp_https)),
     ];
+    // The skip is optional: an empty string means "nothing skipped", which reads back as None.
+    pairs.push((
+        "skipped_update_version",
+        settings.skipped_update_version.clone().unwrap_or_default(),
+    ));
     for (key, value) in pairs {
         conn.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2)

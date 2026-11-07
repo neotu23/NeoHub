@@ -84,6 +84,8 @@ pub struct HostBridge {
     last_db_notice: Mutex<Option<String>>,
     /// Outcome of the last update check: (status summary, has update).
     last_update: Mutex<Option<(String, bool)>>,
+    /// The version an update was found for, so it can be skipped.
+    last_update_version: Mutex<Option<String>>,
     /// Outcome of the last settings save, picked up by the settings panel.
     last_settings: Mutex<(Option<neohub_domain::Settings>, Option<String>)>,
     /// Environment-variable loads/saves waiting to be folded into the editor.
@@ -130,6 +132,7 @@ impl HostBridge {
             last_app_save: Mutex::new((None, None)),
             last_db_notice: Mutex::new(None),
             last_update: Mutex::new(None),
+            last_update_version: Mutex::new(None),
             last_settings: Mutex::new((None, None)),
             last_env: Mutex::new((Vec::new(), None)),
             session_store,
@@ -642,6 +645,7 @@ impl HostBridge {
         let mut notices_out: Vec<(crate::state::toast::ToastKind, String)> = Vec::new();
         let mut pins_out: Vec<crate::state::crash_pin::CrashPin> = Vec::new();
         let mut update_out: Option<(String, bool)> = None;
+        let mut update_version_out: Option<String> = None;
         let mut app_saved_out: Option<neohub_domain::App> = None;
         let mut app_save_error_out: Option<String> = None;
         let mut save_error: Option<String> = None;
@@ -806,7 +810,17 @@ impl HostBridge {
                         changed = true;
                     }
                     HostUpdate::UpdateChecked(status) => {
+                        let status = neohub_core::update::respect_skip(
+                            status,
+                            store.settings().skipped_update_version.as_deref(),
+                        );
                         update_out = Some((status.summary(), status.is_available()));
+                        update_version_out = match &status {
+                            neohub_core::update::UpdateStatus::Available { latest, .. } => {
+                                Some(latest.clone())
+                            }
+                            neohub_core::update::UpdateStatus::UpToDate { .. } => None,
+                        };
                         changed = true;
                     }
                     HostUpdate::UpdateFailed(message) => {
@@ -864,6 +878,11 @@ impl HostBridge {
             && let Ok(mut guard) = self.last_update.lock()
         {
             *guard = Some(update);
+        }
+        if let Some(version) = update_version_out
+            && let Ok(mut guard) = self.last_update_version.lock()
+        {
+            *guard = Some(version);
         }
         if !pins_out.is_empty()
             && let Ok(mut store) = self.store.lock()
@@ -2727,6 +2746,36 @@ impl Render for ShellView {
                                 .on_click(move |_, _, _| check_bridge.check_for_updates()),
                         );
                         if has_update {
+                            let skip_bridge = bridge.clone();
+                            let skip_version = self
+                                .bridge
+                                .last_update_version
+                                .lock()
+                                .ok()
+                                .and_then(|guard| guard.clone());
+                            if let Some(version) = skip_version {
+                                row = row.child(
+                                    div()
+                                        .id("settings-skip-update")
+                                        .px(px(metrics::PAD_2))
+                                        .py(px(metrics::GAP_1))
+                                        .rounded(px(metrics::RADIUS_MD))
+                                        .bg(palette.bg_elevated)
+                                        .text_size(px(metrics::TEXT_SM))
+                                        .cursor_pointer()
+                                        .child(format!("忽略 {version}"))
+                                        .on_click(move |_, _, _| {
+                                            skip_bridge.save_settings(
+                                                neohub_domain::SettingsPatch {
+                                                    skipped_update_version: Some(Some(
+                                                        version.clone(),
+                                                    )),
+                                                    ..Default::default()
+                                                },
+                                            );
+                                        }),
+                                );
+                            }
                             row = row.child(
                                 div()
                                     .id("settings-download-update")

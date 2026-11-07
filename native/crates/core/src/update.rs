@@ -81,6 +81,30 @@ pub fn normalise_version(tag: &str) -> Option<String> {
     Some(version.to_string())
 }
 
+/// Apply the user's "skip this version" choice to a check result.
+///
+/// A skipped release is reported as up to date: showing a banner the user already dismissed is
+/// how update prompts get ignored for good. A *newer* release still shows, because the skip is
+/// about one version, not about updates.
+pub fn respect_skip(status: UpdateStatus, skipped: Option<&str>) -> UpdateStatus {
+    let (UpdateStatus::Available { latest, .. }, Some(skipped)) = (&status, skipped) else {
+        return status;
+    };
+    let Some(skipped) = normalise_version(skipped) else {
+        return status;
+    };
+    if normalise_version(latest).as_deref() == Some(skipped.as_str()) {
+        UpdateStatus::UpToDate {
+            current: match &status {
+                UpdateStatus::Available { current, .. } => current.clone(),
+                UpdateStatus::UpToDate { current } => current.clone(),
+            },
+        }
+    } else {
+        status
+    }
+}
+
 /// Compare the running version with the newest published one.
 pub fn compare(
     current: &str,
@@ -226,6 +250,34 @@ mod tests {
                 .summary()
                 .contains("1.4.0")
         );
+    }
+
+    #[test]
+    fn a_skipped_version_is_not_offered_again() {
+        let status = compare("1.4.0", "v1.5.0", None, None);
+        assert!(status.is_available());
+        let skipped = respect_skip(status.clone(), Some("1.5.0"));
+        assert!(!skipped.is_available(), "the skipped release stops asking");
+        assert!(skipped.summary().contains("1.4.0"));
+    }
+
+    #[test]
+    fn a_newer_release_still_shows_after_a_skip() {
+        let status = compare("1.4.0", "v1.6.0", None, None);
+        assert!(
+            respect_skip(status, Some("1.5.0")).is_available(),
+            "skipping 1.5.0 must not hide 1.6.0"
+        );
+    }
+
+    #[test]
+    fn a_nonsense_skip_value_is_ignored() {
+        let status = compare("1.4.0", "v1.5.0", None, None);
+        assert!(
+            respect_skip(status.clone(), Some("nonsense")).is_available(),
+            "an unparsable skip cannot silently hide updates"
+        );
+        assert!(respect_skip(status, None).is_available());
     }
 
     #[test]
