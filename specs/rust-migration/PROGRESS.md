@@ -1846,3 +1846,17 @@
   `cargo test --workspace --locked` → **575 passed / 0 failed**；clippy 0
 - 未解决问题：`enc1:` 密文本次为 0 条（旧库没有秘密变量），若有需按面板「需重录」处理
 
+### 重新打包（产物曾落后于源码）
+- 状态：**完成**
+- 你问到的正是问题所在：`dist/NeoHub.app` 的时间戳是 10:56，而迁移 CLI 与本轮 bug 修复是在那之后提交的
+  （`crates/desktop/src/{main,lib,migrate}.rs`、`crates/storage/src/import/legacy_import.rs` 都比产物新）
+- 实证：旧产物**不认** `--migrate-legacy`（直接去开窗口），说明它是修复前的构建
+- 已用当前 HEAD 重新打包：
+  - 打包自检通过（`up to date with …/crates`），落后文件数 **0**
+  - **打包版现在带 `--migrate-legacy`**：用一个 dry-run 实跑确认，报告 4 apps / 4 tasks / 9 runs
+  - 用导入后的真实数据启动：`pid=22105`、**0 errors**，应用日志记录 `data dir: …/NeoHub-Rust-Dev`
+  - 数据仍在（`4 apps`）
+- 顺带说明一处细节：打包版 dry-run 报 `wal present: no`，而之前是 `yes` ——
+  因为第一次迁移的复制过程完成后旧库被 checkpoint 了；这不影响结果，源库 sha256 仍是
+  `eadcd3d9…09cbab`
+
