@@ -72,8 +72,8 @@ impl AppForm {
             auto_start: app.auto_start,
             auto_restart_on_change: app.auto_restart_on_change,
         };
-        let mut text = TextField::new("app_form");
-        text.set_text(fields.name.clone());
+        // `TextField::new` takes the initial text, not an id; the name is loaded by focus.
+        let text = TextField::new(fields.name.clone());
         AppForm {
             app_id: app.id.as_str().to_string(),
             baseline: fields.clone(),

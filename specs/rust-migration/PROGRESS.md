@@ -1316,3 +1316,24 @@
   （只有 `auto_start` 的应用被尝试、二次调用不重复启动）
   `cargo test --workspace --locked` → **476 passed / 0 failed**；clippy 0
 
+### U11 命令面板（第一批：模型）
+- 状态：**模型完成**；⌘K 与面板渲染未接（按你的选择，这是下一步的重点）
+- 最近提交：`feat: model the command palette`
+- 实际修改文件：新增 `ui/src/state/command_palette.rs`；更新 `ui/src/state/mod.rs`、
+  `ui/src/state/app_form.rs`（顺手修掉一处同类缺陷，见下）
+- 模型要点：
+  1. 两组：**应用**（打开/启动/停止/重启，按当前状态过滤）+ **操作**（设置/导入/全局搜索）
+  2. 会"什么都做不到"的行**不出现**（空闲应用没有"停止"，运行中的应用没有"启动"）——
+     否则用户会误触到无效行
+  3. 排序稳定：组内按名称（再按 id）排，与侧栏一致，避免每次打开位置乱跳
+  4. 匹配是**子序列**（`ovr` 能命中 `overview`），这是面板"跟手"的关键
+  5. 方向键环绕、Enter 执行、Esc 关闭、空结果时 Enter 不是崩溃
+- **顺手修的同类缺陷**：`TextField::new(x)` 的参数是**初始文本**不是 id。命令面板最初传 `"palette"`
+  导致查询里带着这个词（测试立刻抓到）；`AppForm` 里也有同样的误用（`new("app_form")`），
+  因为随后 `set_text` 覆盖才没暴露出来 —— 一并改正
+- 验证：`cargo test -p neohub-ui --lib command_palette` → **9 passed**
+  （两组行、按状态过滤、输入缩小范围并重置光标、子序列匹配、方向键环绕、Enter 取当前行、
+  Esc/未知键、空快照仍有全局动作、无匹配时不崩）
+  `cargo test --workspace --locked` → **485 passed / 0 failed**；clippy 0
+- 未解决问题：⌘K 快捷键与面板渲染（下一批）
+
