@@ -296,3 +296,141 @@ mod tests {
         assert_eq!(view.visible_text(2, true), "two\nthree");
     }
 }
+
+/// Character ranges of `needle` inside `text`, case-insensitively.
+///
+/// Character indices, not byte offsets: slicing UTF-8 by bytes on a non-boundary panics, and a
+/// log line with CJK or emoji is normal. Rendering splits on the same character vector, so the two
+/// agree by construction.
+pub fn highlight_ranges(text: &str, needle: &str) -> Vec<(usize, usize)> {
+    let needle: Vec<char> = needle.chars().flat_map(|c| c.to_lowercase()).collect();
+    if needle.is_empty() {
+        return Vec::new();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let lowered: Vec<char> = text.chars().flat_map(|c| c.to_lowercase()).collect();
+    // A character can lowercase into several (rare, but it happens), so the lowered vector is not
+    // guaranteed to line up with `chars`. Only trust it when lengths match; otherwise fall back to
+    // a case-sensitive scan rather than mis-highlighting.
+    let aligned = lowered.len() == chars.len();
+    let haystack = if aligned { lowered } else { chars.clone() };
+
+    let mut ranges = Vec::new();
+    let mut index = 0;
+    while index + needle.len() <= haystack.len() {
+        if haystack[index..index + needle.len()] == needle[..] {
+            ranges.push((index, index + needle.len()));
+            // Skip past the match: overlapping hits on the same text would draw twice.
+            index += needle.len();
+        } else {
+            index += 1;
+        }
+    }
+    ranges
+}
+
+/// Split one styled run into pieces, marking the highlighted ones.
+///
+/// `offset` is the run's starting character index within the row, so ranges computed for the whole
+/// row can be applied per run.
+pub fn split_run_for_highlight(
+    run_text: &str,
+    offset: usize,
+    ranges: &[(usize, usize)],
+) -> Vec<(String, bool)> {
+    if ranges.is_empty() || run_text.is_empty() {
+        return vec![(run_text.to_string(), false)];
+    }
+    let chars: Vec<char> = run_text.chars().collect();
+    let end = offset + chars.len();
+    let mut cuts: Vec<usize> = vec![offset];
+    for (start, stop) in ranges {
+        for boundary in [*start, *stop] {
+            if boundary > offset && boundary < end {
+                cuts.push(boundary);
+            }
+        }
+    }
+    cuts.sort_unstable();
+    cuts.dedup();
+
+    let mut pieces = Vec::new();
+    for (position, start) in cuts.iter().enumerate() {
+        let stop = cuts.get(position + 1).copied().unwrap_or(end);
+        if stop <= *start {
+            continue;
+        }
+        let slice: String = chars[*start - offset..stop - offset].iter().collect();
+        let highlighted = ranges
+            .iter()
+            .any(|(range_start, range_stop)| *start >= *range_start && *start < *range_stop);
+        pieces.push((slice, highlighted));
+    }
+    pieces
+}
+
+#[cfg(test)]
+mod highlight_tests {
+    use super::*;
+
+    #[test]
+    fn a_plain_substring_is_found() {
+        assert_eq!(highlight_ranges("error: boom", "boom"), vec![(7, 11)]);
+    }
+
+    #[test]
+    fn matching_is_case_insensitive() {
+        assert_eq!(highlight_ranges("Error: BOOM", "boom"), vec![(7, 11)]);
+        assert_eq!(highlight_ranges("boom boom", "BOOM"), vec![(0, 4), (5, 9)]);
+    }
+
+    #[test]
+    fn an_empty_needle_highlights_nothing() {
+        assert!(highlight_ranges("anything", "").is_empty());
+    }
+
+    #[test]
+    fn a_needle_longer_than_the_line_finds_nothing() {
+        assert!(highlight_ranges("short", "much longer needle").is_empty());
+    }
+
+    #[test]
+    fn overlapping_hits_do_not_draw_twice() {
+        // "aaa" contains "aa" twice overlapping; one highlight per region is what we want.
+        assert_eq!(highlight_ranges("aaaa", "aa"), vec![(0, 2), (2, 4)]);
+    }
+
+    #[test]
+    fn non_ascii_text_is_measured_in_characters() {
+        // Byte offsets would be (0,6) here, which would slice a multi-byte character in half.
+        assert_eq!(highlight_ranges("错误: boom", "boom"), vec![(4, 8)]);
+        assert_eq!(highlight_ranges("中文中文", "中文"), vec![(0, 2), (2, 4)]);
+    }
+
+    #[test]
+    fn a_run_is_split_around_the_match() {
+        let pieces = split_run_for_highlight("error: boom", 0, &[(7, 11)]);
+        assert_eq!(
+            pieces,
+            vec![("error: ".to_string(), false), ("boom".to_string(), true)]
+        );
+    }
+
+    #[test]
+    fn a_run_with_no_match_comes_back_whole() {
+        assert_eq!(
+            split_run_for_highlight("nothing here", 0, &[(50, 60)]),
+            vec![("nothing here".to_string(), false)]
+        );
+    }
+
+    #[test]
+    fn offsets_line_up_across_runs() {
+        // Second run starts at character 7: the match lands inside it.
+        let pieces = split_run_for_highlight("boom!", 7, &[(7, 11)]);
+        assert_eq!(
+            pieces,
+            vec![("boom".to_string(), true), ("!".to_string(), false)]
+        );
+    }
+}

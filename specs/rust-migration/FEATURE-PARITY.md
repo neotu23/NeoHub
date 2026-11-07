@@ -54,7 +54,7 @@
 | L3 | 合批推送 ~30 Hz / 16 KiB | `ipc/index.ts` | 部分 | `core/src/logs/buffer.rs`| 已验证（单次推送上限 **10 KiB**（`CHUNK_LIMIT`），低于旧版 ~16 KiB；一次 64 KiB 写入会被切成 ≥4 条事件且每字节不丢、seq 严格递增；UI 侧事件泵再按 100 ms 合并应用） |
 | L4 | 读取/尾读/清空缓冲 `readBuffer`/`tailBuffer`/`clearBuffer` | `ipc/index.ts` | 部分 | `core/src/logs/`| 已验证（`GetLogs`/`ClearLogs`/`BootstrapLogs` 命令；清空不影响进程） |
 | L5 | 跨任务全局日志搜索 `logs:searchAll`（正则 + limit） | `mcp/tools.ts`, `GlobalLogSearch.tsx` | 部分 | `core/src/logs/search.rs`| 已验证（`SearchLogs` 支持单任务与全局，字面量/正则/大小写/limit，非法正则报错） |
-| L6 | 单任务日志过滤视图（虚拟化 + 高亮 + 行号） | `LogSearchView.tsx` | 部分 | `ui/src/views/log_search.rs`| 部分（详情页终端面板 + 全局日志搜索面板：跨任务结果按 app/任务/行号定位、点击跳转选中项目与任务 tab；普通/正则、limit 复用核心匹配器） |
+| L6 | 单任务日志过滤视图（虚拟化 + 高亮 + 行号） | `LogSearchView.tsx` | 部分 | `ui/src/views/log_search.rs`| 已验证（**虚拟化**：`TerminalView::visible(height, follow)` 只返回窗口高度那么多行，渲染量不随缓冲增长；**高亮**：打开搜索时终端把匹配片段用 `warn` 色底着色，按字符（非字节）定位，支持大小写不敏感与中文） |
 | L7 | 终端渲染：ANSI 16/256/真彩、CR 覆写、滚动历史、自动跟随、选择复制、字号 | `LogTerminal.tsx`（xterm 6） | 部分（截图） | `ui/src/terminal/`| 已验证（ANSI 16/256/真彩、粗体、CR 覆写、滚动历史、跟随、选择复制、导出；**终端与日志面板使用等宽字体** `SF Mono`（缺失时回退 `Menlo`，本机实测有 Menlo）） |
 | L8 | 日志复制/保存导出 | `AppDetail.tsx` | 部分 | `ui/src/terminal/`| 已验证（`导出可读`/`导出原始` 落盘到 `<data>/logs/`，集成测试断言可读文本无转义、原始保留 ANSI） |
 | L9 | 崩溃日志钉住最后 200 行 + 重启入口 + 端口冲突提示 | `CrashPin.tsx` | 部分 | `ui/src/views/app_detail.rs`| 已验证（崩溃时**冻结最后 200 行**（缓冲对已退出任务会过期，钉住的是快照）；详情页顶部崩溃卡片：退出码、尾部输出、**端口冲突识别**（EADDRINUSE / address already in use → 指出端口）、重试与忽略） |

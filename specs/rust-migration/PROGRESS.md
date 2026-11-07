@@ -1726,3 +1726,21 @@
 - 未解决问题：真正的 GPUI 绘制期 panic 仍会结束进程（这是有意的选择）；渲染守卫的日志路径
   需在真出问题时才会被验证
 
+### L6 日志虚拟化与高亮
+- 状态：**完成**
+- 最近提交：`feat: highlight the search term inside the terminal`
+- **核实**：虚拟化早已成立 —— `TerminalView::visible(height, follow)` 只返回窗口高度那么多行
+  （16 行），渲染量不随缓冲增长。之前标"部分"是因为缺高亮
+- 本轮补的高亮：
+  1. `highlight_ranges(text, needle)`：**按字符**定位（不是字节），大小写不敏感；
+     字节偏移会在多字节字符中间切开并 panic，而带中文/emoji 的日志是常态
+  2. `split_run_for_highlight(run, offset, ranges)`：把一个带颜色的 run 按匹配切成片段，
+     `offset` 让整行的匹配范围能套到每个 run 上
+  3. 终端面板在搜索面板打开且有查询时，把匹配片段用 `warn` 色底着色
+- 边界处理（都有测试）：空 needle 不高亮、needle 比行长、**重叠命中不重复绘制**、
+  小写化后长度可能变化时退回大小写敏感扫描而不是错位高亮
+- 验证：`cargo test -p neohub-ui --lib highlight` → **9 passed**
+  `cargo test --workspace --locked` → **566 passed / 0 failed**；clippy 0；打包自检通过；
+  启动日志无 error/panic
+- 未解决问题：高亮的实际观感需人工确认；高亮只跟随全局搜索词，详情页尚无独立搜索框
+

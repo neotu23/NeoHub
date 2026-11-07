@@ -4419,6 +4419,12 @@ impl Render for ShellView {
 
                     // Terminal pane: parsed rows from the core, with follow/scroll/export.
                     {
+                        let highlight_needle: Option<String> = {
+                            let store = self.bridge.store.lock().expect("store lock");
+                            let search = store.search();
+                            (search.open && !search.query.trim().is_empty())
+                                .then(|| search.query.clone())
+                        };
                         let source = {
                             let store = self.bridge.store.lock().expect("store lock");
                             store.terminal_text(&task.id).map(str::to_string)
@@ -4600,6 +4606,9 @@ impl Render for ShellView {
                         if rows.is_empty() {
                             pane = pane.child("（还没有日志输出）".to_string());
                         }
+                        // Highlight the active search term inside the pane, so a hit found in the
+                        // search panel is visible where the user is reading.
+                        let needle = highlight_needle.clone();
                         for row in rows {
                             // Terminal output must be monospaced: ANSI columns and cursor
                             // positioning only line up when every glyph has the same advance.
@@ -4611,12 +4620,38 @@ impl Render for ShellView {
                             if row.spans.is_empty() {
                                 line = line.child(row.text);
                             } else {
+                                let ranges = needle
+                                    .as_deref()
+                                    .map(|needle| {
+                                        crate::terminal::highlight_ranges(&row.text, needle)
+                                    })
+                                    .unwrap_or_default();
+                                let mut offset = 0;
                                 for span in row.spans {
                                     let colour = crate::terminal::ansi_to_rgba(
                                         span.style.fg,
                                         palette.fg_muted,
                                     );
-                                    line = line.child(div().text_color(colour).child(span.text));
+                                    let pieces = crate::terminal::split_run_for_highlight(
+                                        &span.text, offset, &ranges,
+                                    );
+                                    offset += span.text.chars().count();
+                                    for (piece, highlighted) in pieces {
+                                        line = line.child(
+                                            div()
+                                                .text_color(if highlighted {
+                                                    palette.warn_fg
+                                                } else {
+                                                    colour
+                                                })
+                                                .bg(if highlighted {
+                                                    palette.warn_bg
+                                                } else {
+                                                    palette.bg_surface
+                                                })
+                                                .child(piece),
+                                        );
+                                    }
                                 }
                             }
                             pane = pane.child(line);
