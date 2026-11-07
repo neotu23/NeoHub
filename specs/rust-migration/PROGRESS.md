@@ -1687,3 +1687,20 @@
 - 备注：clippy 提示"常量断言恒为真"，改成对运行时副本断言（保留了检查意图，也不引入
   `const` 断言的编译期噪音）
 
+### 交付收尾：文档对齐 + 最终验证
+- 状态：**完成**
+- 最近提交：`docs: bring the delivery report up to date`
+- 做了什么：
+  1. `DELIVERY.md` 数字全部按实测重写：**553 测试 / 0 clippy / 82 提交 / 125 文件 / 3.86 万行**
+  2. 功能对照表结论改为 **84 已验证 / 4 部分 / 1 不适用 / 5 说明**
+  3. 剩下的四项各写清"为什么留着 + 需要什么前提"，而不是含糊地留在"部分"
+  4. 补上"本轮之前的验证快照"与"建议的下一步"（真实数据迁移 → 人眼确认 → 之后才谈
+     L6/U13/S6/B6）
+- 最终验证（全部实跑）：
+  - `cargo test --workspace --locked` → **553 passed / 0 failed**
+  - `cargo clippy --workspace --all-targets --locked` → **0 warnings**
+  - `bash scripts/package.sh` → 31 MB app / 13 MB dmg，**打包自检通过**（产物不落后于源码）
+  - 启动（临时 `--data-dir`）→ 进程存活、窗口 onscreen、无 error/panic
+- 依据你的三个决定保持：**不合入 main**、**真实数据由你按 MIGRATION.md 迁移**、
+  **⌘K 优先**（已完成）
+
