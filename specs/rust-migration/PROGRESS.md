@@ -1780,3 +1780,26 @@
 - 接手方式：按上面三步做，先写一个只打印 URL 的探针（`#[ignore]` 测试或示例程序），
   确认不崩再接入 `ActivationWatcher` 那条轮询链路
 
+### S6 深链接 Apple Event（完成 —— 上轮的"止损"被推翻了）
+- 状态：**完成**
+- 最近提交：`feat: receive neohub:// links through an Apple Event handler`
+- 上轮我判断"把握不足"并回滚；本轮按自己写下的三步做完了，**结论是不难，只是需要查对 API**
+- 实际需要的三件事（上轮的推测全部被证实，另外多查出一处）：
+  1. `objc2-core-services` 依赖，且要开 `AE` feature（`AEEventClass`/`AEEventID`/`keyDirectObject` 在这里）
+  2. `objc2-foundation` 要开 `NSAppleEventManager`、`NSAppleEventDescriptor`、**`objc2-core-services`**
+     三个 feature —— 最后一个才是 `setEventHandler:…` 存在的前提，容易漏
+  3. `kAEGetURL` / `kInternetEventClass` **不在生成的绑定里**（它们是 C 宏），需要自己写
+     FourCharCode：两者都是 `'GURL'`
+- 实现：
+  1. `define_class!` 定义 `NSObject` 子类 `UrlEventHandler`，实现 `handleGetURLEvent:withReplyEvent:`，
+     从 `keyDirectObject` 读 `stringValue` 存入全局队列
+  2. `install()` 注册到 `sharedAppleEventManager`，**返回 Retained 对象**（丢了会留悬挂 target，
+     正是这类绑定的经典崩溃点）
+  3. `desktop` 在主线程注册并在轮询 tick 里 `drain()`，逐个 `deep_link::parse` → 选中项目 + 带窗口到前台
+- 验证：`cargo test -p neohub-platform-macos --lib deep_link_event` → **3 passed**
+  （handler 类能在运行时分配、drain 交出并清空、**真实注册 `install()` 不崩**）
+  `cargo test --workspace --locked` → **570 passed / 0 failed**；clippy 0；打包自检通过；
+  启动日志无 error/panic、无 handler 注册失败
+- 未解决问题：**"浏览器点击链接"这一步只能人工确认** —— 我验证的是注册不崩、接收逻辑正确；
+  系统真的回调我们，需要在真机上点一次
+

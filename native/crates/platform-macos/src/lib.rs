@@ -8,6 +8,8 @@
 pub mod app_menu;
 pub mod deep_link;
 #[cfg(target_os = "macos")]
+pub mod deep_link_event;
+#[cfg(target_os = "macos")]
 pub mod dock;
 #[cfg(target_os = "macos")]
 pub mod keychain;

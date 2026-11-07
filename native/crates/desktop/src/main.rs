@@ -15,6 +15,7 @@ use neohub_desktop::session_lock::{LockOutcome, SessionLock};
 use neohub_desktop::window_session::AppHost;
 use neohub_platform_macos::app_menu;
 use neohub_platform_macos::deep_link;
+use neohub_platform_macos::deep_link_event;
 use neohub_platform_macos::log_file;
 use neohub_platform_macos::login_item;
 use neohub_platform_macos::tray::{TrayAction, build_menu};
@@ -155,6 +156,20 @@ fn main() {
             });
         }
 
+        // Apple Event handler for `neohub://` links. Registered on the main thread once AppKit is
+        // up; the retained object must outlive the registration, so it is held here.
+        let url_handler = match deep_link_event::install() {
+            Ok(handler) => Some(handler),
+            Err(error) => {
+                log_file::log(
+                    "host",
+                    &format!("could not register the URL handler: {error}"),
+                );
+                eprintln!("[host] could not register the URL handler: {error}");
+                None
+            }
+        };
+
         // Application menu. Installed after AppKit is up, and it shares the tray's event
         // router (muda supports one handler per process).
         let _app_menu = match app_menu::install() {
@@ -165,6 +180,7 @@ fn main() {
             }
         };
 
+        let _held_url_handler = url_handler;
         let mut login_state: Option<bool> = None;
         let mut tray: Option<TrayHandle> =
             match shared.app.lock().expect("host").service().snapshot() {
@@ -191,6 +207,22 @@ fn main() {
                 cx.background_executor()
                     .timer(Duration::from_millis(500))
                     .await;
+                // Links that arrived while running. Draining the same tick as the activation file
+                // means a click never waits on the window.
+                for url in deep_link_event::drain() {
+                    log_file::log("host", &format!("deep link received: {url}"));
+                    let shared_for_link = shared.clone();
+                    let parsed = deep_link::parse(&url);
+                    cx.update(move |cx| {
+                        if let Err(err) = reopen_or_focus(cx, &shared_for_link) {
+                            eprintln!("[host] could not open the window for a link: {err}");
+                        }
+                        if let Some(link) = parsed {
+                            shared_for_link.bridge.apply_deep_link(link);
+                        }
+                    });
+                }
+
                 if watcher.poll() {
                     let shared = shared.clone();
                     cx.update(move |cx| {
