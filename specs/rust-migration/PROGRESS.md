@@ -1455,3 +1455,20 @@
   打包自检通过（`up to date with …/crates`），启动日志无 error/panic
 - 未解决问题：批量导入的实际点击需人工确认
 
+### U1 行内 ⋮ 菜单
+- 状态：**完成**（U1 只剩拖拽分组未做）
+- 最近提交：`feat: add a per-row action menu`
+- 实际修改文件：`ui/src/state/store.rs`（`open_row_menu`、`toggle_row_menu`、`close_row_menu`）、
+  `ui/src/views/shell.rs`（⋮ 按钮、内联菜单渲染、`row_menu_actions`、`run_row_action`）
+- 设计要点：
+  1. **内联展开而非浮层**：侧栏很窄，浮层会盖住它要操作的那些行
+  2. 同一时刻**只开一个**菜单；再点同一行会关闭（与菜单栏行为一致）
+  3. 动作按状态过滤（与命令面板同一条规则）：运行中才有"停止/重启"，否则只有"启动"
+  4. 每个动作走**与按钮相同的路径**：启停/重启走 `CoreCommand`，"应用配置"打开同一个
+     `AppForm` 面板，"在 Finder 中显示"复用 `open_in`
+- 验证：`cargo test -p neohub-ui --lib row_menu` → **4 passed**
+  （同时只开一个、再点关闭、close 清空、初始未打开）
+  `cargo test --workspace --locked` → **514 passed / 0 failed**；clippy 0；
+  打包自检通过，启动日志无 error/panic
+- 未解决问题：拖拽分组（U1 最后一项）；菜单点击的实际效果需人工确认
+

@@ -101,6 +101,11 @@ pub struct UiStore {
     /// Sections the user collapsed, by title. Kept in memory only: a collapsed folder is a
     /// passing convenience, not a preference worth writing to `session.json`.
     collapsed_sections: std::collections::BTreeSet<String>,
+    /// App whose sidebar row menu is open, if any.
+    ///
+    /// One at a time: two open menus in a list this narrow would overlap, and closing the
+    /// previous one on the way is what a menu bar does anyway.
+    open_row_menu: Option<AppId>,
     /// Transient messages shown over the window.
     toasts: Toasts,
     session: Session,
@@ -136,6 +141,7 @@ impl UiStore {
             snapshot: None,
             cpu_history: std::collections::BTreeMap::new(),
             collapsed_sections: std::collections::BTreeSet::new(),
+            open_row_menu: None,
             toasts: Toasts::default(),
             session,
             logs: BTreeMap::new(),
@@ -580,6 +586,28 @@ impl UiStore {
 
     pub fn is_section_collapsed(&self, title: &str) -> bool {
         self.collapsed_sections.contains(title)
+    }
+
+    /// Open the row menu for one app, or close it when the same app is clicked again.
+    pub fn toggle_row_menu(&mut self, app_id: &AppId) {
+        self.open_row_menu = match &self.open_row_menu {
+            Some(open) if open == app_id => None,
+            _ => Some(app_id.clone()),
+        };
+    }
+
+    /// Which app's row menu is open.
+    pub fn row_menu_app(&self) -> Option<AppId> {
+        self.open_row_menu.clone()
+    }
+
+    pub fn is_row_menu_open(&self, app_id: &AppId) -> bool {
+        self.open_row_menu.as_ref() == Some(app_id)
+    }
+
+    /// Close any open row menu (a click elsewhere, a selection change).
+    pub fn close_row_menu(&mut self) {
+        self.open_row_menu = None;
     }
 
     /// Show a transient message.
@@ -1650,5 +1678,73 @@ mod batch_import_tests {
         store.mark_candidate_registered("/tmp/a");
         assert!(!store.is_import_selected("/tmp/a"));
         assert!(store.import().candidates[0].already_registered);
+    }
+}
+
+#[cfg(test)]
+mod row_menu_tests {
+    use super::*;
+
+    fn app(id: &str) -> App {
+        App {
+            id: AppId::from_existing(id),
+            name: id.into(),
+            path: format!("/tmp/{id}"),
+            color: "#fff".into(),
+            icon: None,
+            node_version_pref: neohub_domain::NodeVersionPref::Auto,
+            package_manager: None,
+            default_script: None,
+            custom_command: None,
+            working_dir: "/tmp".into(),
+            auto_restart_on_change: false,
+            auto_start: false,
+            watch_globs: Vec::new(),
+            port_hint: None,
+            tags: Vec::new(),
+            folder: None,
+            last_started_at: None,
+            last_exit_code: None,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn only_one_row_menu_is_open_at_a_time() {
+        let mut store = UiStore::new(Session::default());
+        store.toggle_row_menu(&AppId::from_existing("a"));
+        assert!(store.is_row_menu_open(&AppId::from_existing("a")));
+        store.toggle_row_menu(&AppId::from_existing("b"));
+        assert!(
+            !store.is_row_menu_open(&AppId::from_existing("a")),
+            "opening another row closes the first"
+        );
+        assert!(store.is_row_menu_open(&AppId::from_existing("b")));
+    }
+
+    #[test]
+    fn clicking_the_same_row_twice_closes_it() {
+        let mut store = UiStore::new(Session::default());
+        let id = AppId::from_existing("a");
+        store.toggle_row_menu(&id);
+        store.toggle_row_menu(&id);
+        assert!(!store.is_row_menu_open(&id));
+        assert!(store.row_menu_app().is_none());
+    }
+
+    #[test]
+    fn closing_clears_whatever_was_open() {
+        let mut store = UiStore::new(Session::default());
+        store.toggle_row_menu(&AppId::from_existing("a"));
+        store.close_row_menu();
+        assert!(store.row_menu_app().is_none());
+    }
+
+    #[test]
+    fn no_menu_is_open_on_a_fresh_store() {
+        let store = UiStore::new(Session::default());
+        assert!(store.row_menu_app().is_none());
+        let _ = app("unused");
     }
 }

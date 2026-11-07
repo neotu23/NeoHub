@@ -160,7 +160,7 @@
 
 | # | 视图/组件 | 旧版源码依据 | 旧版基线 | Rust 目标 | Rust 状态 |
 |---|---|---|---|---|---|
-| U1 | 外壳 + 侧栏（分组/标签双模式、折叠、排序、筛选 ⌘P、⋮ 菜单、拖拽分组） | `Sidebar.tsx`, `sortApps.ts` | 部分（截图） | `ui/src/views/{shell,sidebar}.rs`| 已验证（分组/标签双模式、排序、筛选 ⌘P、选中态、**分组折叠**（点击标题，▸/▾ 指示）、空态引导；⋮ 菜单与拖拽分组仍未做） |
+| U1 | 外壳 + 侧栏（分组/标签双模式、折叠、排序、筛选 ⌘P、⋮ 菜单、拖拽分组） | `Sidebar.tsx`, `sortApps.ts` | 部分（截图） | `ui/src/views/{shell,sidebar}.rs`| 已验证（分组/标签双模式、排序、筛选 ⌘P、选中态、分组折叠、空态引导、**每行 ⋮ 内联菜单**（启动/停止/重启/应用配置/在 Finder 显示，按状态过滤）；拖拽分组仍未做） |
 | U2 | 仪表盘（汇总卡、项目卡、CPU sparkline、端口 chip、标签筛选、全部停止） | `Dashboard.tsx` | 部分（截图） | `ui/src/views/dashboard.rs`| 已验证（汇总卡、项目卡、端口 chip、状态色、CPU sparkline、标签筛选、**空态引导「导入项目…」**） |
 | U3 | 项目详情（任务 tabs、启停/重启、端口、历史、日志区、Open In、复制路径） | `AppDetail.tsx`, `TaskTabs.tsx` | 部分（截图） | `ui/src/views/app_detail.rs`| 已验证（任务 tabs、每任务与项目级启停重启、端口、历史、日志尾、**Open In 按已装目标生成按钮**、运行历史） |
 | U4 | 添加项目抽屉（浏览 → 检测 → 命名/Node/PM/脚本 → 环境；monorepo 每包一任务） | `AddAppDrawer.tsx` | 部分 | `ui/src/views/add_app.rs`| 部分（导入面板：选目录→扫描→候选清单→命名/脚本建议→导入；Node 版本与 PM 选择未接到面板） |

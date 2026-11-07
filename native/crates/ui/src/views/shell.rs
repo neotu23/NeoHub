@@ -915,6 +915,23 @@ gpui_kit::actions!(
     ]
 );
 
+/// What the sidebar row menu offers for a given state.
+///
+/// The same rule as the command palette: no row that would do nothing. A stopped app has no
+/// "stop", a running one has no "start" — those are the rows a user hits by accident.
+fn row_menu_actions(state: neohub_domain::ProcessState) -> Vec<(&'static str, &'static str)> {
+    let mut actions = Vec::new();
+    if state.is_live() {
+        actions.push(("停止", "stop"));
+        actions.push(("重启", "restart"));
+    } else {
+        actions.push(("启动", "start"));
+    }
+    actions.push(("应用配置", "config"));
+    actions.push(("在 Finder 中显示", "find"));
+    actions
+}
+
 /// The window root.
 pub struct ShellView {
     bridge: Arc<HostBridge>,
@@ -1134,6 +1151,57 @@ impl ShellView {
                 self.on_shortcut(Shortcut::GlobalSearch, window, cx);
                 return;
             }
+        }
+        cx.notify();
+    }
+
+    /// Run one row-menu action. Every branch reuses the path the buttons use.
+    fn run_row_action(
+        &mut self,
+        action: &str,
+        app_id: neohub_domain::AppId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            "start" => self.bridge.send(CoreCommand::StartApp { app_id }),
+            "stop" => self.bridge.send(CoreCommand::StopApp { app_id }),
+            "restart" => self.bridge.send(CoreCommand::RestartApp { app_id }),
+            "config" => {
+                let app = self
+                    .bridge
+                    .store
+                    .lock()
+                    .expect("store lock")
+                    .apps()
+                    .into_iter()
+                    .find(|candidate| candidate.id == app_id);
+                if let Some(app) = app {
+                    self.app_form = Some(crate::state::app_form::AppForm::from_app(&app));
+                    let focus = self.app_form_focus.clone();
+                    window.focus(&focus, cx);
+                }
+            }
+            "find" => {
+                let path = self
+                    .bridge
+                    .store
+                    .lock()
+                    .expect("store lock")
+                    .apps()
+                    .into_iter()
+                    .find(|candidate| candidate.id == app_id)
+                    .map(|app| std::path::PathBuf::from(app.path));
+                if let Some(path) = path
+                    && let Err(error) = neohub_platform_macos::open_in::launch(
+                        neohub_platform_macos::open_in::OpenInTarget::Finder,
+                        &path,
+                    )
+                {
+                    eprintln!("[ui] reveal failed: {error}");
+                }
+            }
+            other => eprintln!("[ui] unknown row action: {other}"),
         }
         cx.notify();
     }
@@ -1472,6 +1540,7 @@ impl Render for ShellView {
             let _ = entity;
         }
 
+        let row_menu_for = self.bridge.store.lock().expect("store lock").row_menu_app();
         for section in &sections {
             let entity = cx.entity().downgrade();
             let title = section.title.clone();
@@ -1509,6 +1578,9 @@ impl Render for ShellView {
                 let bridge = self.bridge.clone();
                 let app_id = row.app_id.clone();
                 let is_selected = selected.as_ref() == Some(&row.app_id);
+                let menu_app_id = row.app_id.clone();
+                let menu_entity = cx.entity().downgrade();
+                let row_menu_open = row_menu_for.as_ref() == Some(&row.app_id);
                 sidebar = sidebar.child(
                     div()
                         .id(format!("nav-app-{}", row.app_id))
@@ -1537,10 +1609,69 @@ impl Render for ShellView {
                                 .text_color(palette.fg)
                                 .child(row.name.clone()),
                         )
+                        .child(
+                            div()
+                                .id(format!("nav-menu-{}", row.app_id))
+                                .px(px(2.0))
+                                .rounded(px(metrics::RADIUS_MD))
+                                .text_size(px(metrics::TEXT_XS))
+                                .text_color(palette.fg_subtle)
+                                .cursor_pointer()
+                                .child("⋮")
+                                .on_click(move |_, _, cx| {
+                                    let app_id = menu_app_id.clone();
+                                    let _ = menu_entity.update(cx, |this, cx| {
+                                        if let Ok(mut store) = this.bridge.store.lock() {
+                                            store.toggle_row_menu(&app_id);
+                                        }
+                                        cx.notify();
+                                    });
+                                }),
+                        )
                         .on_click(move |_, _, _| {
                             bridge.with_session(|session| session.select_app(app_id.clone(), None));
                         }),
                 );
+
+                // Inline row menu: a small column of actions right under the row. Inline rather
+                // than a floating popup because the sidebar is narrow and a popup would cover the
+                // neighbouring rows it is meant to act on.
+                if row_menu_open {
+                    let mut menu = div()
+                        .id(format!("nav-menu-panel-{}", row.app_id))
+                        .flex()
+                        .flex_col()
+                        .gap(px(1.0))
+                        .pl(px(metrics::PAD_3))
+                        .pb(px(metrics::GAP_1));
+                    for (label, action) in row_menu_actions(row.state) {
+                        let bridge = self.bridge.clone();
+                        let app_id = row.app_id.clone();
+                        let entity = cx.entity().downgrade();
+                        menu = menu.child(
+                            div()
+                                .id(format!("nav-action-{}-{label}", row.app_id))
+                                .px(px(metrics::PAD_2))
+                                .py(px(1.0))
+                                .rounded(px(metrics::RADIUS_MD))
+                                .bg(palette.bg_elevated)
+                                .text_size(px(metrics::TEXT_XS))
+                                .cursor_pointer()
+                                .child(label)
+                                .on_click(move |_, window, cx| {
+                                    let bridge = bridge.clone();
+                                    let app_id = app_id.clone();
+                                    let _ = entity.update(cx, |this, cx| {
+                                        this.run_row_action(action, app_id, window, cx);
+                                        if let Ok(mut store) = bridge.store.lock() {
+                                            store.close_row_menu();
+                                        }
+                                    });
+                                }),
+                        );
+                    }
+                    sidebar = sidebar.child(menu);
+                }
             }
         }
 
