@@ -1620,3 +1620,21 @@
 - 未解决问题：真实拖拽窗口后终端重排的观感需人工确认；字符宽度是估算（0.6 em），
   若换非等宽字体会偏
 
+### U4 导入面板的批次默认值
+- 状态：**完成**
+- 最近提交：`feat: choose node and package manager for an import batch`
+- 实际修改文件：`ui/src/state/store.rs`（`ImportState.node_version`/`package_manager` + setter）、
+  `ui/src/views/shell.rs`（选择行、`import_selected` 应用）
+- 内容：
+  1. 面板顶部两行选择：包管理器（自动/npm/pnpm/yarn/bun）、Node（自动/system/本机已装）
+  2. 选择**只作用于本批导入**：重新扫描保留选择（那是关于"怎么导入"，不是关于目录），
+     关闭面板则清空
+  3. 未选择时**不写死**：`node_version_pref = None`（即 auto），包管理器用探测结果 —— 不把
+     "今天这台机器恰好有的版本"固化进应用配置
+  4. 显式版本会去掉 `v` 前缀后写入 `NodeVersionPref::Explicit`
+- 验证：`cargo test -p neohub-ui --lib import_defaults` → **2 passed**
+  （默认空、可设置与清除、重新扫描保留、关闭面板清空）
+  `cargo test --workspace --locked` → **547 passed / 0 failed**；clippy 0；打包自检通过；
+  启动日志无 error/panic
+- 未解决问题：选择行的实际点击需人工确认
+

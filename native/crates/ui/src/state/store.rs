@@ -83,6 +83,10 @@ pub struct ImportState {
     pub candidates: Vec<ImportCandidate>,
     /// Paths ticked for a batch import.
     pub selected: std::collections::BTreeSet<String>,
+    /// Node version to apply to everything imported in this batch (`None` = auto).
+    pub node_version: Option<String>,
+    /// Package manager override for this batch (`None` = use what detection found).
+    pub package_manager: Option<neohub_domain::PackageManager>,
 }
 
 impl ImportState {
@@ -300,6 +304,8 @@ impl UiStore {
             error: None,
             candidates: Vec::new(),
             selected: Default::default(),
+            node_version: None,
+            package_manager: None,
         };
     }
 
@@ -364,6 +370,15 @@ impl UiStore {
             .filter(|candidate| self.import.selected.contains(&candidate.path))
             .cloned()
             .collect()
+    }
+
+    /// Node version for the batch: `auto`, `system` or an explicit version.
+    pub fn set_import_node_version(&mut self, value: Option<impl Into<String>>) {
+        self.import.node_version = value.map(Into::into);
+    }
+
+    pub fn set_import_package_manager(&mut self, value: Option<neohub_domain::PackageManager>) {
+        self.import.package_manager = value;
     }
 
     /// Mark one candidate as registered once its import succeeded.
@@ -1785,5 +1800,49 @@ mod row_menu_tests {
         let store = UiStore::new(Session::default());
         assert!(store.row_menu_app().is_none());
         let _ = app("unused");
+    }
+}
+
+#[cfg(test)]
+mod import_defaults_tests {
+    use super::*;
+
+    #[test]
+    fn batch_defaults_start_empty_and_can_be_set_and_cleared() {
+        let mut store = UiStore::new(Session::default());
+        store.open_import("/tmp");
+        assert!(store.import().node_version.is_none(), "auto by default");
+        assert!(store.import().package_manager.is_none(), "use detection");
+
+        store.set_import_node_version(Some("20.11.0"));
+        store.set_import_package_manager(Some(neohub_domain::PackageManager::Pnpm));
+        assert_eq!(store.import().node_version.as_deref(), Some("20.11.0"));
+        assert_eq!(
+            store.import().package_manager,
+            Some(neohub_domain::PackageManager::Pnpm)
+        );
+
+        store.set_import_node_version(None::<String>);
+        store.set_import_package_manager(None);
+        assert!(store.import().node_version.is_none());
+        assert!(store.import().package_manager.is_none());
+    }
+
+    #[test]
+    fn the_defaults_survive_a_scan_but_not_closing_the_panel() {
+        let mut store = UiStore::new(Session::default());
+        store.open_import("/tmp");
+        store.set_import_package_manager(Some(neohub_domain::PackageManager::Yarn));
+        // A rescan keeps the user's choices: they are about the import, not the folder.
+        store.set_import_candidates(Vec::new());
+        assert_eq!(
+            store.import().package_manager,
+            Some(neohub_domain::PackageManager::Yarn)
+        );
+        store.close_import();
+        assert!(
+            store.import().package_manager.is_none(),
+            "a closed panel forgets"
+        );
     }
 }

@@ -465,11 +465,14 @@ impl HostBridge {
     /// running them in parallel would make the failure report depend on scheduling. Each success
     /// is marked in the panel so a retry after a partial failure re-imports only what is left.
     pub fn import_selected(&self) {
-        let candidates = self
-            .store
-            .lock()
-            .expect("store lock")
-            .selected_import_candidates();
+        let (candidates, node_version, package_manager) = {
+            let store = self.store.lock().expect("store lock");
+            (
+                store.selected_import_candidates(),
+                store.import().node_version.clone(),
+                store.import().package_manager,
+            )
+        };
         if candidates.is_empty() {
             return;
         }
@@ -482,8 +485,16 @@ impl HostBridge {
                 let input = neohub_core::catalog::CreateAppInput {
                     path: candidate.path.clone(),
                     name: Some(candidate.name.clone()),
-                    node_version_pref: None,
-                    package_manager: candidate.package_manager,
+                    // An explicit choice wins; otherwise the import leaves the app on `auto`
+                    // rather than freezing whatever the machine happens to have today.
+                    node_version_pref: match node_version.as_deref() {
+                        Some("system") => Some(neohub_domain::NodeVersionPref::System),
+                        Some("auto") | None => None,
+                        Some(version) => Some(neohub_domain::NodeVersionPref::Explicit {
+                            version: version.trim_start_matches('v').to_string(),
+                        }),
+                    },
+                    package_manager: package_manager.or(candidate.package_manager),
                     default_script: candidate.suggested_script.clone(),
                     first_task: candidate.suggested_script.clone().map(|script| {
                         neohub_core::catalog::CreateTaskSpec {
@@ -3038,6 +3049,107 @@ impl Render for ShellView {
                         .text_color(palette.fg_muted)
                         .child("这个目录下没有找到含 package.json 的项目。"),
                 );
+            }
+
+            // Batch defaults: applied to everything imported from this panel.
+            {
+                let mut defaults = div().flex().flex_col().gap(px(1.0));
+                let mut pm_row = div().flex().items_center().gap(px(metrics::GAP_1));
+                pm_row = pm_row.child(
+                    div()
+                        .text_size(px(metrics::TEXT_XS))
+                        .text_color(palette.fg_subtle)
+                        .child("包管理器"),
+                );
+                for (label, manager) in [
+                    ("自动", None),
+                    ("npm", Some(neohub_domain::PackageManager::Npm)),
+                    ("pnpm", Some(neohub_domain::PackageManager::Pnpm)),
+                    ("yarn", Some(neohub_domain::PackageManager::Yarn)),
+                    ("bun", Some(neohub_domain::PackageManager::Bun)),
+                ] {
+                    let entity = cx.entity().downgrade();
+                    let active = import.package_manager == manager;
+                    pm_row = pm_row.child(
+                        div()
+                            .id(format!("import-pm-{label}"))
+                            .px(px(metrics::PAD_2))
+                            .rounded(px(metrics::RADIUS_MD))
+                            .bg(if active {
+                                palette.accent
+                            } else {
+                                palette.bg_elevated
+                            })
+                            .text_color(if active {
+                                palette.accent_fg
+                            } else {
+                                palette.fg_muted
+                            })
+                            .text_size(px(metrics::TEXT_XS))
+                            .cursor_pointer()
+                            .child(label)
+                            .on_click(move |_, _, cx| {
+                                let _ = entity.update(cx, |this, cx| {
+                                    if let Ok(mut store) = this.bridge.store.lock() {
+                                        store.set_import_package_manager(manager);
+                                    }
+                                    cx.notify();
+                                });
+                            }),
+                    );
+                }
+                defaults = defaults.child(pm_row);
+
+                let mut node_row = div().flex().items_center().gap(px(metrics::GAP_1));
+                node_row = node_row.child(
+                    div()
+                        .text_size(px(metrics::TEXT_XS))
+                        .text_color(palette.fg_subtle)
+                        .child("Node"),
+                );
+                let choices = std::iter::once(("自动".to_string(), None))
+                    .chain(std::iter::once((
+                        "system".to_string(),
+                        Some("system".to_string()),
+                    )))
+                    .chain(self.node_versions.iter().map(|label| {
+                        let bare = label.split(' ').next().unwrap_or(label).to_string();
+                        (label.clone(), Some(bare))
+                    }));
+                for (label, value) in choices {
+                    let entity = cx.entity().downgrade();
+                    let active = import.node_version == value;
+                    let id_value = value.clone().unwrap_or_else(|| "auto".to_string());
+                    node_row = node_row.child(
+                        div()
+                            .id(format!("import-node-{id_value}"))
+                            .px(px(metrics::PAD_2))
+                            .rounded(px(metrics::RADIUS_MD))
+                            .bg(if active {
+                                palette.accent
+                            } else {
+                                palette.bg_elevated
+                            })
+                            .text_color(if active {
+                                palette.accent_fg
+                            } else {
+                                palette.fg_muted
+                            })
+                            .text_size(px(metrics::TEXT_XS))
+                            .cursor_pointer()
+                            .child(label)
+                            .on_click(move |_, _, cx| {
+                                let _ = entity.update(cx, |this, cx| {
+                                    if let Ok(mut store) = this.bridge.store.lock() {
+                                        store.set_import_node_version(value.clone());
+                                    }
+                                    cx.notify();
+                                });
+                            }),
+                    );
+                }
+                defaults = defaults.child(node_row);
+                panel = panel.child(defaults);
             }
 
             // Batch controls: tick several and import them in one go.
