@@ -431,3 +431,59 @@ mod tests {
         assert_eq!(merged[0].scope, "应用");
     }
 }
+
+#[cfg(test)]
+mod inline_edit_tests {
+    use super::*;
+    use neohub_core::service::EnvVarView;
+
+    fn view(key: &str, value: Option<&str>, secret: bool) -> EnvVarView {
+        EnvVarView {
+            key: key.to_string(),
+            value: value.map(str::to_string),
+            is_secret: secret,
+            enabled: true,
+            note: None,
+        }
+    }
+
+    #[test]
+    fn editing_a_value_then_saving_carries_it_through() {
+        // What the inline editor does: set_value, then to_inputs on save.
+        let mut editor = EnvEditor::new(
+            EnvScope::Global,
+            vec![view("API_URL", Some("http://a"), false)],
+        );
+        editor.set_value(0, "http://b");
+        assert!(editor.is_dirty());
+        let inputs = editor.to_inputs();
+        assert_eq!(inputs[0].key, "API_URL");
+        assert_eq!(inputs[0].value.as_deref(), Some("http://b"));
+    }
+
+    #[test]
+    fn editing_a_secret_keeps_it_secret() {
+        let mut editor = EnvEditor::new(EnvScope::Global, vec![view("TOKEN", None, true)]);
+        editor.set_value(0, "rotated-value");
+        let inputs = editor.to_inputs();
+        assert!(inputs[0].is_secret, "the flag survives an edit");
+        assert_eq!(inputs[0].value.as_deref(), Some("rotated-value"));
+    }
+
+    #[test]
+    fn an_untouched_row_sends_no_value_for_a_secret() {
+        // A masked row that the user did not edit must still go out as `None` (keep what is
+        // stored); sending the mask back would overwrite the real secret.
+        let editor = EnvEditor::new(EnvScope::Global, vec![view("TOKEN", None, true)]);
+        let inputs = editor.to_inputs();
+        assert!(inputs[0].value.is_none());
+    }
+
+    #[test]
+    fn the_displayed_value_of_a_secret_is_masked() {
+        let editor = EnvEditor::new(EnvScope::Global, vec![view("TOKEN", None, true)]);
+        let shown = editor.rows()[0].value.display();
+        assert!(!shown.is_empty());
+        assert_ne!(shown, "null", "the row shows a mask, not the word 'null'");
+    }
+}

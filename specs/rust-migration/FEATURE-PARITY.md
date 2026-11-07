@@ -69,7 +69,7 @@
 | E4 | 强制 `FORCE_COLOR=1`、`TERM=xterm-256color` | `EnvBuilder.ts` | 已验证 | `core/src/environment/env_builder.rs` | 已验证（`FORCE_COLOR=1`、`TERM=xterm-256color` 强制写入） |
 | E5 | 秘密值加密存储（Electron `safeStorage` → `enc1:` 前缀） | `EnvStore.ts` | 部分（依赖 Keychain，未在测试中断言解密） | `storage/src/secrets.rs` + `platform-macos/src/keychain.rs`| 已验证（`nhk1:` + AES-256-GCM，master key 在 login Keychain；写入时加密、读取时只回 `set 状态`；集成测试断言库里无明文；启动来源头待接） |
 | E6 | 密钥不可用时报 `SecretUnavailable` 并阻止受影响任务启动 | 计划要求（旧版行为需在阶段 4 复核） | **待复核** | `core/src/environment/` | 部分（`read_secret_value` 明确拒绝 `enc1:` 并报告 Locked/Corrupt；启动流程拦截待接） |
-| E7 | 环境变量编辑 UI：三 tab、启用开关、秘密遮挡、备注、批量粘贴、合并预览 | `EnvEditor.tsx` | 部分（截图 missing，见 BASELINE §5） | `ui/src/views/env_editor.rs`| 部分（三层 tab、掩码行、启用·秘密·删除、新增、粘贴 .env、保存回收；行内值编辑受限） |
+| E7 | 环境变量编辑 UI：三 tab、启用开关、秘密遮挡、备注、批量粘贴、合并预览 | `EnvEditor.tsx` | 部分（截图 missing，见 BASELINE §5） | `ui/src/views/env_editor.rs`| 已验证（三层 tab、掩码行、启用·秘密·删除、新增、粘贴 .env；**行内值编辑**：点值进入编辑、Enter 提交、Tab 跳到下一行、Esc 取消；未编辑的秘密行仍以 `null` 提交，不会把掩码写回） |
 | E8 | `.env` 文件变化推送 `env:fileChanged` + 横幅 | `EnvFileWatcher.ts` | 部分 | `core/src/watch/environment.rs`| 已验证（notify 非递归监听 `.env*`，去抖 250 ms，非 `.env` 文件不产生事件） |
 
 ## 6. Node 环境与 PATH
@@ -167,7 +167,7 @@
 | U5 | 扫描导入抽屉（候选列表、已注册标记、批量添加） | `ImportProjectsDrawer.tsx` | 部分 | `ui/src/views/import_projects.rs`| 已验证（扫描面板：候选清单、已注册标记、**勾选多选 + 全选 + 批量导入**（逐个顺序执行、成功即标记、部分失败汇总为错误 toast）、单条「添加」仍在） |
 | U6 | 任务编辑器抽屉（命令/脚本/工作目录/依赖/readiness/oneShot/enabled/重排） | `TaskEditor.tsx` | 部分 | `ui/src/views/task_editor.rs`| 已验证（表单模型 + 视图：点击聚焦、键入、Tab 切换、readiness 六选择、保存/取消、字段级错误） |
 | U7 | 应用配置抽屉（名称/颜色/文件夹/标签/自动重启/watch globs/autoStart/Node/PM） | `AppConfigDrawer.tsx`, `TagInput.tsx`, `FolderSelect.tsx` | 部分 | `ui/src/views/app_config.rs`| 已验证（面板：9 个字段 + 两个开关；**行内文本输入**（点击字段聚焦、Tab 切换并带值、Esc 关闭），保存走 `UpdateApp`，字段级错误就地显示，成功用服务端返回值重建基线） |
-| U8 | 环境变量编辑器（见 E7） | `EnvEditor.tsx` | 部分 | `ui/src/views/env_editor.rs`| 部分（同 E7，编辑器的值编辑仍受限） |
+| U8 | 环境变量编辑器（见 E7） | `EnvEditor.tsx` | 部分 | `ui/src/views/env_editor.rs`| 已验证（同 E7，含行内值编辑） |
 | U9 | 设置抽屉（17 项设置 + 危险区 db 导出/重置 + MCP 状态/Token） | `SettingsDrawer.tsx` | 部分（截图） | `ui/src/views/settings.rs`| 已验证（17 项设置、保存回收；**诊断与危险区**：打开日志目录、导出数据库、重置数据库（两次确认）、检查更新 + 下载页） |
 | U10 | 运行历史子视图（含 Rerun） | `AppDetail.tsx` History | 部分 | `ui/src/views/run_history.rs`| 已验证（详情页最近运行列表（任务/退出码/自行退出或用户停止）+ **重跑按钮**：用历史记录的任务 id 重新启动，任务已删除时以错误 toast 说明而不擅自重建） |
 | U11 | 命令面板 ⌘K（Apps/Start/Stop/Restart/Actions 分组） | `CommandPalette.tsx`（cmdk） | 部分 | `ui/src/components/`| 已验证（⌘K 打开；模型分组（应用打开/启动/停止/重启按状态过滤 + 设置/导入/搜索）、子序列匹配、方向键环绕、Enter 执行、Esc 关闭；每行带动作快捷键提示，点击也可执行） |

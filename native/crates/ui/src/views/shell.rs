@@ -3379,6 +3379,8 @@ impl Render for ShellView {
                         }
                         panel = panel.child(tabs);
 
+                        let env_editing = self.env_editing;
+                        let env_text_now = self.env_text.text().to_string();
                         for (index, row) in rows.iter().enumerate() {
                             let toggle = cx.entity().downgrade();
                             let secret = cx.entity().downgrade();
@@ -3408,17 +3410,48 @@ impl Render for ShellView {
                                                 row.key.clone()
                                             }),
                                     )
-                                    .child(
+                                    .child({
+                                        let entity = cx.entity().downgrade();
+                                        let focus = self.env_focus.clone();
+                                        let editing = matches!(env_editing, Some((index_now, false)) if index_now == index);
+                                        // While editing, this row shows the live buffer instead
+                                        // of the stored value — otherwise the caret would move
+                                        // over text that is not what gets saved.
+                                        let shown = if editing {
+                                            format!("{}▌", env_text_now)
+                                        } else {
+                                            row.value.display().to_string()
+                                        };
+                                        let seed = row.value.display();
                                         div()
+                                            .id(format!("env-value-{index}"))
                                             .flex_1()
                                             .min_w(px(120.0))
+                                            .px(px(1.0))
+                                            .rounded(px(metrics::RADIUS_MD))
+                                            .bg(if editing {
+                                                palette.bg_elevated
+                                            } else {
+                                                palette.bg_base
+                                            })
                                             .text_color(if row.enabled {
                                                 palette.fg_muted
                                             } else {
                                                 palette.fg_subtle
                                             })
-                                            .child(row.value.display()),
-                                    )
+                                            .cursor_text()
+                                            .child(shown)
+                                            .on_click(move |_, window, cx| {
+                                                let seed = seed.clone();
+                                                let focus = focus.clone();
+                                                let _ = entity.update(cx, |this, cx| {
+                                                    this.env_editing = Some((index, false));
+                                                    this.env_text = TextField::new(seed);
+                                                    window.focus(&focus, cx);
+                                                    cx.notify();
+                                                });
+                                            })
+                                    })
                                     .child(
                                         div()
                                             .id(format!("env-toggle-{index}"))
@@ -3619,6 +3652,51 @@ impl Render for ShellView {
                         panel = panel.child(buttons);
                         panel =
                             panel.on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                let characters = event.keystroke.key_char.as_deref();
+                                let key = event.keystroke.key.clone();
+                                if let Some((index, _)) = this.env_editing {
+                                    match key.as_str() {
+                                        "enter" => {
+                                            let value = this.env_text.text().to_string();
+                                            if let Some(editor) = this.env.as_mut() {
+                                                editor.set_value(index, value);
+                                            }
+                                            this.env_editing = None;
+                                            cx.notify();
+                                            return;
+                                        }
+                                        "escape" => {
+                                            this.env_editing = None;
+                                            cx.notify();
+                                            return;
+                                        }
+                                        "tab" => {
+                                            let value = this.env_text.text().to_string();
+                                            if let Some(editor) = this.env.as_mut() {
+                                                editor.set_value(index, value.clone());
+                                                // Move to the next row's value, wrapping.
+                                                let next = (index + 1) % editor.rows().len().max(1);
+                                                this.env_editing = Some((next, false));
+                                                let seed = editor
+                                                    .rows()
+                                                    .get(next)
+                                                    .map(|row| row.value.display())
+                                                    .unwrap_or_default();
+                                                this.env_text = TextField::new(seed);
+                                            }
+                                            let _ = &value;
+                                            cx.notify();
+                                            return;
+                                        }
+                                        _ => {}
+                                    }
+                                    if this.env_text.apply_key(&key, characters)
+                                        == KeyOutcome::Changed
+                                    {
+                                        cx.notify();
+                                    }
+                                    return;
+                                }
                                 let characters = event.keystroke.key_char.as_deref();
                                 if this.env_paste.apply_key(&event.keystroke.key, characters)
                                     == KeyOutcome::Changed
@@ -3834,6 +3912,51 @@ impl Render for ShellView {
                         panel = panel.child(buttons);
                         panel =
                             panel.on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                let characters = event.keystroke.key_char.as_deref();
+                                let key = event.keystroke.key.clone();
+                                if let Some((index, _)) = this.env_editing {
+                                    match key.as_str() {
+                                        "enter" => {
+                                            let value = this.env_text.text().to_string();
+                                            if let Some(editor) = this.env.as_mut() {
+                                                editor.set_value(index, value);
+                                            }
+                                            this.env_editing = None;
+                                            cx.notify();
+                                            return;
+                                        }
+                                        "escape" => {
+                                            this.env_editing = None;
+                                            cx.notify();
+                                            return;
+                                        }
+                                        "tab" => {
+                                            let value = this.env_text.text().to_string();
+                                            if let Some(editor) = this.env.as_mut() {
+                                                editor.set_value(index, value.clone());
+                                                // Move to the next row's value, wrapping.
+                                                let next = (index + 1) % editor.rows().len().max(1);
+                                                this.env_editing = Some((next, false));
+                                                let seed = editor
+                                                    .rows()
+                                                    .get(next)
+                                                    .map(|row| row.value.display())
+                                                    .unwrap_or_default();
+                                                this.env_text = TextField::new(seed);
+                                            }
+                                            let _ = &value;
+                                            cx.notify();
+                                            return;
+                                        }
+                                        _ => {}
+                                    }
+                                    if this.env_text.apply_key(&key, characters)
+                                        == KeyOutcome::Changed
+                                    {
+                                        cx.notify();
+                                    }
+                                    return;
+                                }
                                 let Some(form) = this.editor.as_mut() else {
                                     return;
                                 };

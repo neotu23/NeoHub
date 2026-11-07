@@ -1492,3 +1492,21 @@
   `cargo test --workspace --locked` → **516 passed / 0 failed**；clippy 0；打包自检通过
 - 未解决问题：门控的实际收益需在多个后台任务运行时观察；`L3` 的 16 KiB 分块上限仍未做
 
+### E7/U8 环境变量行内值编辑
+- 状态：**完成**
+- 最近提交：`feat: edit environment values inline`
+- 实际修改文件：`ui/src/views/shell.rs`（值单元格可点击进入编辑、键盘处理、Tab 跳行）、
+  `ui/src/state/env_editor.rs`（新增 4 个语义测试）
+- 行为：
+  1. 点某一行的值 → 该行进入编辑态，缓冲**预填当前值**（不是空）
+  2. 编辑时该行显示**缓冲内容**（带 `▌`），不是原值 —— 否则光标会走在"不是最终保存内容"的文本上
+  3. `Enter` 提交到模型，`Tab` 提交并跳到下一行（环绕），`Esc` 取消不再改动
+  4. 秘密行编辑后**仍然保持 secret 标记**
+- **关键安全语义（有测试）**：未编辑的秘密行提交时 `value = None`（保留原值）；
+  如果把掩码当成值提交回去，就会把真实密钥覆盖成 `••••••`
+- 验证：`cargo test -p neohub-ui --lib inline_edit` → **4 passed**
+  （编辑后保存带上新值、秘密编辑后仍是秘密、未编辑的秘密行不回传值、掩码显示不是 "null"）
+  `cargo test --workspace --locked` → **520 passed / 0 failed**；clippy 0；打包自检通过；
+  启动日志无 error/panic
+- 未解决问题：键、备注、启用状态的**键内编辑**仍靠按钮；行内编辑的实际点击需人工确认
+
