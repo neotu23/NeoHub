@@ -640,6 +640,7 @@ impl HostBridge {
         let mut saved_task: Option<neohub_domain::Task> = None;
         let mut db_notice_out: Option<String> = None;
         let mut notices_out: Vec<(crate::state::toast::ToastKind, String)> = Vec::new();
+        let mut pins_out: Vec<crate::state::crash_pin::CrashPin> = Vec::new();
         let mut update_out: Option<(String, bool)> = None;
         let mut app_saved_out: Option<neohub_domain::App> = None;
         let mut app_save_error_out: Option<String> = None;
@@ -663,9 +664,25 @@ impl HostBridge {
                         if let neohub_core::events::CoreEventKind::TaskStatus {
                             task_id,
                             state,
+                            app_id,
+                            exit,
                             ..
                         } = &event.kind
                         {
+                            // Freeze the tail now: the buffer expires for exited tasks, and the
+                            // crash card has to survive longer than that.
+                            if crate::state::store::UiStore::should_pin_state(*state) {
+                                let (app_name, task_name) = store.labels_for(task_id);
+                                let _ = app_name;
+                                let output = store.terminal_text_of(task_id);
+                                pins_out.push(crate::state::crash_pin::CrashPin::new(
+                                    task_id.clone(),
+                                    app_id.clone(),
+                                    task_name,
+                                    exit.as_ref().and_then(|exit| exit.code),
+                                    &output,
+                                ));
+                            }
                             let settings = store.settings();
                             if settings.notify_on_crash {
                                 let (app_name, task_name) = store.labels_for(task_id);
@@ -834,6 +851,13 @@ impl HostBridge {
             && let Ok(mut guard) = self.last_update.lock()
         {
             *guard = Some(update);
+        }
+        if !pins_out.is_empty()
+            && let Ok(mut store) = self.store.lock()
+        {
+            for pin in pins_out {
+                store.pin_crash(pin);
+            }
         }
         for (kind, message) in notices_out {
             if let Ok(mut store) = self.store.lock() {
@@ -3207,6 +3231,107 @@ impl Render for ShellView {
                 }
                 header = header.child(actions);
                 main = main.child(header);
+
+                // Crash cards: the pinned tail of anything that died, with a restart entry.
+                // Shown above the tabs because this is the reason the user is looking.
+                {
+                    let store = self.bridge.store.lock().expect("store lock");
+                    let pins: Vec<crate::state::crash_pin::CrashPin> = store
+                        .crash_pins()
+                        .iter()
+                        .filter(|pin| pin.app_id == app.id)
+                        .cloned()
+                        .collect();
+                    let hint = app.port_hint;
+                    drop(store);
+                    for pin in pins {
+                        let entity = cx.entity().downgrade();
+                        let bridge = self.bridge.clone();
+                        let task_id = pin.task_id.clone();
+                        let conflict = pin.looks_like_port_conflict(hint);
+                        let mut card = div()
+                            .id(format!("crash-card-{}", pin.task_id))
+                            .flex()
+                            .flex_col()
+                            .gap(px(metrics::GAP_1))
+                            .p(px(metrics::PAD_3))
+                            .rounded(px(metrics::RADIUS_LG))
+                            .border_1()
+                            .border_color(palette.danger_border)
+                            .bg(palette.danger_bg)
+                            .text_size(px(metrics::TEXT_SM))
+                            .child(div().text_color(palette.danger_fg).child(pin.headline()));
+                        if let Some(port) = conflict {
+                            card = card.child(
+                                div()
+                                    .text_size(px(metrics::TEXT_XS))
+                                    .text_color(palette.warn_fg)
+                                    .child(format!(
+                                        "端口 {port} 已被占用 —— 先停掉占用它的进程，或改这个项目的端口"
+                                    )),
+                            );
+                        }
+                        card = card.child(
+                            div()
+                                .text_size(px(metrics::TEXT_XS))
+                                .text_color(palette.fg_muted)
+                                .child(if pin.tail.is_empty() {
+                                    "退出前没有输出".to_string()
+                                } else {
+                                    pin.tail.clone()
+                                }),
+                        );
+                        let mut actions = div().flex().gap(px(metrics::GAP_2));
+                        {
+                            let bridge = bridge.clone();
+                            let task_id = task_id.clone();
+                            let entity = entity.clone();
+                            actions = actions.child(
+                                div()
+                                    .id(format!("crash-restart-{}", pin.task_id))
+                                    .px(px(metrics::PAD_3))
+                                    .py(px(metrics::GAP_1))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .bg(palette.accent)
+                                    .text_color(palette.accent_fg)
+                                    .text_size(px(metrics::TEXT_XS))
+                                    .cursor_pointer()
+                                    .child("重试")
+                                    .on_click(move |_, _, cx| {
+                                        bridge.send(CoreCommand::StartTask {
+                                            task_id: task_id.clone(),
+                                        });
+                                        let _ = entity.update(cx, |_, cx| cx.notify());
+                                    }),
+                            );
+                        }
+                        {
+                            let entity = entity.clone();
+                            let dismiss_id = task_id.clone();
+                            actions = actions.child(
+                                div()
+                                    .id(format!("crash-dismiss-{}", pin.task_id))
+                                    .px(px(metrics::PAD_3))
+                                    .py(px(metrics::GAP_1))
+                                    .rounded(px(metrics::RADIUS_MD))
+                                    .bg(palette.bg_elevated)
+                                    .text_size(px(metrics::TEXT_XS))
+                                    .cursor_pointer()
+                                    .child("忽略")
+                                    .on_click(move |_, _, cx| {
+                                        let _ = entity.update(cx, |this, cx| {
+                                            if let Ok(mut store) = this.bridge.store.lock() {
+                                                store.dismiss_crash(&dismiss_id);
+                                            }
+                                            cx.notify();
+                                        });
+                                    }),
+                            );
+                        }
+                        card = card.child(actions);
+                        main = main.child(card);
+                    }
+                }
 
                 // Task tabs.
                 let mut tabs = div().flex().gap(px(metrics::GAP_1));

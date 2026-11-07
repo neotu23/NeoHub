@@ -3,6 +3,7 @@
 pub mod app_form;
 pub mod command_labels;
 pub mod command_palette;
+pub mod crash_pin;
 pub mod edit_session;
 pub mod env_editor;
 pub mod session;

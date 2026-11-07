@@ -57,7 +57,7 @@
 | L6 | 单任务日志过滤视图（虚拟化 + 高亮 + 行号） | `LogSearchView.tsx` | 部分 | `ui/src/views/log_search.rs`| 部分（详情页终端面板 + 全局日志搜索面板：跨任务结果按 app/任务/行号定位、点击跳转选中项目与任务 tab；普通/正则、limit 复用核心匹配器） |
 | L7 | 终端渲染：ANSI 16/256/真彩、CR 覆写、滚动历史、自动跟随、选择复制、字号 | `LogTerminal.tsx`（xterm 6） | 部分（截图） | `ui/src/terminal/`| 部分（终端面板渲染已支持 SGR 颜色：16 色/256 色/真彩、粗体；跟随/滚动/导出齐备；等宽字体待调） |
 | L8 | 日志复制/保存导出 | `AppDetail.tsx` | 部分 | `ui/src/terminal/`| 已验证（`导出可读`/`导出原始` 落盘到 `<data>/logs/`，集成测试断言可读文本无转义、原始保留 ANSI） |
-| L9 | 崩溃日志钉住最后 200 行 + 重启入口 + 端口冲突提示 | `CrashPin.tsx` | 部分 | `ui/src/views/app_detail.rs`| 部分（崩溃/退出后日志仍可搜索查看，10 分钟后淘汰；崩溃钉住入口随 UI） |
+| L9 | 崩溃日志钉住最后 200 行 + 重启入口 + 端口冲突提示 | `CrashPin.tsx` | 部分 | `ui/src/views/app_detail.rs`| 已验证（崩溃时**冻结最后 200 行**（缓冲对已退出任务会过期，钉住的是快照）；详情页顶部崩溃卡片：退出码、尾部输出、**端口冲突识别**（EADDRINUSE / address already in use → 指出端口）、重试与忽略） |
 
 ## 5. 环境变量与密钥
 

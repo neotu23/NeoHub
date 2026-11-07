@@ -1531,3 +1531,24 @@
   启动日志无 error/panic
 - 未解决问题：错误只以 toast 呈现，详情页没有"上次失败原因"的常驻位置
 
+### L9 崩溃钉住
+- 状态：**完成**
+- 最近提交：`feat: pin the tail of a crash`
+- 实际修改文件：新增 `ui/src/state/crash_pin.rs`；更新 `ui/src/state/{mod,store}.rs`、
+  `ui/src/views/shell.rs`（事件里钉住、详情页崩溃卡片）
+- 为什么是"快照"而不是"接着看实时日志"：缓冲对已退出任务有 TTL 会过期，而用户可能几分钟后
+  才回到窗口。钉住的是**崩溃那一刻的尾部**；如果它继续更新，那就不是现场记录，只是换了标题的
+  当前日志
+- 内容：
+  1. 崩溃事件到达时冻结最后 **200 行**（`terminal_text_of`）
+  2. 详情页顶部卡片：标题含退出码、尾部输出、"重试"（`StartTask`）、"忽略"
+  3. **端口冲突识别**：尾部出现 `EADDRINUSE` / `address already in use` 时指出端口
+     （优先用应用的 `port_hint`，否则从文本里找），并给出下一步（停掉占用进程或改端口）
+  4. 同一个任务重复崩溃只保留一张卡（避免堆叠）；最多保留 5 张
+- 验证：`cargo test -p neohub-ui --lib crash_pin` → **9 passed**
+  （只保留尾部且最新在末尾、短日志完整保留、空日志不报错、标题含退出码、端口冲突两种拼写、
+  无关崩溃不误报端口、只有崩溃才钉住、limit 0）
+  `cargo test --workspace --locked` → **532 passed / 0 failed**；clippy 0；打包自检通过；
+  启动日志无 error/panic
+- 未解决问题：崩溃卡片的实际渲染需人工确认（无法自动化视觉）
+

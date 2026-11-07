@@ -4,6 +4,7 @@
 //! and `CoreEvent`s and answers "what should the sidebar/dashboard show". That keeps the
 //! expensive logic testable without a window, and keeps rendering a pure function of state.
 
+use crate::state::crash_pin::{CrashPin, should_pin};
 use crate::state::session::{AppSort, GroupBy, Session};
 use crate::state::sparkline::Sparkline;
 use crate::state::toast::{ToastKind, Toasts};
@@ -101,6 +102,8 @@ pub struct UiStore {
     /// Sections the user collapsed, by title. Kept in memory only: a collapsed folder is a
     /// passing convenience, not a preference worth writing to `session.json`.
     collapsed_sections: std::collections::BTreeSet<String>,
+    /// Crashes the user has not dismissed, newest last.
+    crash_pins: Vec<CrashPin>,
     /// App whose sidebar row menu is open, if any.
     ///
     /// One at a time: two open menus in a list this narrow would overlap, and closing the
@@ -141,6 +144,7 @@ impl UiStore {
             snapshot: None,
             cpu_history: std::collections::BTreeMap::new(),
             collapsed_sections: std::collections::BTreeSet::new(),
+            crash_pins: Vec::new(),
             open_row_menu: None,
             toasts: Toasts::default(),
             session,
@@ -260,6 +264,11 @@ impl UiStore {
             }
         }
         (String::new(), String::new())
+    }
+
+    /// The last rendered text for a task (what the terminal pane shows).
+    pub fn terminal_text_of(&self, task_id: &TaskId) -> String {
+        self.terminal_text.get(task_id).cloned().unwrap_or_default()
     }
 
     pub fn set_terminal_text(&mut self, task_id: TaskId, text: String) {
@@ -586,6 +595,30 @@ impl UiStore {
 
     pub fn is_section_collapsed(&self, title: &str) -> bool {
         self.collapsed_sections.contains(title)
+    }
+
+    /// Pin a crashed task's tail (called when a crash event arrives).
+    pub fn pin_crash(&mut self, pin: CrashPin) {
+        // One pin per task: a task that crashes twice should not stack two cards.
+        self.crash_pins
+            .retain(|existing| existing.task_id != pin.task_id);
+        self.crash_pins.push(pin);
+        // Keep the list short; the newest crashes are the ones being worked on.
+        while self.crash_pins.len() > 5 {
+            self.crash_pins.remove(0);
+        }
+    }
+
+    pub fn crash_pins(&self) -> &[CrashPin] {
+        &self.crash_pins
+    }
+
+    pub fn dismiss_crash(&mut self, task_id: &TaskId) {
+        self.crash_pins.retain(|pin| &pin.task_id != task_id);
+    }
+
+    pub fn should_pin_state(state: ProcessState) -> bool {
+        should_pin(state)
     }
 
     /// Open the row menu for one app, or close it when the same app is clicked again.
