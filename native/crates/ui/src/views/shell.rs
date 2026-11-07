@@ -32,6 +32,13 @@ enum HostUpdate {
     Event(CoreEvent),
     Candidates(Vec<ImportCandidate>),
     Imported,
+    /// One candidate of a batch finished: (path, ok).
+    ImportedOne(String, bool),
+    /// A whole batch finished.
+    BatchImported {
+        imported: usize,
+        failures: Vec<String>,
+    },
     History(AppId, Vec<neohub_domain::RunHistoryRow>),
     TaskSaved(Box<neohub_domain::Task>),
     TaskError(String),
@@ -412,6 +419,66 @@ impl HostBridge {
         });
     }
 
+    /// Import every ticked candidate, one at a time.
+    ///
+    /// Sequential on purpose: each import writes apps, tasks and env vars in one transaction, and
+    /// running them in parallel would make the failure report depend on scheduling. Each success
+    /// is marked in the panel so a retry after a partial failure re-imports only what is left.
+    pub fn import_selected(&self) {
+        let candidates = self
+            .store
+            .lock()
+            .expect("store lock")
+            .selected_import_candidates();
+        if candidates.is_empty() {
+            return;
+        }
+        let handle = self.handle.clone();
+        let sink = self.reply_sink.clone();
+        self.runtime.spawn(async move {
+            let mut imported = 0usize;
+            let mut failures: Vec<String> = Vec::new();
+            for candidate in candidates {
+                let input = neohub_core::catalog::CreateAppInput {
+                    path: candidate.path.clone(),
+                    name: Some(candidate.name.clone()),
+                    node_version_pref: None,
+                    package_manager: candidate.package_manager,
+                    default_script: candidate.suggested_script.clone(),
+                    first_task: candidate.suggested_script.clone().map(|script| {
+                        neohub_core::catalog::CreateTaskSpec {
+                            name: script.clone(),
+                            command_kind: Some(neohub_domain::CommandKind::Script),
+                            script: Some(script),
+                            custom_command: None,
+                            working_dir_override: None,
+                        }
+                    }),
+                    tasks: Vec::new(),
+                    env_vars: Vec::new(),
+                };
+                match handle
+                    .request(CoreCommand::CreateApp {
+                        input: Box::new(input),
+                    })
+                    .await
+                {
+                    Ok(_) => {
+                        imported += 1;
+                        // Marked as it lands, so a retry after a partial failure only re-imports
+                        // what is left.
+                        let _ = sink.send(HostUpdate::ImportedOne(candidate.path.clone(), true));
+                    }
+                    Err(error) => {
+                        failures.push(format!("{}：{error}", candidate.name));
+                        let _ = sink.send(HostUpdate::ImportedOne(candidate.path.clone(), false));
+                    }
+                }
+            }
+            let _ = sink.send(HostUpdate::BatchImported { imported, failures });
+        });
+    }
+
     /// Reveal the app's own log file in Finder (creates the folder first).
     pub fn open_log_dir(&self) {
         let dir = self.data_dir.join("logs");
@@ -558,6 +625,7 @@ impl HostBridge {
         let mut notices: Vec<neohub_platform_macos::notify::Notification> = Vec::new();
         let mut saved_task: Option<neohub_domain::Task> = None;
         let mut db_notice_out: Option<String> = None;
+        let mut notices_out: Vec<(crate::state::toast::ToastKind, String)> = Vec::new();
         let mut update_out: Option<(String, bool)> = None;
         let mut app_saved_out: Option<neohub_domain::App> = None;
         let mut app_save_error_out: Option<String> = None;
@@ -605,6 +673,32 @@ impl HostBridge {
                     }
                     HostUpdate::Candidates(candidates) => {
                         store.set_import_candidates(candidates);
+                        changed = true;
+                    }
+                    HostUpdate::ImportedOne(path, ok) => {
+                        if ok {
+                            store.mark_candidate_registered(&path);
+                        }
+                        changed = true;
+                    }
+                    HostUpdate::BatchImported { imported, failures } => {
+                        store.set_import_busy(false);
+                        if failures.is_empty() {
+                            notices_out.push((
+                                crate::state::toast::ToastKind::Success,
+                                format!("已导入 {imported} 个项目"),
+                            ));
+                        } else {
+                            notices_out.push((
+                                crate::state::toast::ToastKind::Error,
+                                format!(
+                                    "导入 {imported} 个，{} 个失败：{}",
+                                    failures.len(),
+                                    failures.join("；")
+                                ),
+                            ));
+                        }
+                        need_snapshot = true;
                         changed = true;
                     }
                     HostUpdate::Imported => {
@@ -712,6 +806,11 @@ impl HostBridge {
             && let Ok(mut guard) = self.last_update.lock()
         {
             *guard = Some(update);
+        }
+        for (kind, message) in notices_out {
+            if let Ok(mut store) = self.store.lock() {
+                store.notify(kind, message);
+            }
         }
         if let Some(notice) = db_notice_out {
             // Database results also surface as a toast: the panel may be closed by the time the
@@ -2564,11 +2663,74 @@ impl Render for ShellView {
                 );
             }
 
+            // Batch controls: tick several and import them in one go.
+            if !import.candidates.is_empty() {
+                let entity = cx.entity().downgrade();
+                let selected_count = import.selected.len();
+                let importable = import
+                    .candidates
+                    .iter()
+                    .filter(|c| !c.already_registered)
+                    .count();
+                let all_entity = cx.entity().downgrade();
+                let batch_bridge = self.bridge.clone();
+                let mut footer = div().flex().items_center().gap(px(metrics::GAP_2));
+                footer = footer.child(
+                    div()
+                        .id("import-select-all")
+                        .px(px(metrics::PAD_2))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(palette.bg_elevated)
+                        .text_size(px(metrics::TEXT_XS))
+                        .cursor_pointer()
+                        .child(format!("全选（{importable}）"))
+                        .on_click(move |_, _, cx| {
+                            let _ = all_entity.update(cx, |this, cx| {
+                                if let Ok(mut store) = this.bridge.store.lock() {
+                                    store.toggle_select_all_imports();
+                                }
+                                cx.notify();
+                            });
+                        }),
+                );
+                footer = footer.child(
+                    div()
+                        .id("import-batch")
+                        .px(px(metrics::PAD_3))
+                        .py(px(metrics::GAP_1))
+                        .rounded(px(metrics::RADIUS_MD))
+                        .bg(if selected_count == 0 {
+                            palette.bg_surface
+                        } else {
+                            palette.accent
+                        })
+                        .text_color(if selected_count == 0 {
+                            palette.fg_subtle
+                        } else {
+                            palette.accent_fg
+                        })
+                        .text_size(px(metrics::TEXT_XS))
+                        .cursor_pointer()
+                        .child(format!("导入选中（{selected_count}）"))
+                        .on_click(move |_, _, cx| {
+                            if selected_count == 0 {
+                                return;
+                            }
+                            batch_bridge.import_selected();
+                            let _ = entity.update(cx, |_, cx| cx.notify());
+                        }),
+                );
+                panel = panel.child(footer);
+            }
+
             for candidate in &import.candidates {
                 let bridge = self.bridge.clone();
                 let entity = cx.entity().downgrade();
                 let candidate = candidate.clone();
                 let registered = candidate.already_registered;
+                let checked = import.selected.contains(&candidate.path);
+                let tick_path = candidate.path.clone();
+                let tick_entity = cx.entity().downgrade();
                 panel = panel.child(
                     div()
                         .id(format!("candidate-{}", candidate.path))
@@ -2594,6 +2756,36 @@ impl Render for ShellView {
                                         .text_color(palette.fg_subtle)
                                         .child(candidate.path.clone()),
                                 ),
+                        )
+                        .child(
+                            div()
+                                .id(format!("candidate-tick-{}", candidate.path))
+                                .px(px(metrics::PAD_2))
+                                .rounded(px(metrics::RADIUS_MD))
+                                .bg(palette.bg_surface)
+                                .text_size(px(metrics::TEXT_XS))
+                                .text_color(if checked {
+                                    palette.accent
+                                } else {
+                                    palette.fg_subtle
+                                })
+                                .cursor_pointer()
+                                .child(if registered {
+                                    "—"
+                                } else if checked {
+                                    "☑"
+                                } else {
+                                    "☐"
+                                })
+                                .on_click(move |_, _, cx| {
+                                    let path = tick_path.clone();
+                                    let _ = tick_entity.update(cx, |this, cx| {
+                                        if let Ok(mut store) = this.bridge.store.lock() {
+                                            store.toggle_import_candidate(&path);
+                                        }
+                                        cx.notify();
+                                    });
+                                }),
                         )
                         .child(
                             div()

@@ -80,6 +80,8 @@ pub struct ImportState {
     /// Last error, shown in the panel and dismissable.
     pub error: Option<String>,
     pub candidates: Vec<ImportCandidate>,
+    /// Paths ticked for a batch import.
+    pub selected: std::collections::BTreeSet<String>,
 }
 
 impl ImportState {
@@ -282,6 +284,7 @@ impl UiStore {
             busy: true,
             error: None,
             candidates: Vec::new(),
+            selected: Default::default(),
         };
     }
 
@@ -293,6 +296,69 @@ impl UiStore {
         self.import.busy = false;
         self.import.error = None;
         self.import.candidates = candidates;
+        // A fresh scan invalidates the previous selection.
+        self.import.selected.clear();
+    }
+
+    /// Tick or untick one candidate.
+    ///
+    /// Already-registered candidates cannot be selected: offering to import them again would
+    /// promise something the service refuses.
+    pub fn toggle_import_candidate(&mut self, path: &str) {
+        let selectable = self
+            .import
+            .candidates
+            .iter()
+            .any(|candidate| candidate.path == path && !candidate.already_registered);
+        if !selectable {
+            return;
+        }
+        if !self.import.selected.remove(path) {
+            self.import.selected.insert(path.to_string());
+        }
+    }
+
+    pub fn is_import_selected(&self, path: &str) -> bool {
+        self.import.selected.contains(path)
+    }
+
+    /// Select every importable candidate, or clear the selection when all are already ticked.
+    pub fn toggle_select_all_imports(&mut self) {
+        let importable: Vec<String> = self
+            .import
+            .candidates
+            .iter()
+            .filter(|candidate| !candidate.already_registered)
+            .map(|candidate| candidate.path.clone())
+            .collect();
+        if importable
+            .iter()
+            .all(|path| self.import.selected.contains(path))
+        {
+            self.import.selected.clear();
+        } else {
+            self.import.selected = importable.into_iter().collect();
+        }
+    }
+
+    /// Candidates the user ticked, in scan order (import order should be predictable).
+    pub fn selected_import_candidates(&self) -> Vec<ImportCandidate> {
+        self.import
+            .candidates
+            .iter()
+            .filter(|candidate| self.import.selected.contains(&candidate.path))
+            .cloned()
+            .collect()
+    }
+
+    /// Mark one candidate as registered once its import succeeded.
+    pub fn mark_candidate_registered(&mut self, path: &str) {
+        for candidate in &mut self.import.candidates {
+            if candidate.path == path {
+                candidate.already_registered = true;
+            }
+        }
+        self.import.selected.remove(path);
     }
 
     pub fn set_import_error(&mut self, message: impl Into<String>) {
@@ -1491,5 +1557,98 @@ mod section_tests {
         );
         let filled = store_with(vec![app_with_folder("a", None)]);
         assert!(!filled.has_no_apps());
+    }
+}
+
+#[cfg(test)]
+mod batch_import_tests {
+    use super::*;
+    use neohub_core::environment::ImportCandidate;
+
+    fn candidate(path: &str, registered: bool) -> ImportCandidate {
+        ImportCandidate {
+            path: path.to_string(),
+            name: path.rsplit('/').next().unwrap_or(path).to_string(),
+            package_manager: None,
+            suggested_script: Some("dev".to_string()),
+            scripts: vec!["dev".to_string()],
+            already_registered: registered,
+        }
+    }
+
+    fn store_with(candidates: Vec<ImportCandidate>) -> UiStore {
+        let mut store = UiStore::new(Session::default());
+        store.open_import("/tmp");
+        store.set_import_candidates(candidates);
+        store
+    }
+
+    #[test]
+    fn ticking_toggles_only_selectable_candidates() {
+        let mut store = store_with(vec![candidate("/tmp/a", false), candidate("/tmp/b", true)]);
+        store.toggle_import_candidate("/tmp/a");
+        assert!(store.is_import_selected("/tmp/a"));
+        store.toggle_import_candidate("/tmp/a");
+        assert!(!store.is_import_selected("/tmp/a"), "ticking again unticks");
+
+        store.toggle_import_candidate("/tmp/b");
+        assert!(
+            !store.is_import_selected("/tmp/b"),
+            "an already registered project cannot be selected"
+        );
+    }
+
+    #[test]
+    fn select_all_covers_the_importable_and_toggles_off() {
+        let mut store = store_with(vec![
+            candidate("/tmp/a", false),
+            candidate("/tmp/b", false),
+            candidate("/tmp/c", true),
+        ]);
+        store.toggle_select_all_imports();
+        assert_eq!(store.selected_import_candidates().len(), 2);
+        store.toggle_select_all_imports();
+        assert!(
+            store.selected_import_candidates().is_empty(),
+            "select-all again clears"
+        );
+    }
+
+    #[test]
+    fn a_fresh_scan_drops_the_previous_selection() {
+        let mut store = store_with(vec![candidate("/tmp/a", false)]);
+        store.toggle_import_candidate("/tmp/a");
+        assert_eq!(store.selected_import_candidates().len(), 1);
+        store.set_import_candidates(vec![candidate("/tmp/a", false)]);
+        assert!(
+            store.selected_import_candidates().is_empty(),
+            "a new scan invalidates the old ticks"
+        );
+    }
+
+    #[test]
+    fn selected_candidates_keep_the_scan_order() {
+        let mut store = store_with(vec![
+            candidate("/tmp/a", false),
+            candidate("/tmp/b", false),
+            candidate("/tmp/c", false),
+        ]);
+        store.toggle_import_candidate("/tmp/c");
+        store.toggle_import_candidate("/tmp/a");
+        let picked: Vec<String> = store
+            .selected_import_candidates()
+            .into_iter()
+            .map(|candidate| candidate.path)
+            .collect();
+        assert_eq!(picked, vec!["/tmp/a".to_string(), "/tmp/c".to_string()]);
+    }
+
+    #[test]
+    fn marking_one_registered_untucks_it() {
+        let mut store = store_with(vec![candidate("/tmp/a", false)]);
+        store.toggle_import_candidate("/tmp/a");
+        store.mark_candidate_registered("/tmp/a");
+        assert!(!store.is_import_selected("/tmp/a"));
+        assert!(store.import().candidates[0].already_registered);
     }
 }

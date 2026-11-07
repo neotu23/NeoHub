@@ -1436,3 +1436,22 @@
   - 失败路径：`touch crates/ui/src/lib.rs` 后单独运行该检查 → 打印该文件并 `exit=1`
   - 之后重新打包已恢复一致（`touch` 只改 mtime，源码内容未变）
 
+### U5 批量导入
+- 状态：**完成**
+- 最近提交：`feat: import several projects at once`
+- 实际修改文件：`ui/src/state/store.rs`（`ImportState.selected`、勾选/全选/标记已导入）、
+  `ui/src/views/shell.rs`（候选行勾选框、全选与批量按钮、`HostBridge::import_selected`、
+  `HostUpdate::ImportedOne`/`BatchImported`）
+- 设计要点：
+  1. **逐个顺序导入**：每次导入是 app+tasks+env 的一个事务；并行会让失败报告取决于调度顺序
+  2. **成功即标记**：部分失败后重试只会重新导入剩下的（`mark_candidate_registered` 同时取消勾选）
+  3. **已注册的候选不能勾选**（显示 `—`）：给出一个服务端会拒绝的选项是假承诺
+  4. 新扫描会**清空上次的勾选**，避免对着旧列表点"导入选中"
+  5. 结果汇总为一条 toast：全成功给数量，部分失败给"导入 N 个，M 个失败：…"
+- 验证：`cargo test -p neohub-ui --lib batch_import` → **5 passed**
+  （勾选只影响可选候选、全选覆盖可选且再点清空、新扫描清空选择、按扫描顺序输出、
+  标记已导入后取消勾选）
+  `cargo test --workspace --locked` → **510 passed / 0 failed**；clippy 0
+  打包自检通过（`up to date with …/crates`），启动日志无 error/panic
+- 未解决问题：批量导入的实际点击需人工确认
+

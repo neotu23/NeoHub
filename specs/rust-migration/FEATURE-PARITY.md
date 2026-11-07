@@ -164,7 +164,7 @@
 | U2 | 仪表盘（汇总卡、项目卡、CPU sparkline、端口 chip、标签筛选、全部停止） | `Dashboard.tsx` | 部分（截图） | `ui/src/views/dashboard.rs`| 已验证（汇总卡、项目卡、端口 chip、状态色、CPU sparkline、标签筛选、**空态引导「导入项目…」**） |
 | U3 | 项目详情（任务 tabs、启停/重启、端口、历史、日志区、Open In、复制路径） | `AppDetail.tsx`, `TaskTabs.tsx` | 部分（截图） | `ui/src/views/app_detail.rs`| 已验证（任务 tabs、每任务与项目级启停重启、端口、历史、日志尾、**Open In 按已装目标生成按钮**、运行历史） |
 | U4 | 添加项目抽屉（浏览 → 检测 → 命名/Node/PM/脚本 → 环境；monorepo 每包一任务） | `AddAppDrawer.tsx` | 部分 | `ui/src/views/add_app.rs`| 部分（导入面板：选目录→扫描→候选清单→命名/脚本建议→导入；Node 版本与 PM 选择未接到面板） |
-| U5 | 扫描导入抽屉（候选列表、已注册标记、批量添加） | `ImportProjectsDrawer.tsx` | 部分 | `ui/src/views/import_projects.rs`| 部分（扫描导入面板含候选清单与已注册标记；批量多选添加待做） |
+| U5 | 扫描导入抽屉（候选列表、已注册标记、批量添加） | `ImportProjectsDrawer.tsx` | 部分 | `ui/src/views/import_projects.rs`| 已验证（扫描面板：候选清单、已注册标记、**勾选多选 + 全选 + 批量导入**（逐个顺序执行、成功即标记、部分失败汇总为错误 toast）、单条「添加」仍在） |
 | U6 | 任务编辑器抽屉（命令/脚本/工作目录/依赖/readiness/oneShot/enabled/重排） | `TaskEditor.tsx` | 部分 | `ui/src/views/task_editor.rs`| 已验证（表单模型 + 视图：点击聚焦、键入、Tab 切换、readiness 六选择、保存/取消、字段级错误） |
 | U7 | 应用配置抽屉（名称/颜色/文件夹/标签/自动重启/watch globs/autoStart/Node/PM） | `AppConfigDrawer.tsx`, `TagInput.tsx`, `FolderSelect.tsx` | 部分 | `ui/src/views/app_config.rs`| 已验证（面板：9 个字段 + 两个开关；**行内文本输入**（点击字段聚焦、Tab 切换并带值、Esc 关闭），保存走 `UpdateApp`，字段级错误就地显示，成功用服务端返回值重建基线） |
 | U8 | 环境变量编辑器（见 E7） | `EnvEditor.tsx` | 部分 | `ui/src/views/env_editor.rs`| 部分（同 E7，编辑器的值编辑仍受限） |
