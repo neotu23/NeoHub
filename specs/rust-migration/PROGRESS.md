@@ -1761,3 +1761,22 @@
 - 未解决问题：没有"自动批量重录"（需要旧版导出明文）；启动流程对 `enc1:` 的拦截仍会让任务
   起不来（这是正确的，错误已能说明原因并可引导重录）
 
+### S6 深链接 Apple Event：探针结论（本轮未实现，已止损）
+- 状态：**保持"部分"**，但阻塞点已查清并记录
+- 本轮做了什么：查了 `objc2` 生态能提供什么，而不是凭猜测改代码
+- **确切结论**：
+  - `objc2-foundation 0.3` 有 `NSAppleEventManager` 与 `NSAppleEventDescriptor`，但
+    `setEventHandler:andSelector:forEventClass:andEventID:` **只在启用 `objc2-core-services`
+    时存在**（它需要 `AEEventClass` / `AEEventID` / `kAEGetURL` / `AEKeyword` 这些类型）
+  - 因此要做成，需要同时具备：`objc2-core-services` 依赖 + `objc2::define_class!` 定义一个
+    NSObject 子类并实现 `handleGetURLEvent:withReplyEvent:` + 从 `AEKeyword` 取
+    `keyDirectObject` 再读 `stringValue`
+  - 这三件事都是 unsafe ObjC 交互，且**失败形态是"点击链接后崩溃"**，只能在真机上验证
+- 为什么本轮停手：`Cargo.toml` 里加了 `NSAppleEventManager` feature 之后我判断，在剩余精力内
+  完成这套绑定的把握不足；更糟的结果是交付一个"看起来能用、点了会崩"的功能。所以回滚了那处
+  feature 改动，工作区保持干净，并把上面的路径写清楚
+- 现状（未变）：`Info.plist` 已注册 `neohub` scheme，`deep_link::parse` 已完整实现并有 10 个
+  测试，argv 传入的链接会被解析并选中项目；**只有"运行中通过 Apple Event 送进来"这一环缺失**
+- 接手方式：按上面三步做，先写一个只打印 URL 的探针（`#[ignore]` 测试或示例程序），
+  确认不崩再接入 `ActivationWatcher` 那条轮询链路
+
