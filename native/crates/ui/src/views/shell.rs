@@ -1087,6 +1087,8 @@ pub struct ShellView {
     /// Open command palette, if any.
     palette: Option<crate::state::command_palette::CommandPalette>,
     palette_focus: FocusHandle,
+    /// Last PTY size sent per task, so a resize goes out only when it changes.
+    pty_size_sent: std::collections::BTreeMap<TaskId, (u16, u16)>,
     /// Node installations for the config panel's version picker.
     node_versions: Vec<String>,
     /// Tasks the last `SetLogFocus` command mentioned (avoids re-sending every frame).
@@ -1140,6 +1142,7 @@ impl ShellView {
             terminal_height: 16,
             terminal_task: None,
             db_reset_armed: false,
+            pty_size_sent: Default::default(),
             node_versions: Vec::new(),
             log_focus_sent: None,
             palette: None,
@@ -1413,7 +1416,7 @@ impl ShellView {
 }
 
 impl Render for ShellView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = self.palette();
         // Fold a completed save back into the open editor.
         let (saved, save_error) = self.bridge.take_save_outcome();
@@ -1544,6 +1547,25 @@ impl Render for ShellView {
                     .request(CoreCommand::SetLogFocus { tasks })
                     .await;
             });
+        }
+
+        // Keep the PTY's idea of the window in step with the actual window. Sent only on change:
+        // the tick runs every frame, and a resize ioctl per frame would be pure noise.
+        if let Some(task_id) = self.terminal_task.clone() {
+            let window_width = f32::from(window.bounds().size.width);
+            let (cols, rows) = crate::state::pty_size::pty_size(
+                window_width,
+                crate::theme::metrics::TEXT_SM,
+                self.terminal_height,
+            );
+            if self.pty_size_sent.get(&task_id) != Some(&(cols, rows)) {
+                self.pty_size_sent.insert(task_id.clone(), (cols, rows));
+                self.bridge.send(CoreCommand::ResizeTask {
+                    task_id,
+                    cols,
+                    rows,
+                });
+            }
         }
 
         // Expiry runs on the same tick as everything else; errors are exempt (see toast.rs).

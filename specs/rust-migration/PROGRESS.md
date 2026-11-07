@@ -1601,3 +1601,22 @@
 - 未解决问题：版本 chips 的实际点击需人工确认；本机只有 system node（`~/.local/bin/node`），
   所以列表里只会出现一个来源
 
+### P4 PTY resize 接线
+- 状态：**完成**
+- 最近提交：`feat: keep the pty in step with the window`
+- 实际修改文件：新增 `ui/src/state/pty_size.rs`；更新 `ui/src/state/mod.rs`、
+  `ui/src/views/shell.rs`（render 读取窗口宽度、尺寸变化时发 `ResizeTask`）
+- 为什么之前是"部分"：PTY 启动在 120×30 之后**再没变过** —— 窗口拉宽后终端仍在原宽度换行
+- 实现：
+  1. 纯函数 `pty_size(window_width, font_size, rows)`：扣掉侧栏与内边距，按 0.6 em 字宽估算列数
+  2. 结果**双向夹紧**（cols 20–400、rows 4–200）：估算偏差无害，但荒谬值会让游标定位的
+     转义序列错乱
+  3. 只有**尺寸变化时**才发命令（每帧一个 ioctl 是纯噪音），按任务记录上次发送值
+- 验证：`cargo test -p neohub-ui --lib pty_size` → **7 passed**
+  （宽窗列数更多、扣掉侧栏与内边距、极小窗夹到最小值、极大窗夹到最大值、NaN/0/∞ 回退最小值、
+  rows 双向夹紧、1280×12px 时列数落在 100–140 与初始 120×30 同一量级）
+  `cargo test --workspace --locked` → **545 passed / 0 failed**；clippy 0；打包自检通过；
+  启动日志无 error/panic
+- 未解决问题：真实拖拽窗口后终端重排的观感需人工确认；字符宽度是估算（0.6 em），
+  若换非等宽字体会偏
+

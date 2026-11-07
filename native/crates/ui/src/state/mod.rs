@@ -6,6 +6,7 @@ pub mod command_palette;
 pub mod crash_pin;
 pub mod edit_session;
 pub mod env_editor;
+pub mod pty_size;
 pub mod session;
 pub mod settings_form;
 pub mod sparkline;

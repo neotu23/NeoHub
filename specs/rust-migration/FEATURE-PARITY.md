@@ -38,7 +38,7 @@
 | P1 | PTY 启动：脚本模式（PM + script）与 custom 命令模式 | `TaskRunner.ts` | 已验证（`AppOrchestrator.e2e.test.ts` 真起进程） | `core/src/process/spawn_spec.rs`| 已验证（`SpawnSpec` 脚本/命令两种模式 + PTY 启动；任务可真实运行并出现在快照里） |
 | P2 | 同任务启动去重（并发 start 只 spawn 一次） | `TaskRunner.ts` | 已验证（e2e 断言） | `core/src/process/runner.rs` | 已验证（并发 start 串行化，第二个被拒绝，只 spawn 一次） |
 | P3 | 停止：SIGTERM → grace(kill_grace_ms) → SIGKILL，**整棵进程树**；不误杀自身 | `TaskRunner.ts`（`tree-kill`） | 已验证 | `core/src/process/process_tree.rs` | 已验证（TERM→grace→KILL 作用于整个进程组；含祖父/子进程、忽略 TERM、拒绝自身组） |
-| P4 | PTY resize（最小 2×2，初始 120×30） | `TaskRunner.ts`, `task:resize` | 部分 | `core/src/process/runner.rs`| 部分（初始 120×30、resize 下限 2×2、ioctl 已实现，`CoreCommand::ResizeTask` 有处理；**UI 侧拖拽/尺寸变化未发送该命令**） |
+| P4 | PTY resize（最小 2×2，初始 120×30） | `TaskRunner.ts`, `task:resize` | 部分 | `core/src/process/runner.rs`| 已验证（初始 120×30、resize 下限 2×2、ioctl 已实现；**UI 按窗口宽度与字号算出 cols**，尺寸变化时发 `ResizeTask`（相同尺寸不重发），cols 夹在 20–400、rows 夹在 4–200） |
 | P5 | 退出结算：用户停止 / 正常退出 / 崩溃三态，只结算一次 | `TaskRunner.ts`, `AppOrchestrator.ts` | 已验证（`AppOrchestrator.state.test.ts`） | `core/src/process/runner.rs` | 已验证（用户停止/正常退出/崩溃三态 + generation 校验只结算一次） |
 | P6 | 应用级启停重启 `proc:start/stop/restart` + 反向拓扑停止 | `AppOrchestrator.ts` | 已验证 | `core/src/orchestrator/`| 已验证（`CoreService::start_app/stop_app/restart_app` + 拓扑顺序；UI 详情页项目级启停/重启按钮；`workflow_*` 测试覆盖） |
 | P7 | 任务级启停 `task:start/stop`（手动） | `ipc/index.ts` | 部分 | `core/src/service.rs`| 已验证（`start_task`/`stop_task` 命令 + 详情页每任务启停按钮；`task_isolation` 测试） |
