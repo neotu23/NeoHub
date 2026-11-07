@@ -15,7 +15,24 @@
 | 未知设置键 | 记入 `unknown_settings`，不写入新库（旧库里仍在） |
 | 旧版密文 `enc1:` | 原样复制（不丢数据），并统计到 `secrets_unavailable`；这些变量在修好之前会**阻止任务启动**，不会当密码传下去 |
 
-## 导入步骤
+## 一条命令完成（推荐）
+
+打包后的二进制自带迁移入口，**先 dry-run 看报告，再真跑**：
+
+```bash
+APP="$PWD/native/dist/NeoHub.app/Contents/MacOS/neohub-desktop"
+
+# 1) 只读预览：什么都不写
+"$APP" --migrate-legacy --dry-run --data-dir "$HOME/Library/Application Support/NeoHub-Rust-Dev"
+
+# 2) 确认数量无误后导入
+"$APP" --migrate-legacy --data-dir "$HOME/Library/Application Support/NeoHub-Rust-Dev"
+```
+
+`--legacy-dir` 可指定源目录（默认按 `NeoHub` → `DevHarbor` → `devharbor` 查找）。
+`--dry-run` 会复制到临时 staging 后立刻删除，**目标目录一个字节都不写**。
+
+## 手工步骤（等同上面的实现）
 
 1. 完全退出旧版（关窗只到菜单栏不算退出）：
 

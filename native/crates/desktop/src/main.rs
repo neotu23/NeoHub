@@ -11,6 +11,7 @@ use gpui_kit::*;
 use neohub_core::commands::CoreCommand;
 use neohub_core::service::CoreService;
 use neohub_desktop::app_host::{ActivationWatcher, SharedHost, open_main_window, reopen_or_focus};
+use neohub_desktop::migrate;
 use neohub_desktop::session_lock::{LockOutcome, SessionLock};
 use neohub_desktop::window_session::AppHost;
 use neohub_platform_macos::app_menu;
@@ -66,6 +67,17 @@ fn run_command(shared: &SharedHost, runtime: &Arc<tokio::runtime::Runtime>, comm
 }
 
 fn main() {
+    // `--migrate-legacy` runs headless and exits: it prints a report instead of opening a window,
+    // so it works over SSH and cannot be interrupted by the UI half-starting.
+    match migrate::parse_args(std::env::args()) {
+        Ok(Some(request)) => std::process::exit(migrate::run(request)),
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(2);
+        }
+    }
+
     // Earliest possible: a panic below this point still reaches the log file.
     log_file::init(None);
     log_file::install_panic_hook();

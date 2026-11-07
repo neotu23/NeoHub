@@ -40,8 +40,13 @@ pub fn import_legacy(
     let fresh_target = !target_db.exists();
 
     // Build in a staging directory first when the target is new: one rename publishes it.
+    //
+    // The name must not collide with the directory a caller uses for its *copy* of the legacy
+    // database. It did once: the CLI copies to `<target>/.import-staging`, and this function
+    // then deleted that same directory before reading it, so the import failed with
+    // "unable to open database file". Publishing gets its own name now.
     let staging_dir = if fresh_target {
-        target_dir.join(".import-staging")
+        target_dir.join(".publish-staging")
     } else {
         target_dir.to_path_buf()
     };

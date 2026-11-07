@@ -1823,3 +1823,26 @@
      浏览器点击 `neohub://`
   3. 决定是否合入 `main`、是否替换稳定版（当前按你的决定保持分支隔离）
 
+### 真实数据迁移：CLI + 执行（并修掉一个真实 bug）
+- 状态：**完成**（已对真实旧库执行，旧库字节未变）
+- 最近提交：`feat: migrate legacy data with one command`
+- 为什么需要新代码：此前只有库内 API，没有可执行入口，用户/我都没法按 `MIGRATION.md` 跑。
+  新增 `neohub-desktop --migrate-legacy [--dry-run] [--data-dir] [--legacy-dir]`，
+  在 GPUI 启动前分流、打印纯文报告后退出 —— 这样 SSH 里也能用，且不会被窗口半途打断
+- **执行中发现并修掉一个真实 bug**：`import_legacy` 的内部发布目录原本用 `.import-staging`，
+  与调用方（CLI）复制源库所用的目录**同名**。于是发布步骤先把调用者的副本删掉，再去读它 →
+  `unable to open database file`。改为 `.publish-staging`，并加了防回归测试
+  （测试形状与 CLI 完全一致：复制到 `<target>/.import-staging` → inspect → import）
+- 真实迁移结果（`~/Library/Application Support/DevHarbor` → `…/NeoHub-Rust-Dev`）：
+  - 预览：7 个 schema 版本全部已知；**4 apps / 4 tasks / 0 env vars / 9 run history / 7 settings**；
+    源库有 WAL；`mcp_token` 属未知设置（留在旧库，未应用）
+  - 导入：`应用 4 · 任务 4 · 环境变量 0 · 历史 9 · 跳过 0 · 未解密 0`
+  - `PRAGMA integrity_check` → `ok`；`auto_start=0`、`mcp_enabled=0`（**按设计暂停自动化**）
+  - **旧库 sha256 仍是 `eadcd3d9…09cbab`**，与冷备份一致 —— 源库只读这条守住了
+  - 用导入后的数据启动打包应用：进程存活、**0 errors**
+  - `migration.json` 记录了源 sha256、schema 版本与逐表计数
+- 验证：`cargo test -p neohub-desktop --lib migrate` → **4 passed**（flag 解析、缺 `--data-dir` 报错、
+  目标=源被拒）；`cargo test -p neohub-storage --test migration_atomicity` → **7 passed**（新增回归）
+  `cargo test --workspace --locked` → **575 passed / 0 failed**；clippy 0
+- 未解决问题：`enc1:` 密文本次为 0 条（旧库没有秘密变量），若有需按面板「需重录」处理
+

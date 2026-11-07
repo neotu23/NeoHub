@@ -9,3 +9,5 @@ pub mod window_session;
 pub use app_host::{ActivationWatcher, SharedHost, open_main_window, reopen_or_focus};
 pub use session_lock::{LockOutcome, SessionLock, activation_path, activation_stamp};
 pub use window_session::{AppHost, CloseDecision, ReopenPlan};
+
+pub mod migrate;

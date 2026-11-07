@@ -90,7 +90,7 @@ fn a_first_import_publishes_the_whole_database_and_pauses_automation() {
         "database published"
     );
     assert!(
-        !target_dir.join(".import-staging").exists(),
+        !target_dir.join(".publish-staging").exists(),
         "staging directory is consumed by the rename"
     );
 
@@ -239,5 +239,31 @@ fn the_source_database_is_never_modified() {
     assert_eq!(
         before, after,
         "the legacy database is byte-identical afterwards"
+    );
+}
+
+#[test]
+fn importing_works_when_the_callers_copy_sits_in_the_target_directory() {
+    // The CLI copies the legacy database to `<target>/.import-staging` and then imports from
+    // there. The publishing step used to reuse that same directory name and delete the very
+    // copy it was about to read, which surfaced as "unable to open database file".
+    let dir = tempfile::tempdir().unwrap();
+    // The fixture writes devharbor.db into `dir` and returns that file path; the copy step takes
+    // the directory that holds it.
+    let db_file = legacy(dir.path(), 2, false);
+    let source_dir = db_file.parent().expect("source dir").to_path_buf();
+    let target = dir.path().join("target");
+
+    // Same shape as the CLI: copy first, inspect the copy, then import from it.
+    let copy_dir = target.join(".import-staging");
+    let copied = copy_source(&source_dir, &copy_dir).expect("copy");
+    let preview = inspect(&copied, &source_dir, false).expect("inspect");
+    let outcome = import_legacy(&copied, &preview, &target).expect("import from the caller's copy");
+
+    assert!(outcome.database.exists());
+    assert_eq!(outcome.report.imported.apps, 2, "both apps landed");
+    assert!(
+        !target.join(".publish-staging").exists(),
+        "the publish staging is cleaned up"
     );
 }
