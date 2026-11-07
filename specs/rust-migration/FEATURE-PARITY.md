@@ -76,7 +76,7 @@
 
 | # | 功能 | 旧版源码依据 | 旧版基线 | Rust 目标 | Rust 状态 |
 |---|---|---|---|---|---|
-| N1 | 版本管理器检测 nvm/fnm/volta/asdf/system + `node:list` | `NodeResolver.ts` | 已验证（5 例，含特殊字符路径） | `core/src/environment/node_resolver.rs`| 部分（nvm/fnm/volta/asdf/system 扫描 + MCP `list_node_versions` 可用；**应用配置面板没有版本下拉**，只能手输） |
+| N1 | 版本管理器检测 nvm/fnm/volta/asdf/system + `node:list` | `NodeResolver.ts` | 已验证（5 例，含特殊字符路径） | `core/src/environment/node_resolver.rs`| 已验证（nvm/fnm/volta/asdf/system 扫描 + MCP `list_node_versions`；**应用配置面板在版本字段下列出本机已装版本**（点击填入裸版本号），仍可手输 `auto`/`system`/任意版本） |
 | N2 | 版本选择规则 `.nvmrc` / `.node-version` / `engines.node`（semver）+ 不自动安装 | `NodeResolver.ts` | 已验证 | `core/src/environment/node_resolver.rs` | 已验证（`.nvmrc`/`.node-version` 精确与 major-only、`engines.node` 范围、缺版本报错、不自动安装） |
 | N3 | Finder 启动无终端 PATH：登录 shell PATH 探测（有超时与缓存） | `PathProbe.ts` | 已验证（3 例） | `core/src/environment/path_probe.rs`| 已验证（`PathProbe` 探测登录 shell PATH（哨兵/3 s 超时/缓存），**已在启动流程的 env 构建里使用**） |
 | N4 | `node:resolve` 单应用解析 | `ipc/index.ts` | 部分 | `core/src/environment/`| 已验证（`NodeResolver::resolve` 在 `start_task` 路径里按 system/explicit/auto 解析，失败会报错而不是静默用错版本） |

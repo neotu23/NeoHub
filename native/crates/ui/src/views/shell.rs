@@ -42,6 +42,8 @@ enum HostUpdate {
     History(AppId, Vec<neohub_domain::RunHistoryRow>),
     TaskSaved(Box<neohub_domain::Task>),
     TaskError(String),
+    /// Node versions installed on this machine, as menu labels.
+    NodeVersions(Vec<String>),
     UpdateChecked(neohub_core::update::UpdateStatus),
     UpdateFailed(String),
     /// A fire-and-forget command failed; the user needs to know which one.
@@ -86,6 +88,8 @@ pub struct HostBridge {
     last_update: Mutex<Option<(String, bool)>>,
     /// The version an update was found for, so it can be skipped.
     last_update_version: Mutex<Option<String>>,
+    /// Node installations for the config panel's version picker.
+    last_node_versions: Mutex<Vec<String>>,
     /// Outcome of the last settings save, picked up by the settings panel.
     last_settings: Mutex<(Option<neohub_domain::Settings>, Option<String>)>,
     /// Environment-variable loads/saves waiting to be folded into the editor.
@@ -133,6 +137,7 @@ impl HostBridge {
             last_db_notice: Mutex::new(None),
             last_update: Mutex::new(None),
             last_update_version: Mutex::new(None),
+            last_node_versions: Mutex::new(Vec::new()),
             last_settings: Mutex::new((None, None)),
             last_env: Mutex::new((Vec::new(), None)),
             session_store,
@@ -423,6 +428,24 @@ impl HostBridge {
         }
     }
 
+    /// Load the Node installations for the version picker.
+    pub fn load_node_versions(&self) {
+        let handle = self.handle.clone();
+        let sink = self.reply_sink.clone();
+        self.runtime.spawn(async move {
+            if let Ok(neohub_core::commands::CoreReply::NodeVersions(versions)) =
+                handle.request(CoreCommand::ListNodeVersions).await
+            {
+                let _ = sink.send(HostUpdate::NodeVersions(
+                    versions
+                        .into_iter()
+                        .map(|install| format!("{} ({})", install.version, install.source.as_str()))
+                        .collect(),
+                ));
+            }
+        });
+    }
+
     /// Ask GitHub whether a newer release exists (blocking call, off the UI thread).
     pub fn check_for_updates(&self) {
         let sink = self.reply_sink.clone();
@@ -646,6 +669,7 @@ impl HostBridge {
         let mut pins_out: Vec<crate::state::crash_pin::CrashPin> = Vec::new();
         let mut update_out: Option<(String, bool)> = None;
         let mut update_version_out: Option<String> = None;
+        let mut node_versions_out: Option<Vec<String>> = None;
         let mut app_saved_out: Option<neohub_domain::App> = None;
         let mut app_save_error_out: Option<String> = None;
         let mut save_error: Option<String> = None;
@@ -809,6 +833,10 @@ impl HostBridge {
                         eprintln!("[ui] log export failed: {message}");
                         changed = true;
                     }
+                    HostUpdate::NodeVersions(versions) => {
+                        node_versions_out = Some(versions);
+                        changed = true;
+                    }
                     HostUpdate::UpdateChecked(status) => {
                         let status = neohub_core::update::respect_skip(
                             status,
@@ -873,6 +901,11 @@ impl HostBridge {
             if let Err(error) = neohub_platform_macos::notify::send(&notice) {
                 eprintln!("[ui] notification failed: {error}");
             }
+        }
+        if let Some(versions) = node_versions_out
+            && let Ok(mut guard) = self.last_node_versions.lock()
+        {
+            *guard = versions;
         }
         if let Some(update) = update_out
             && let Ok(mut guard) = self.last_update.lock()
@@ -1054,6 +1087,8 @@ pub struct ShellView {
     /// Open command palette, if any.
     palette: Option<crate::state::command_palette::CommandPalette>,
     palette_focus: FocusHandle,
+    /// Node installations for the config panel's version picker.
+    node_versions: Vec<String>,
     /// Tasks the last `SetLogFocus` command mentioned (avoids re-sending every frame).
     log_focus_sent: Option<Vec<TaskId>>,
     /// Global log search input.
@@ -1105,6 +1140,7 @@ impl ShellView {
             terminal_height: 16,
             terminal_task: None,
             db_reset_armed: false,
+            node_versions: Vec::new(),
             log_focus_sent: None,
             palette: None,
             palette_focus,
@@ -1409,6 +1445,12 @@ impl Render for ShellView {
 
         // Read before any panel borrows `self` mutably.
         let update_status_now = self.update_status();
+        self.node_versions = self
+            .bridge
+            .last_node_versions
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default();
 
         // Fold a completed app-configuration save back into the open panel.
         let (app_saved, app_error) = self.take_app_save_outcome();
@@ -2218,6 +2260,7 @@ impl Render for ShellView {
                 ));
 
             // Text rows: (label, field name, value, placeholder).
+            let node_version_choices = self.node_versions.clone();
             for (label, field, value, placeholder) in [
                 ("名称", "name", fields.name.clone(), "显示名称"),
                 ("文件夹", "folder", fields.folder.clone(), "分组，可留空"),
@@ -2299,7 +2342,41 @@ impl Render for ShellView {
                                 .text_size(px(metrics::TEXT_XS))
                                 .text_color(palette.danger_fg)
                                 .child(error.clone().unwrap_or_default()),
-                        ),
+                        )
+                        .child({
+                            // Installed versions as chips, so the field is a choice rather than a
+                            // guess. The list comes from the same command the MCP tool uses.
+                            let mut chips = div().flex().gap(px(metrics::GAP_1));
+                            if field == "node_version" {
+                                for version in node_version_choices.iter() {
+                                    let entity = cx.entity().downgrade();
+                                    let value = version.clone();
+                                    // "20.11.0 (nvm)" -> the bare version is what the field wants.
+                                    let bare =
+                                        value.split(' ').next().unwrap_or(&value).to_string();
+                                    chips = chips.child(
+                                        div()
+                                            .id(format!("node-version-{bare}"))
+                                            .px(px(metrics::PAD_2))
+                                            .rounded(px(metrics::RADIUS_MD))
+                                            .bg(palette.bg_elevated)
+                                            .text_size(px(metrics::TEXT_XS))
+                                            .cursor_pointer()
+                                            .child(value.clone())
+                                            .on_click(move |_, _, cx| {
+                                                let bare = bare.clone();
+                                                let _ = entity.update(cx, |this, cx| {
+                                                    if let Some(form) = this.app_form.as_mut() {
+                                                        form.set("node_version", bare);
+                                                    }
+                                                    cx.notify();
+                                                });
+                                            }),
+                                    );
+                                }
+                            }
+                            chips
+                        }),
                 );
             }
 
@@ -3255,6 +3332,7 @@ impl Render for ShellView {
                         let entity = cx.entity().downgrade();
                         let focus = self.app_form_focus.clone();
                         let app = app.clone();
+                        let bridge_for_config = self.bridge.clone();
                         div()
                             .id("detail-app-config")
                             .px(px(metrics::PAD_3))
@@ -3266,6 +3344,7 @@ impl Render for ShellView {
                             .child("应用配置")
                             .on_click(move |_, window, cx| {
                                 let form = crate::state::app_form::AppForm::from_app(&app);
+                                bridge_for_config.load_node_versions();
                                 let _ = entity.update(cx, |this, cx| {
                                     this.app_form = Some(form);
                                     window.focus(&focus, cx);

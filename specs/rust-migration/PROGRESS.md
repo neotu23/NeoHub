@@ -1586,3 +1586,18 @@
   启动日志无 error/panic
 - 未解决问题：「忽略 X」按钮的实际点击需人工确认
 
+### N1 Node 版本选择接入配置面板
+- 状态：**完成**
+- 最近提交：`feat: offer installed node versions in the config panel`
+- 实际修改文件：`ui/src/views/shell.rs`（`load_node_versions`、版本列表通道、版本字段下的可选 chips）
+- 内容：
+  1. 打开「应用配置」时加载 `ListNodeVersions`（与 MCP 同一个命令）
+  2. 在 Node 版本字段下方列出本机已装版本（`20.11.0 (nvm)` 形式），点击填入**裸版本号**
+  3. 仍可手输 `auto` / `system` / 任意版本 —— 下拉是便利，不是限制
+- 实现注意：drain 方法在 `HostBridge` 上、读列表的是 `ShellView`，所以列表经 `last_node_versions`
+  共享通道传递（与 `last_update` 同一模式），而不是硬塞进视图
+- 验证：`cargo test --workspace --locked` → **538 passed / 0 failed**；clippy 0；打包自检通过；
+  启动日志无 error/panic
+- 未解决问题：版本 chips 的实际点击需人工确认；本机只有 system node（`~/.local/bin/node`），
+  所以列表里只会出现一个来源
+
