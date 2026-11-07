@@ -970,6 +970,8 @@ pub struct ShellView {
     /// Open command palette, if any.
     palette: Option<crate::state::command_palette::CommandPalette>,
     palette_focus: FocusHandle,
+    /// Tasks the last `SetLogFocus` command mentioned (avoids re-sending every frame).
+    log_focus_sent: Option<Vec<TaskId>>,
     /// Global log search input.
     search_input: TextField,
     log_search_focus: FocusHandle,
@@ -1019,6 +1021,7 @@ impl ShellView {
             terminal_height: 16,
             terminal_task: None,
             db_reset_armed: false,
+            log_focus_sent: None,
             palette: None,
             palette_focus,
             search_input: TextField::new(""),
@@ -1386,6 +1389,36 @@ impl Render for ShellView {
         } else {
             div().id("empty-state-placeholder").w(px(0.0)).h(px(0.0))
         };
+
+        // Tell the core which tasks are on screen, so background logs stop pushing events. Sent
+        // only when the set changes: this runs every frame.
+        let log_focus: Option<Vec<TaskId>> = {
+            let store = self.bridge.store.lock().expect("store lock");
+            if store.search().open || store.selected_app().is_none() {
+                // The global search reads every task's buffer, and the dashboard shows none:
+                // both need everything pushed rather than a list to filter by.
+                None
+            } else {
+                Some(
+                    store
+                        .tasks_of_selected_app()
+                        .into_iter()
+                        .map(|task| task.id)
+                        .collect(),
+                )
+            }
+        };
+        if self.log_focus_sent != log_focus {
+            self.log_focus_sent = log_focus.clone();
+            let bridge = self.bridge.clone();
+            let tasks = log_focus;
+            self.bridge.runtime.spawn(async move {
+                let _ = bridge
+                    .handle
+                    .request(CoreCommand::SetLogFocus { tasks })
+                    .await;
+            });
+        }
 
         // Expiry runs on the same tick as everything else; errors are exempt (see toast.rs).
         if let Ok(mut store) = self.bridge.store.lock() {

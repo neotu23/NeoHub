@@ -16,7 +16,7 @@
 | D3 | `ReadinessSignal` 六种 `none/port/log/http/exit/delay` | `types.ts`, `services/readiness/*` | 已验证（`HttpReadiness.test.ts` 4 例 + MCP set_readiness） | `domain/src/models.rs` | 已验证（六种 readiness 编码 + 往返测试） |
 | D4 | `NodeVersionPref` auto/system/explicit + `PackageManager` × 4 | `types.ts`, `NodeResolver.ts`, `PMDetector.ts` | 已验证（`NodeResolver.test.ts` 5 例） | `domain/src/models.rs` | 已验证（{kind:…} 编码与旧库一致） |
 | D5 | `SettingsState` 17 个字段 + `McpStatus` | `ipc.ts`, `Settings.ts` | 已验证（`Settings.test.ts`） | `domain/src/settings.rs`| 已验证（domain + storage 读写 + **设置面板全部可编辑**，重启不丢） |
-| D6 | IPC 契约：**59 invoke + 22 event** 频道，preload 白名单与类型同源 | `ipc.ts`, `preload/index.ts` | 已验证（`satisfies` 编译期对齐） | `core/src/commands.rs` + `events.rs` + `docs/interfaces.md`| 部分（`CoreCommand`/`CoreReply`/`CoreEvent`/`CoreSnapshot`/`CoreHandle` 已落地并测试；59+22 全量映射随阶段推进补齐） |
+| D6 | IPC 契约：**59 invoke + 22 event** 频道，preload 白名单与类型同源 | `ipc.ts`, `preload/index.ts` | 已验证（`satisfies` 编译期对齐） | `core/src/commands.rs` + `events.rs` + `docs/interfaces.md`| 不适用（Rust 版是同进程调用：`CoreCommand`/`CoreEvent` 取代了 IPC 频道，不存在 preload 边界；对照见 PROGRESS 的架构说明） |
 
 ## 2. 项目 / 任务 / 分组（CRUD）
 
@@ -38,7 +38,7 @@
 | P1 | PTY 启动：脚本模式（PM + script）与 custom 命令模式 | `TaskRunner.ts` | 已验证（`AppOrchestrator.e2e.test.ts` 真起进程） | `core/src/process/spawn_spec.rs`| 已验证（`SpawnSpec` 脚本/命令两种模式 + PTY 启动；任务可真实运行并出现在快照里） |
 | P2 | 同任务启动去重（并发 start 只 spawn 一次） | `TaskRunner.ts` | 已验证（e2e 断言） | `core/src/process/runner.rs` | 已验证（并发 start 串行化，第二个被拒绝，只 spawn 一次） |
 | P3 | 停止：SIGTERM → grace(kill_grace_ms) → SIGKILL，**整棵进程树**；不误杀自身 | `TaskRunner.ts`（`tree-kill`） | 已验证 | `core/src/process/process_tree.rs` | 已验证（TERM→grace→KILL 作用于整个进程组；含祖父/子进程、忽略 TERM、拒绝自身组） |
-| P4 | PTY resize（最小 2×2，初始 120×30） | `TaskRunner.ts`, `task:resize` | 部分 | `core/src/process/runner.rs` | 部分（初始 120×30、resize 下限 2×2、ioctl 已实现；UI 拖拽接线在阶段 11） |
+| P4 | PTY resize（最小 2×2，初始 120×30） | `TaskRunner.ts`, `task:resize` | 部分 | `core/src/process/runner.rs`| 部分（初始 120×30、resize 下限 2×2、ioctl 已实现，`CoreCommand::ResizeTask` 有处理；**UI 侧拖拽/尺寸变化未发送该命令**） |
 | P5 | 退出结算：用户停止 / 正常退出 / 崩溃三态，只结算一次 | `TaskRunner.ts`, `AppOrchestrator.ts` | 已验证（`AppOrchestrator.state.test.ts`） | `core/src/process/runner.rs` | 已验证（用户停止/正常退出/崩溃三态 + generation 校验只结算一次） |
 | P6 | 应用级启停重启 `proc:start/stop/restart` + 反向拓扑停止 | `AppOrchestrator.ts` | 已验证 | `core/src/orchestrator/`| 已验证（`CoreService::start_app/stop_app/restart_app` + 拓扑顺序；UI 详情页项目级启停/重启按钮；`workflow_*` 测试覆盖） |
 | P7 | 任务级启停 `task:start/stop`（手动） | `ipc/index.ts` | 部分 | `core/src/service.rs`| 已验证（`start_task`/`stop_task` 命令 + 详情页每任务启停按钮；`task_isolation` 测试） |
@@ -50,7 +50,7 @@
 | # | 功能 | 旧版源码依据 | 旧版基线 | Rust 目标 | Rust 状态 |
 |---|---|---|---|---|---|
 | L1 | 主进程有界日志环：每任务 5 MiB / `log_ring_size` 行、全局 100 MiB、退出后淘汰 | `LogBuffer.ts` | 已验证（`LogBuffer.test.ts`） | `core/src/logs/buffer.rs`| 已验证（每任务 5 MiB / 全局 100 MiB / 单 chunk 10 KiB / 退出 10 分钟淘汰，按真实 UTF-8 字节计） |
-| L2 | 可见性订阅 `task:subscribeLogs/unsubscribeLogs`，只为可见任务推送 | `ipc/index.ts` | 部分 | `core/src/logs/subscription.rs`| 部分（`bootstrap_logs` + 事件流已实现，脱离订阅仍采集；"只为可见任务推送" 的门控随 UI 在阶段 11 接） |
+| L2 | 可见性订阅 `task:subscribeLogs/unsubscribeLogs`，只为可见任务推送 | `ipc/index.ts` | 部分 | `core/src/logs/subscription.rs`| 已验证（`SetLogFocus`：窗口只推送**当前可见任务**的日志事件；搜索面板打开或未选应用时推送全部；**字节永不丢弃** —— 环形缓冲仍完整，切换任务后可 bootstrap 取回） |
 | L3 | 合批推送 ~30 Hz / 16 KiB | `ipc/index.ts` | 部分 | `core/src/logs/buffer.rs`| 部分（事件泵按 100 ms 合并 `Log` 事件后批量应用，减少刷新次数；未按 16 KiB 分块上限） |
 | L4 | 读取/尾读/清空缓冲 `readBuffer`/`tailBuffer`/`clearBuffer` | `ipc/index.ts` | 部分 | `core/src/logs/`| 已验证（`GetLogs`/`ClearLogs`/`BootstrapLogs` 命令；清空不影响进程） |
 | L5 | 跨任务全局日志搜索 `logs:searchAll`（正则 + limit） | `mcp/tools.ts`, `GlobalLogSearch.tsx` | 部分 | `core/src/logs/search.rs`| 已验证（`SearchLogs` 支持单任务与全局，字面量/正则/大小写/limit，非法正则报错） |
@@ -76,10 +76,10 @@
 
 | # | 功能 | 旧版源码依据 | 旧版基线 | Rust 目标 | Rust 状态 |
 |---|---|---|---|---|---|
-| N1 | 版本管理器检测 nvm/fnm/volta/asdf/system + `node:list` | `NodeResolver.ts` | 已验证（5 例，含特殊字符路径） | `core/src/environment/node_resolver.rs` | 部分（nvm/fnm/volta/asdf/system 扫描 + 降序去重已实现并测试；`node:list` 命令层未接） |
+| N1 | 版本管理器检测 nvm/fnm/volta/asdf/system + `node:list` | `NodeResolver.ts` | 已验证（5 例，含特殊字符路径） | `core/src/environment/node_resolver.rs`| 部分（nvm/fnm/volta/asdf/system 扫描 + MCP `list_node_versions` 可用；**应用配置面板没有版本下拉**，只能手输） |
 | N2 | 版本选择规则 `.nvmrc` / `.node-version` / `engines.node`（semver）+ 不自动安装 | `NodeResolver.ts` | 已验证 | `core/src/environment/node_resolver.rs` | 已验证（`.nvmrc`/`.node-version` 精确与 major-only、`engines.node` 范围、缺版本报错、不自动安装） |
-| N3 | Finder 启动无终端 PATH：登录 shell PATH 探测（有超时与缓存） | `PathProbe.ts` | 已验证（3 例） | `core/src/environment/path_probe.rs` | 部分（探测/哨兵解析/超时/缓存已实现并测试；尚未接到启动流程） |
-| N4 | `node:resolve` 单应用解析 | `ipc/index.ts` | 部分 | `core/src/environment/` | 部分（`NodeResolver::resolve` 已实现并测试，含 system/explicit/auto 分支） |
+| N3 | Finder 启动无终端 PATH：登录 shell PATH 探测（有超时与缓存） | `PathProbe.ts` | 已验证（3 例） | `core/src/environment/path_probe.rs`| 已验证（`PathProbe` 探测登录 shell PATH（哨兵/3 s 超时/缓存），**已在启动流程的 env 构建里使用**） |
+| N4 | `node:resolve` 单应用解析 | `ipc/index.ts` | 部分 | `core/src/environment/`| 已验证（`NodeResolver::resolve` 在 `start_task` 路径里按 system/explicit/auto 解析，失败会报错而不是静默用错版本） |
 
 ## 7. 就绪与编排
 

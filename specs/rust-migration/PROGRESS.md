@@ -1472,3 +1472,23 @@
   打包自检通过，启动日志无 error/panic
 - 未解决问题：拖拽分组（U1 最后一项）；菜单点击的实际效果需人工确认
 
+### 状态核实 + L2 日志可见性门控
+- 状态：**完成**
+- 最近提交：`feat: push log events only for the visible tasks`
+- **先做了一件必要的事：核实过期状态**。逐条查源码后修正 5 行：
+  - `N3`（登录 shell PATH 探测）→ 已验证：`path_probe.get()` 确实在启动流程的 env 构建里被调用
+  - `N4`（node 解析）→ 已验证：`resolver.resolve` 在 `start_task` 路径里
+  - `P4`（PTY resize）→ 仍是部分：`CoreCommand::ResizeTask` 有处理，但 **UI 从不发送**
+  - `N1`（node 版本）→ 仍是部分：MCP 有 `list_node_versions`，UI 没有版本下拉
+  - `D6`（IPC 契约）→ 改为**不适用**：Rust 版是同进程调用，不存在 IPC/preload 边界
+- L2 实现：
+  1. 新命令 `SetLogFocus { tasks }`：`None` = 推送全部
+  2. 事件泵发 `Log` 事件前查焦点集合，不在其中就**跳过推送**（`revision` 都不 bump）
+  3. **字节永不丢弃**：环形缓冲照常写入，切到该任务后 `GetTerminalText`/bootstrap 仍拿到完整输出
+  4. UI 只在**可见任务集合变化时**发送该命令（每帧比较，避免每帧发命令）；搜索面板打开或
+     未选应用时发送 `None`（需要全部）
+- 验证：`cargo test -p neohub-core --test log_focus` → **2 passed**
+  （焦点只放行被关注任务的事件，**而且被门控任务的输出仍可读**；清空焦点后全部推送）
+  `cargo test --workspace --locked` → **516 passed / 0 failed**；clippy 0；打包自检通过
+- 未解决问题：门控的实际收益需在多个后台任务运行时观察；`L3` 的 16 KiB 分块上限仍未做
+

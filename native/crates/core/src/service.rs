@@ -50,6 +50,12 @@ pub struct CoreService {
     outcomes: Mutex<StickyOutcomes>,
     /// In-flight start cancellation flags, one per app.
     start_cancels: Mutex<HashMap<AppId, Arc<AtomicBool>>>,
+    /// Tasks whose log output the window is currently showing, or `None` for "everything".
+    ///
+    /// Log bytes are always captured (the ring buffer is the source of truth); this only decides
+    /// whether an event is *pushed*. With a dozen background tasks the difference is the
+    /// difference between a quiet UI and a repaint per log line.
+    log_focus: Mutex<Option<std::collections::HashSet<TaskId>>>,
     /// Readiness result per task for the current run.
     ready_flags: Mutex<HashMap<TaskId, (String, bool)>>,
     /// Wakes the monitor loop when a task starts (idle loops must not poll).
@@ -93,6 +99,7 @@ impl CoreService {
             secrets: Arc::new(FakeSecretStore::new()),
             outcomes: Mutex::new(StickyOutcomes::new()),
             start_cancels: Mutex::new(HashMap::new()),
+            log_focus: Mutex::new(None),
             ready_flags: Mutex::new(HashMap::new()),
             monitor_notify: Arc::new(Notify::new()),
             monitor_sweeps: Arc::new(AtomicU64::new(0)),
@@ -180,6 +187,19 @@ impl CoreService {
                 seq,
                 bytes,
             } => {
+                // Push only what the window is looking at. The bytes are already in the ring
+                // buffer, so a task that was skipped still has its full output when the user
+                // selects it (the UI then requests a bootstrap).
+                let focused = self
+                    .log_focus
+                    .lock()
+                    .expect("log focus")
+                    .as_ref()
+                    .map(|focus| focus.contains(&task_id))
+                    .unwrap_or(true);
+                if !focused {
+                    return;
+                }
                 let revision = self.bump_revision();
                 let _ = self.events.send(CoreEvent {
                     revision,
@@ -855,6 +875,12 @@ impl CoreService {
         self.with_storage(|storage| Ok(storage.catalog().remove_app(app_id)?))
     }
 
+    /// Which tasks the window is showing; see `log_focus`.
+    pub fn set_log_focus(&self, tasks: Option<Vec<TaskId>>) {
+        let focus = tasks.map(|tasks| tasks.into_iter().collect());
+        *self.log_focus.lock().expect("log focus") = focus;
+    }
+
     /// Every Node installation the resolver knows about (highest first).
     pub fn node_versions(&self) -> Vec<crate::environment::NodeInstallation> {
         self.node_resolver.list()
@@ -1290,6 +1316,10 @@ impl CoreHandle {
                 Ok(CoreReply::DatabaseReset(outcome))
             }
             CoreCommand::DatabasePath => Ok(CoreReply::DatabasePath(self.service.database_path())),
+            CoreCommand::SetLogFocus { tasks } => {
+                self.service.set_log_focus(tasks);
+                Ok(CoreReply::Ack)
+            }
             CoreCommand::ListNodeVersions => {
                 Ok(CoreReply::NodeVersions(self.service.node_versions()))
             }

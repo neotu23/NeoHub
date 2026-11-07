@@ -67,6 +67,10 @@ pub enum CoreCommand {
     ResetDatabase,
     /// Where the live database file is.
     DatabasePath,
+    /// Tasks whose log output the window is showing (`None` = push everything).
+    SetLogFocus {
+        tasks: Option<Vec<TaskId>>,
+    },
     /// Task CRUD through the command surface (the UI never touches the catalog directly).
     AddTask {
         app_id: AppId,
