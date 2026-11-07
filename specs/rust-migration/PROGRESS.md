@@ -1638,3 +1638,20 @@
   启动日志无 error/panic
 - 未解决问题：选择行的实际点击需人工确认
 
+### U16 焦点陷阱（Shift-Tab 与焦点语义）
+- 状态：**完成**
+- 最近提交：`feat: walk the form fields backwards with shift-tab`
+- 实际修改文件：`ui/src/state/app_form.rs`（`shift-tab` 反向、测试）、
+  `ui/src/views/shell.rs`（把 Shift+Tab 翻译成表单认识的反向键）
+- 澄清一处此前的模糊表述：这个 UI 是**自绘**的，只有一个 `FocusHandle`，字段焦点由表单自己
+  管理（单缓冲 + 索引）。因此**不存在"焦点逃出抽屉"的系统焦点链问题** —— 旧版 WebView 里需要
+  焦点陷阱，正是因为浏览器有真实的 tab 链。真正缺的只是反向切换
+- 内容：
+  1. `Tab` 前进、`Shift-Tab` 后退，**双向都环绕**，切换时把目标字段当前值载入缓冲（不丢改动）
+  2. `Esc` 关闭面板（已有）；视图层把 `tab + shift` 翻译成 `"shift-tab"`，模型不依赖 modifiers
+- 验证：`cargo test -p neohub-ui --lib app_form` → **15 passed**
+  （新增：Shift-Tab 从第一项绕到最后一项、反向取值正确、再按 Tab 回到原位）
+  `cargo test --workspace --locked` → **548 passed / 0 failed**；clippy 0；打包自检通过；
+  启动日志无 error/panic
+- 未解决问题：按键实际效果需人工确认
+

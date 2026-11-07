@@ -138,9 +138,18 @@ impl AppForm {
     /// the button, not per field.
     pub fn apply_key(&mut self, key: &str, characters: Option<&str>) -> KeyOutcome {
         match key {
-            "tab" => {
+            "tab" | "shift-tab" => {
                 self.commit_text();
-                self.focused = (self.focused + 1) % TEXT_FIELDS.len();
+                let last = TEXT_FIELDS.len() - 1;
+                self.focused = if key == "shift-tab" {
+                    if self.focused == 0 {
+                        last
+                    } else {
+                        self.focused - 1
+                    }
+                } else {
+                    (self.focused + 1) % TEXT_FIELDS.len()
+                };
                 let field = self.focused_field();
                 self.text.set_text(self.value_of(field).to_string());
                 KeyOutcome::Changed
@@ -533,6 +542,27 @@ mod tests {
             form.to_patch().expect("valid").name.as_deref(),
             Some("web2")
         );
+    }
+
+    #[test]
+    fn shift_tab_moves_backwards_and_wraps() {
+        let mut form = AppForm::from_app(&app());
+        form.focus_field("name");
+        form.apply_key("shift-tab", None);
+        assert_eq!(
+            form.focused_field(),
+            "node_version",
+            "backwards from the first wraps"
+        );
+        form.apply_key("shift-tab", None);
+        assert_eq!(form.focused_field(), "port_hint");
+        assert_eq!(
+            form.text().text(),
+            "3000",
+            "the value is loaded on the way in"
+        );
+        form.apply_key("tab", None);
+        assert_eq!(form.focused_field(), "node_version");
     }
 
     #[test]

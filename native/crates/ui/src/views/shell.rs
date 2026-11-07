@@ -2521,8 +2521,14 @@ impl Render for ShellView {
             body = body.child(buttons);
             body = body.on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                 let characters = event.keystroke.key_char.as_deref();
+                // Shift+Tab is a distinct key for the form: it walks the fields backwards.
+                let key = if event.keystroke.key == "tab" && event.keystroke.modifiers.shift {
+                    "shift-tab".to_string()
+                } else {
+                    event.keystroke.key.clone()
+                };
                 let outcome = match this.app_form.as_mut() {
-                    Some(form) => form.apply_key(&event.keystroke.key, characters),
+                    Some(form) => form.apply_key(&key, characters),
                     None => return,
                 };
                 if outcome == KeyOutcome::Escape {
