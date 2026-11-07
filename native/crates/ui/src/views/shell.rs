@@ -44,6 +44,11 @@ enum HostUpdate {
     TaskError(String),
     UpdateChecked(neohub_core::update::UpdateStatus),
     UpdateFailed(String),
+    /// A fire-and-forget command failed; the user needs to know which one.
+    CommandFailed {
+        label: String,
+        message: String,
+    },
     DatabaseExported(std::path::PathBuf),
     DatabaseReset(usize),
     DatabaseError(String),
@@ -149,8 +154,17 @@ impl HostBridge {
 
     fn send(&self, command: CoreCommand) {
         let handle = self.handle.clone();
+        let sink = self.reply_sink.clone();
+        // The label is captured before the command moves into the task, so a failure can say
+        // what the user was trying to do.
+        let label = crate::state::command_labels::describe_command(&command).to_string();
         self.runtime.spawn(async move {
-            let _ = handle.request(command).await;
+            if let Err(error) = handle.request(command).await {
+                let _ = sink.send(HostUpdate::CommandFailed {
+                    label,
+                    message: error.to_string(),
+                });
+            }
         });
     }
 
@@ -767,6 +781,20 @@ impl HostBridge {
                     }
                     HostUpdate::UpdateFailed(message) => {
                         update_out = Some((format!("检查更新失败：{message}"), false));
+                        changed = true;
+                    }
+                    HostUpdate::CommandFailed { label, message } => {
+                        let hint = if message.contains("decrypted") || message.contains("密钥") {
+                            // The backend refuses to hand an undecryptable secret to a child
+                            // process; the only fix is re-entering it, so say that.
+                            "（该项目的密钥无法用它当前可用的密钥材料解密，请到环境变量里重新录入）"
+                        } else {
+                            ""
+                        };
+                        notices_out.push((
+                            crate::state::toast::ToastKind::Error,
+                            format!("{label}失败：{message}{hint}"),
+                        ));
                         changed = true;
                     }
                     HostUpdate::DatabaseExported(path) => {

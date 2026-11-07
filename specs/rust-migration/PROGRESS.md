@@ -1510,3 +1510,24 @@
   启动日志无 error/panic
 - 未解决问题：键、备注、启用状态的**键内编辑**仍靠按钮；行内编辑的实际点击需人工确认
 
+### E6 密钥不可用：让失败可见
+- 状态：**完成**
+- 最近提交：`feat: say what failed when a command errors`
+- 发现的问题：`HostBridge::send` 是 `let _ = handle.request(...)` —— **所有命令错误被静默丢弃**。
+  所以"点了启动没反应"是真的没有任何提示，而密钥不可用正是其中一种
+- 修改：
+  1. `send` 在失败时回传 `HostUpdate::CommandFailed { label, message }`
+  2. 新增 `ui/src/state/command_labels.rs`：把命令翻译成"启动/停止/重启/保存环境变量…"，
+     文案短（≤8 字），因为它在 toast 里是"启动失败：…"
+  3. drain 里统一转成 **error toast**（不自动过期）；对密钥错误追加
+     "（该项目的密钥无法用它当前可用的密钥材料解密，请到环境变量里重新录入）"
+- 后端本来已正确：`SecretUnavailable` 会**阻止启动**（`core_service.rs` 有测试），
+  缺的只是把它说出来
+- 副作用记录：这个模块的 `#[test]` 放进 `shell.rs` 会触发 `recursion limit reached while
+  expanding #[test]`（文件太大）。因此把纯函数移到独立模块 —— 顺便更符合"小模块可测"
+- 验证：`cargo test -p neohub-ui --lib command_labels` → **3 passed**
+  （启停标签、未映射命令有兜底标签、标签长度 ≤8）
+  `cargo test --workspace --locked` → **523 passed / 0 failed**；clippy 0；打包自检通过；
+  启动日志无 error/panic
+- 未解决问题：错误只以 toast 呈现，详情页没有"上次失败原因"的常驻位置
+
