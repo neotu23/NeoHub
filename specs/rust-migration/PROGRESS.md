@@ -1803,3 +1803,23 @@
 - 未解决问题：**"浏览器点击链接"这一步只能人工确认** —— 我验证的是注册不崩、接收逻辑正确；
   系统真的回调我们，需要在真机上点一次
 
+### 最终交付验证（0 部分状态）
+- 状态：**完成**
+- 最近提交：`docs: final delivery verification`
+- 本轮做的：
+  1. `DELIVERY.md` 结论改为 **88 已验证 / 0 部分 / 1 不适用 / 5 说明**，并列出最后关闭的四项
+     （`L6`/`U13`/`B6`/`S6`）各自的结论
+  2. 在仓库根的 `specs/PROGRESS.md` 补上 Rust 版条目 —— 计划要求两处进度文件都更新，此前只写了
+     `specs/rust-migration/PROGRESS.md`
+  3. 全部数字按实测重写：570 测试、0 clippy、88 提交
+- 最终验证（实跑）：
+  - `cargo test --workspace --locked` → **570 passed / 0 failed**
+  - `cargo clippy --workspace --all-targets --locked` → **0 warnings**
+  - `bash scripts/package.sh` → 31 MB app / 13 MB dmg，**产物不落后于源码**自检通过
+  - 启动（临时 `--data-dir`）→ 进程存活、无 error/panic、无 URL handler 注册失败
+- 仍需要人做的事（不是我能替代的）：
+  1. **真实数据迁移** —— 按 `native/docs/MIGRATION.md` 的"预览 → 确认 → 导入"
+  2. **人眼确认** —— 菜单栏图标与点击、⌘K、行内编辑、通知横幅、拖拽窗口后的终端重排、
+     浏览器点击 `neohub://`
+  3. 决定是否合入 `main`、是否替换稳定版（当前按你的决定保持分支隔离）
+

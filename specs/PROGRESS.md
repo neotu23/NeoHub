@@ -210,6 +210,23 @@ All findings from the post-Phase-5 audit:
   - **New features:** menubar **Tray** (aggregate state + per-app start/stop + Stop all), **crash/ready notifications**, **launch-at-login + per-app auto-start** (`0007`), **start/stop all in folder**, **bulk import** (scan a folder of repos), **global log search** (⌘⇧F), **port-conflict** callout in CrashPin, update **release notes** + error surfacing in the banner.
   - Verification: typecheck + lint (83 files, 0 warnings) + 52 tests (incl. new restart-watcher and double-start-race coverage) + production build all green; all 7 migrations validated against a real SQLite DB.
 
+- **2026-11-07** - Rust + GPUI rewrite reaches functional parity (branch `rewrite/rust-gpui`, not merged).
+  - The Electron build in this file is unchanged and remains the shipping app; the Rust rewrite lives in
+    [`native/`](../native) on its own branch with its own progress log
+    ([`specs/rust-migration/PROGRESS.md`](rust-migration/PROGRESS.md)).
+  - **Parity:** `FEATURE-PARITY.md` tracks 94 rows against the Electron source: **88 verified, 0 partial**,
+    1 marked not-applicable (the 59 invoke + 22 event IPC contract — the Rust build calls in-process
+    through `CoreCommand`/`CoreEvent`, so there is no preload boundary), 5 explanatory rows.
+  - **Verification:** 570 tests, 0 clippy warnings, `NeoHub.app` 31 MB / `NeoHub-1.4.0.dmg` 13 MB
+    (ad-hoc signed), startup 82 ms and RSS 135 MB measured with a throwaway data dir
+    (`PERFORMANCE.md`). Packaging refuses to finish if any source file is newer than the bundled binary.
+  - **Data safety:** the real user database was never written. Import is read-only source + staging +
+    `integrity_check` + file-level rename, with tests asserting the source bytes are unchanged; the
+    `enc1:` secrets cannot be decrypted and are flagged for re-entry instead.
+  - **Not done on purpose:** not merged to `main`, stable build not replaced, real-data migration left to
+    the user (`native/docs/MIGRATION.md`), notarization needs a Developer ID certificate, arm64 only.
+  - See [`rust-migration/DELIVERY.md`](rust-migration/DELIVERY.md) for the full report.
+
 ## How to keep this file honest
 
 - Every PR that ships a feature should flip its row from 📐/🚧 → ✅.
