@@ -5,9 +5,14 @@
 //! expensive logic testable without a window, and keeps rendering a pure function of state.
 
 use crate::state::session::{AppSort, GroupBy, Session};
+use crate::state::sparkline::Sparkline;
 use neohub_core::environment::ImportCandidate;
 use neohub_core::events::{CoreEvent, CoreEventKind};
 use neohub_core::snapshot::CoreSnapshot;
+
+/// How many CPU samples a card remembers, and how many blocks it draws.
+const SPARKLINE_SAMPLES: usize = 40;
+const SPARKLINE_WIDTH: usize = 16;
 use neohub_domain::{App, AppId, ProcessState, RunHistoryRow, Settings, Task, TaskId};
 use std::collections::BTreeMap;
 
@@ -47,6 +52,8 @@ pub struct AppCard {
     pub ports: Vec<u16>,
     pub folder: Option<String>,
     pub tags: Vec<String>,
+    /// Recent CPU share as block characters, newest on the right.
+    pub cpu_sparkline: String,
 }
 
 /// Header totals for the dashboard.
@@ -84,6 +91,8 @@ impl ImportState {
 /// Everything the views read.
 pub struct UiStore {
     snapshot: Option<CoreSnapshot>,
+    /// Recent CPU samples per app (dashboard sparklines).
+    cpu_history: std::collections::BTreeMap<AppId, Sparkline>,
     session: Session,
     /// Tail of each task's raw output for the detail pane.
     logs: BTreeMap<TaskId, Vec<u8>>,
@@ -115,6 +124,7 @@ impl UiStore {
     pub fn new(session: Session) -> Self {
         UiStore {
             snapshot: None,
+            cpu_history: std::collections::BTreeMap::new(),
             session,
             logs: BTreeMap::new(),
             filter: String::new(),
@@ -303,6 +313,7 @@ impl UiStore {
     /// Replace state with a fresh snapshot, then repair dangling selections.
     pub fn apply_snapshot(&mut self, snapshot: CoreSnapshot) {
         self.snapshot = Some(snapshot);
+        self.sample_cpu_history();
         if let Some(snapshot) = self.snapshot.as_ref() {
             let apps = snapshot.apps.clone();
             let tasks = snapshot.tasks_by_app.clone();
@@ -619,6 +630,11 @@ impl UiStore {
                     ports,
                     folder: app.folder.clone(),
                     tags: app.tags.clone(),
+                    cpu_sparkline: self
+                        .cpu_history
+                        .get(&app.id)
+                        .map(|line| line.render(SPARKLINE_WIDTH))
+                        .unwrap_or_default(),
                 }
             })
             .collect()
@@ -679,6 +695,38 @@ impl UiStore {
             .find(|task| task.enabled)
             .or_else(|| tasks.first())
             .cloned()
+    }
+
+    /// CPU history per app, for the dashboard sparklines.
+    ///
+    /// Sampling happens when a snapshot is applied rather than when the cards are built: a card
+    /// is re-rendered many times per snapshot, and pushing on every render would make the line
+    /// depend on how often the UI repainted instead of on time.
+    fn sample_cpu_history(&mut self) {
+        let Some(snapshot) = self.snapshot.clone() else {
+            return;
+        };
+        for app in &snapshot.apps {
+            let cpu: f32 = snapshot
+                .tasks_by_app
+                .get(&app.id)
+                .map(|tasks| {
+                    tasks
+                        .iter()
+                        .filter_map(|task| snapshot.task_stats.get(&task.id))
+                        .map(|stats| stats.cpu_percent)
+                        .sum()
+                })
+                .unwrap_or(0.0);
+            self.cpu_history
+                .entry(app.id.clone())
+                .or_insert_with(|| Sparkline::new(SPARKLINE_SAMPLES))
+                .push(cpu);
+        }
+        // Drop history for apps that no longer exist, so a long session does not grow forever.
+        let live: std::collections::BTreeSet<&AppId> =
+            snapshot.apps.iter().map(|app| &app.id).collect();
+        self.cpu_history.retain(|app_id, _| live.contains(app_id));
     }
 
     /// The snapshot itself, for views that need to build from it (the command palette).
@@ -1160,5 +1208,125 @@ mod tests {
         assert_eq!(store.session().view, View::Dashboard);
         assert!(store.selected_app().is_none());
         assert!(store.selected_task().is_none());
+    }
+}
+
+#[cfg(test)]
+mod sparkline_sampling_tests {
+    use super::*;
+    use neohub_core::monitor::stats::StatsSample;
+    use neohub_domain::NodeVersionPref;
+    use std::collections::BTreeMap;
+
+    fn app(id: &str) -> App {
+        App {
+            id: AppId::from_existing(id),
+            name: id.into(),
+            path: format!("/tmp/{id}"),
+            color: "#fff".into(),
+            icon: None,
+            node_version_pref: NodeVersionPref::Auto,
+            package_manager: None,
+            default_script: None,
+            custom_command: None,
+            working_dir: "/tmp".into(),
+            auto_restart_on_change: false,
+            auto_start: false,
+            watch_globs: Vec::new(),
+            port_hint: None,
+            tags: Vec::new(),
+            folder: None,
+            last_started_at: None,
+            last_exit_code: None,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn snapshot(cpu: f32) -> CoreSnapshot {
+        let app = app("web");
+        let task_id = TaskId::from_existing("t1");
+        let mut tasks_by_app = BTreeMap::new();
+        tasks_by_app.insert(
+            app.id.clone(),
+            vec![Task {
+                id: task_id.clone(),
+                app_id: app.id.clone(),
+                name: "dev".into(),
+                position: 0,
+                command_kind: neohub_domain::CommandKind::Script,
+                script: Some("dev".into()),
+                custom_command: None,
+                working_dir_override: None,
+                package_manager_override: None,
+                node_version_pref_override: None,
+                depends_on: Vec::new(),
+                readiness: neohub_domain::ReadinessSignal::None,
+                one_shot: false,
+                enabled: true,
+                env_overrides: Default::default(),
+                created_at: 0,
+                updated_at: 0,
+            }],
+        );
+        let mut task_stats = BTreeMap::new();
+        task_stats.insert(
+            task_id,
+            StatsSample {
+                cpu_percent: cpu,
+                mem_mb: 10.0,
+                tree_cpu_percent: cpu,
+                tree_mem_mb: 10.0,
+                process_count: 1,
+            },
+        );
+        CoreSnapshot {
+            revision: 1,
+            apps: vec![app],
+            tasks_by_app,
+            running_tasks: Vec::new(),
+            app_states: Default::default(),
+            settings: Default::default(),
+            task_stats,
+            task_ports: Default::default(),
+            task_ready: Default::default(),
+        }
+    }
+
+    #[test]
+    fn each_snapshot_adds_one_sample_per_app() {
+        let mut store = UiStore::new(Session::default());
+        for cpu in [1.0, 5.0, 3.0] {
+            store.apply_snapshot(snapshot(cpu));
+        }
+        let card = store.dashboard_cards().remove(0);
+        assert_eq!(card.cpu_percent, 3.0, "the latest sample is the CPU figure");
+        assert_eq!(
+            card.cpu_sparkline.chars().count().min(SPARKLINE_WIDTH),
+            card.cpu_sparkline.chars().count(),
+            "the line never exceeds its width"
+        );
+        assert!(!card.cpu_sparkline.is_empty(), "history was sampled");
+        let history = store
+            .cpu_history
+            .get(&AppId::from_existing("web"))
+            .expect("history");
+        assert_eq!(history.len(), 3, "one sample per snapshot, not per render");
+    }
+
+    #[test]
+    fn history_for_a_removed_app_is_dropped() {
+        let mut store = UiStore::new(Session::default());
+        store.apply_snapshot(snapshot(1.0));
+        assert!(store.cpu_history.contains_key(&AppId::from_existing("web")));
+
+        let mut empty = snapshot(1.0);
+        empty.apps.clear();
+        empty.tasks_by_app.clear();
+        store.apply_snapshot(empty);
+        assert!(
+            store.cpu_history.is_empty(),
+            "a long session must not accumulate dead apps"
+        );
     }
 }

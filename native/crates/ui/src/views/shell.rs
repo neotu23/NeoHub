@@ -3762,6 +3762,17 @@ impl Render for ShellView {
                             )),
                     );
 
+                // Trend, not just the current number: a card that only shows an instant cannot
+                // tell "busy once" from "busy for a minute".
+                if !card.cpu_sparkline.is_empty() {
+                    card_view = card_view.child(
+                        div()
+                            .text_size(px(metrics::TEXT_SM))
+                            .text_color(palette.accent)
+                            .child(card.cpu_sparkline.clone()),
+                    );
+                }
+
                 if !card.ports.is_empty() {
                     let mut ports = div().flex().gap(px(metrics::GAP_1));
                     for port in &card.ports {

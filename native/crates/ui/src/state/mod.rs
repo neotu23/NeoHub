@@ -6,6 +6,7 @@ pub mod edit_session;
 pub mod env_editor;
 pub mod session;
 pub mod settings_form;
+pub mod sparkline;
 pub mod store;
 pub mod task_form;
 pub mod text_input;

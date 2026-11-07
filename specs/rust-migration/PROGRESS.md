@@ -1354,3 +1354,22 @@
 - 对照表现在是 **65 已验证 / 24 部分 / 0 未开始**（共 94 项），`DELIVERY.md` 同步更新
 - 未解决问题：键盘/鼠标的实际交互需人工确认（无法自动化按键）
 
+### U2 CPU sparkline（UI 细节第一批）
+- 状态：**完成**
+- 最近提交：`feat: draw a CPU sparkline on each dashboard card`
+- 实际修改文件：新增 `ui/src/state/sparkline.rs`；更新 `ui/src/state/{mod,store}.rs`、
+  `ui/src/views/shell.rs`（卡片渲染）
+- 为什么用块字符而不是画路径：不占 GPU 状态、任何字体都渲染正确、在卡片这个尺寸上最好读。
+  将来换真图表时，只需要删掉这一个模块。
+- 两条让图"不说谎"的规则：
+  1. **每张卡按自己的近期峰值缩放** —— 用绝对百分比会让安静的项目挨着繁忙项目时看起来是死的
+  2. **空闲画平线**（全零时画最低块），不画上升趋势；缺失采样不能被画成增长
+- 采样时机：**应用快照时**采样，不是渲染时 —— 卡片一次快照会重绘很多次，按渲染采样会让
+  曲线取决于重绘频率而非时间。应用被删除后历史一并清理，长会话不会无限增长
+- 验证：`cargo test -p neohub-ui --lib sparkline` → **8 passed**（窗口保留最新、空序列、
+  峰值/零块、平线、常量序列、宽度裁剪、NaN/负数/∞ 不污染刻度、容量 0 仍有 1 个）
+  `cargo test -p neohub-ui --lib sparkline_sampling` → **2 passed**（每快照一采样、删应用后清理）
+  `cargo test --workspace --locked` → **495 passed / 0 failed**；clippy 0；
+  重新打包（30 MB）并启动，日志无 error/panic
+- 未解决问题：卡片空态文案（没有应用时的提示）仍未做
+
