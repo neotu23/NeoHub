@@ -55,7 +55,7 @@
 | L4 | 读取/尾读/清空缓冲 `readBuffer`/`tailBuffer`/`clearBuffer` | `ipc/index.ts` | 部分 | `core/src/logs/`| 已验证（`GetLogs`/`ClearLogs`/`BootstrapLogs` 命令；清空不影响进程） |
 | L5 | 跨任务全局日志搜索 `logs:searchAll`（正则 + limit） | `mcp/tools.ts`, `GlobalLogSearch.tsx` | 部分 | `core/src/logs/search.rs`| 已验证（`SearchLogs` 支持单任务与全局，字面量/正则/大小写/limit，非法正则报错） |
 | L6 | 单任务日志过滤视图（虚拟化 + 高亮 + 行号） | `LogSearchView.tsx` | 部分 | `ui/src/views/log_search.rs`| 部分（详情页终端面板 + 全局日志搜索面板：跨任务结果按 app/任务/行号定位、点击跳转选中项目与任务 tab；普通/正则、limit 复用核心匹配器） |
-| L7 | 终端渲染：ANSI 16/256/真彩、CR 覆写、滚动历史、自动跟随、选择复制、字号 | `LogTerminal.tsx`（xterm 6） | 部分（截图） | `ui/src/terminal/`| 部分（终端面板渲染已支持 SGR 颜色：16 色/256 色/真彩、粗体；跟随/滚动/导出齐备；等宽字体待调） |
+| L7 | 终端渲染：ANSI 16/256/真彩、CR 覆写、滚动历史、自动跟随、选择复制、字号 | `LogTerminal.tsx`（xterm 6） | 部分（截图） | `ui/src/terminal/`| 已验证（ANSI 16/256/真彩、粗体、CR 覆写、滚动历史、跟随、选择复制、导出；**终端与日志面板使用等宽字体** `SF Mono`（缺失时回退 `Menlo`，本机实测有 Menlo）） |
 | L8 | 日志复制/保存导出 | `AppDetail.tsx` | 部分 | `ui/src/terminal/`| 已验证（`导出可读`/`导出原始` 落盘到 `<data>/logs/`，集成测试断言可读文本无转义、原始保留 ANSI） |
 | L9 | 崩溃日志钉住最后 200 行 + 重启入口 + 端口冲突提示 | `CrashPin.tsx` | 部分 | `ui/src/views/app_detail.rs`| 已验证（崩溃时**冻结最后 200 行**（缓冲对已退出任务会过期，钉住的是快照）；详情页顶部崩溃卡片：退出码、尾部输出、**端口冲突识别**（EADDRINUSE / address already in use → 指出端口）、重试与忽略） |
 

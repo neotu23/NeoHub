@@ -1655,3 +1655,19 @@
   启动日志无 error/panic
 - 未解决问题：按键实际效果需人工确认
 
+### L7 等宽字体
+- 状态：**完成**
+- 最近提交：`feat: use a monospace face for the terminal panes`
+- 实际修改文件：`ui/src/theme.rs`（`MONO_FAMILY` / `MONO_FAMILY_FALLBACK` + 测试）、
+  `ui/src/views/shell.rs`（终端与日志面板 `font_family`）
+- 为什么值得单独做：**终端网格在比例字体里是没有意义的** —— ANSI 列与光标定位只有在每个字形
+  等宽时才对得上。之前终端用的是界面默认字体，输出对齐是碰运气
+- 选择：`SF Mono`（随 macOS 提供），回退 `Menlo`（10.6 起就有）。本机实测只有 `Menlo.ttc`，
+  所以实际走回退路径 —— 这也说明回退不是装饰
+- 验证：`cargo test -p neohub-ui --lib font_tests` → **2 passed**
+  （等宽族已声明、回退族与主族不同、回退是 Menlo）
+  `cargo test --workspace --locked` → **550 passed / 0 failed**；clippy 0；打包自检通过；
+  启动日志无 error/panic
+- 未解决问题：字体渲染的观感需人工确认；若用户系统两者都没有，会退回系统默认（比例字体），
+  此时列对齐仍会偏 —— GPUI 侧暂无字体回退链的显式 API
+

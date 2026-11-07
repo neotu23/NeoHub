@@ -4586,12 +4586,19 @@ impl Render for ShellView {
                             .rounded(px(metrics::RADIUS_MD))
                             .bg(palette.bg_surface)
                             .text_size(px(metrics::TEXT_XS))
-                            .text_color(palette.fg_muted);
+                            .text_color(palette.fg_muted)
+                            .font_family(metrics::MONO_FAMILY);
                         if rows.is_empty() {
                             pane = pane.child("（还没有日志输出）".to_string());
                         }
                         for row in rows {
-                            let mut line = div().flex().flex_row().gap(px(0.0));
+                            // Terminal output must be monospaced: ANSI columns and cursor
+                            // positioning only line up when every glyph has the same advance.
+                            let mut line = div()
+                                .flex()
+                                .flex_row()
+                                .gap(px(0.0))
+                                .font_family(metrics::MONO_FAMILY);
                             if row.spans.is_empty() {
                                 line = line.child(row.text);
                             } else {

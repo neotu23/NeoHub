@@ -170,6 +170,14 @@ pub mod metrics {
     pub const TEXT_XS: f32 = 11.0;
     /// `text-xs`.
     pub const TEXT_SM: f32 = 12.0;
+
+    /// Monospace family for the terminal and log panes.
+    ///
+    /// SF Mono ships with macOS; Menlo is the fallback that has shipped forever, so a machine
+    /// without the newer face still gets a proper fixed-width grid instead of a proportional
+    /// font that would make ANSI columns meaningless.
+    pub const MONO_FAMILY: &str = "SF Mono";
+    pub const MONO_FAMILY_FALLBACK: &str = "Menlo";
     /// `text-sm`.
     pub const TEXT_BASE: f32 = 14.0;
     /// `text-lg`.
@@ -220,5 +228,28 @@ mod tests {
         assert_eq!(ThemeMode::System.palette(false), LIGHT);
         assert_eq!(ThemeMode::Dark.palette(false), DARK);
         assert_eq!(ThemeMode::Light.palette(true), LIGHT);
+    }
+}
+
+#[cfg(test)]
+mod font_tests {
+    use super::*;
+
+    #[test]
+    fn a_monospace_family_is_declared() {
+        // The terminal grid is meaningless in a proportional font: columns need equal advance.
+        assert!(!metrics::MONO_FAMILY.is_empty());
+        assert!(!metrics::MONO_FAMILY_FALLBACK.is_empty());
+        assert_ne!(
+            metrics::MONO_FAMILY,
+            metrics::MONO_FAMILY_FALLBACK,
+            "the fallback has to be a different face, otherwise it is not a fallback"
+        );
+    }
+
+    #[test]
+    fn the_fallback_is_a_font_that_ships_with_macos() {
+        // Menlo has shipped since 10.6; anything newer would leave old machines without a grid.
+        assert_eq!(metrics::MONO_FAMILY_FALLBACK, "Menlo");
     }
 }
