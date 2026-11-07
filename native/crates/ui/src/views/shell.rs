@@ -3710,7 +3710,15 @@ impl Render for ShellView {
                             .exit_code
                             .map(|code| format!("退出码 {code}"))
                             .unwrap_or_else(|| "运行中/无退出码".to_string());
-                        rows = rows.child(
+                        let rerun = row.task_id.clone();
+                        let rerun_bridge = self.bridge.clone();
+                        let rerun_entity = cx.entity().downgrade();
+                        let mut line = div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(px(metrics::GAP_2));
+                        line = line.child(
                             div()
                                 .text_size(px(metrics::TEXT_XS))
                                 .text_color(if row.was_killed_by_user {
@@ -3732,6 +3740,50 @@ impl Render for ShellView {
                                     row.ended_at.map(|_| "").unwrap_or(" · 未结束")
                                 )),
                         );
+                        // Rerun uses the recorded task id: the run happened with this task's
+                        // configuration, so replaying it through the same task is the honest
+                        // thing. A deleted task is reported, not silently recreated.
+                        line = line.child(
+                            div()
+                                .id(format!("rerun-{}", row.id))
+                                .px(px(metrics::PAD_2))
+                                .rounded(px(metrics::RADIUS_MD))
+                                .bg(palette.bg_elevated)
+                                .text_size(px(metrics::TEXT_XS))
+                                .text_color(palette.fg_muted)
+                                .cursor_pointer()
+                                .child("重跑")
+                                .on_click(move |_, _, cx| {
+                                    let bridge = rerun_bridge.clone();
+                                    let task_id = rerun.clone();
+                                    let _ = rerun_entity.update(cx, |_this, cx| {
+                                        match task_id {
+                                            Some(task_id) => {
+                                                bridge.send(CoreCommand::StartTask {
+                                                    task_id: task_id.clone(),
+                                                });
+                                                if let Ok(mut store) = bridge.store.lock() {
+                                                    store.notify(
+                                                        crate::state::toast::ToastKind::Info,
+                                                        format!("已重新启动 {}", task_id.as_str()),
+                                                    );
+                                                }
+                                            }
+                                            None => {
+                                                if let Ok(mut store) = bridge.store.lock() {
+                                                    store.notify(
+                                                        crate::state::toast::ToastKind::Error,
+                                                        "这条历史没有关联任务，无法重跑"
+                                                            .to_string(),
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        cx.notify();
+                                    });
+                                }),
+                        );
+                        rows = rows.child(line);
                     }
                     main = main.child(rows);
                 }

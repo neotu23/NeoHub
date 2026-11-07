@@ -1412,3 +1412,15 @@
 - 未解决问题：`ErrorBoundary`（渲染期 panic 的兜底 UI）未做；其余错误（保存任务、环境变量）
   目前仍是行内提示，未全部改走 toast
 
+### U10 运行历史重跑
+- 状态：**完成**
+- 最近提交：`feat: rerun a task from its history row`
+- 实际修改文件：`ui/src/views/shell.rs`（历史行加重跑按钮）
+- 语义决定：重跑**用历史记录里的任务 id 重新启动同一个任务**，不是拿历史里的脚本另建一个。
+  那条历史确实是这个任务按当前配置跑出来的；如果任务已被删除，就用错误 toast 说明"没有关联任务，
+  无法重跑"，**不擅自重建**一个用户没要求的任务
+- 反馈：点击后立即给一条 info toast（"已重新启动 …"），失败路径给 error toast
+- 验证：`cargo test --workspace --locked` → **505 passed / 0 failed**；clippy 0；
+  重新打包（30 MB）并启动，日志无 error/panic
+- 未解决问题：重跑按钮的实际点击需人工确认；历史列表仍只取最近 5 条，没有独立子视图
+

@@ -169,7 +169,7 @@
 | U7 | 应用配置抽屉（名称/颜色/文件夹/标签/自动重启/watch globs/autoStart/Node/PM） | `AppConfigDrawer.tsx`, `TagInput.tsx`, `FolderSelect.tsx` | 部分 | `ui/src/views/app_config.rs`| 已验证（面板：9 个字段 + 两个开关；**行内文本输入**（点击字段聚焦、Tab 切换并带值、Esc 关闭），保存走 `UpdateApp`，字段级错误就地显示，成功用服务端返回值重建基线） |
 | U8 | 环境变量编辑器（见 E7） | `EnvEditor.tsx` | 部分 | `ui/src/views/env_editor.rs`| 部分（同 E7，编辑器的值编辑仍受限） |
 | U9 | 设置抽屉（17 项设置 + 危险区 db 导出/重置 + MCP 状态/Token） | `SettingsDrawer.tsx` | 部分（截图） | `ui/src/views/settings.rs`| 已验证（17 项设置、保存回收；**诊断与危险区**：打开日志目录、导出数据库、重置数据库（两次确认）、检查更新 + 下载页） |
-| U10 | 运行历史子视图（含 Rerun） | `AppDetail.tsx` History | 部分 | `ui/src/views/run_history.rs`| 部分（运行历史列表已渲染在详情页；Rerun 按钮与独立子视图待做） |
+| U10 | 运行历史子视图（含 Rerun） | `AppDetail.tsx` History | 部分 | `ui/src/views/run_history.rs`| 已验证（详情页最近运行列表（任务/退出码/自行退出或用户停止）+ **重跑按钮**：用历史记录的任务 id 重新启动，任务已删除时以错误 toast 说明而不擅自重建） |
 | U11 | 命令面板 ⌘K（Apps/Start/Stop/Restart/Actions 分组） | `CommandPalette.tsx`（cmdk） | 部分 | `ui/src/components/`| 已验证（⌘K 打开；模型分组（应用打开/启动/停止/重启按状态过滤 + 设置/导入/搜索）、子序列匹配、方向键环绕、Enter 执行、Esc 关闭；每行带动作快捷键提示，点击也可执行） |
 | U12 | 全局日志搜索 ⌘⇧F | `GlobalLogSearch.tsx` | 部分 | `ui/src/views/log_search.rs`| 已验证（全局日志搜索面板 + **⌘⇧F 快捷键绑定**，结果可跳转到项目/任务） |
 | U13 | 通用组件：Toast、ErrorBanner、ErrorBoundary、ContextMenu、PromptModal、StatusDot、PortChip、NodeVersionPicker、OpenInMenu、EmptyState、CrashPin、UpdateBanner | 对应 `components/*.tsx` | 部分（截图） | `ui/src/components/`| 部分（统一 `Toasts` 队列：错误**不自动过期**、确认类 4 秒过期、满队列优先淘汰确认类、点击关闭、数据库结果显示为 toast；ErrorBoundary 仍未做） |
