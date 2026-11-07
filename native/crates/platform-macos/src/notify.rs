@@ -102,6 +102,21 @@ pub fn for_task_exit(
     None
 }
 
+/// Notification for a task that just became ready, or `None` when the user does not want it.
+///
+/// Ready notifications are only interesting when the window is *not* in front of the user — that
+/// is the whole point of starting a stack from the menu bar. The caller decides that part; this
+/// function only enforces the setting.
+pub fn for_task_ready(app: &str, task: &str, enabled: bool) -> Option<Notification> {
+    if !enabled {
+        return None;
+    }
+    Some(Notification::new(
+        format!("{app} 已就绪"),
+        format!("{task} 已完成启动"),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,6 +175,17 @@ mod tests {
             for_task_exit("web", "dev", false, true, false).is_none(),
             "it was not running, so nothing changed"
         );
+    }
+
+    #[test]
+    fn a_ready_notification_honours_the_setting() {
+        assert!(
+            for_task_ready("web", "dev", false).is_none(),
+            "the setting is off by default and must be respected"
+        );
+        let notification = for_task_ready("web", "dev", true).expect("notify");
+        assert!(notification.title.contains("web"));
+        assert!(notification.body.contains("dev"));
     }
 
     #[test]

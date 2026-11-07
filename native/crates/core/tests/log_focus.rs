@@ -166,3 +166,45 @@ async fn no_focus_means_push_everything() {
     assert!(seen_beta, "with no focus, every task pushes");
     let _ = handle.request(CoreCommand::Shutdown).await;
 }
+
+#[tokio::test]
+async fn readiness_is_announced_once_per_run() {
+    // The ready event exists so the window can notify; it must fire on the transition and not on
+    // every probe that keeps succeeding.
+    use neohub_core::events::CoreEventKind;
+
+    let dir = tempfile::tempdir().unwrap();
+    let (service, alpha, _beta) = service_with_two_tasks(dir.path()).await;
+    let handle = service.handle();
+    let mut subscription = handle.subscribe();
+
+    // Flip the flag directly: the probe loop is exercised elsewhere, and what this test is about
+    // is the event.
+    service.set_ready_for_test(
+        &neohub_domain::TaskId::from_existing(alpha.clone()),
+        "port",
+        true,
+    );
+    service.set_ready_for_test(
+        &neohub_domain::TaskId::from_existing(alpha.clone()),
+        "port",
+        true,
+    );
+
+    let mut ready_events = 0;
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < deadline {
+        let Ok(Some(event)) =
+            tokio::time::timeout(Duration::from_millis(200), subscription.recv()).await
+        else {
+            break;
+        };
+        if matches!(event.kind, CoreEventKind::TaskReady { .. }) {
+            ready_events += 1;
+        }
+    }
+    assert_eq!(
+        ready_events, 1,
+        "one event on the transition, none for the repeat"
+    );
+}

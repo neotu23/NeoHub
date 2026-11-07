@@ -1552,3 +1552,19 @@
   启动日志无 error/panic
 - 未解决问题：崩溃卡片的实际渲染需人工确认（无法自动化视觉）
 
+### S8 就绪通知
+- 状态：**完成**（崩溃 + 就绪两类通知）
+- 最近提交：`feat: notify when a task becomes ready`
+- 实际修改文件：`core/src/events.rs`（新事件）、`core/src/service.rs`（`set_ready` 发事件、
+  `app_of_task`、测试钩子）、`platform-macos/src/notify.rs`（`for_task_ready`）、
+  `ui/src/state/store.rs`（处理事件）、`ui/src/views/shell.rs`（按开关发送）
+- 关键设计：**只在 ready 首次变 true 时发事件**。探测是周期性运行的，若每次成功都发事件，
+  事件流和通知中心都会被刷屏 —— 测试直接断言"同一次运行只发一次"
+- 就绪通知默认**关闭**（`notify_on_ready` 默认 false，与旧版一致）：它只在窗口不在前台时才有意义，
+  而大多数时候用户正看着那个任务
+- 验证：`cargo test -p neohub-platform-macos --lib notify` → **7 passed**（含设置关闭时不通知）
+  `cargo test -p neohub-core --test log_focus readiness` → **1 passed**（一次运行只发一次事件）
+  `cargo test --workspace --locked` → **534 passed / 0 failed**；clippy 0；打包自检通过；
+  启动日志无 error/panic
+- 未解决问题：通知实际弹出需人工确认（自动化不能看横幅）
+

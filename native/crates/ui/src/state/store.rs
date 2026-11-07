@@ -474,6 +474,12 @@ impl UiStore {
                 snapshot.revision = event.revision;
                 true
             }
+            CoreEventKind::TaskReady { task_id, .. } => {
+                // Readiness is a verdict per task; the pane reads it from the snapshot.
+                snapshot.task_ready.insert(task_id, true);
+                snapshot.revision = event.revision;
+                true
+            }
             CoreEventKind::TaskPorts {
                 task_id,
                 confirmed,

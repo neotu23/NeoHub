@@ -699,6 +699,19 @@ impl HostBridge {
                                 }
                             }
                         }
+                        if let neohub_core::events::CoreEventKind::TaskReady { task_id, .. } =
+                            &event.kind
+                        {
+                            let enabled = store.settings().notify_on_ready;
+                            let (app_name, task_name) = store.labels_for(task_id);
+                            if let Some(notification) =
+                                neohub_platform_macos::notify::for_task_ready(
+                                    &app_name, &task_name, enabled,
+                                )
+                            {
+                                notices.push(notification);
+                            }
+                        }
                         changed |= store.apply_event(event);
                         need_snapshot |= resync;
                     }

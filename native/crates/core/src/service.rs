@@ -936,10 +936,53 @@ impl CoreService {
     }
 
     fn set_ready(&self, task_id: &TaskId, kind: &str, verified: bool) {
-        self.ready_flags
+        let previous = self
+            .ready_flags
             .lock()
             .expect("ready flags")
             .insert(task_id.clone(), (kind.to_string(), verified));
+        // Emit only on the change to `true`: a probe that keeps reporting ready must not spam
+        // the event stream (or the user's notification centre).
+        let already_ready = previous.map(|(_, was)| was).unwrap_or(false);
+        if verified
+            && !already_ready
+            && let Some(app_id) = self.app_of_task(task_id)
+        {
+            let revision = self.bump_revision();
+            let _ = self.events.send(CoreEvent {
+                revision,
+                kind: CoreEventKind::TaskReady {
+                    task_id: task_id.clone(),
+                    app_id,
+                },
+            });
+        }
+    }
+
+    /// Test hook: record a readiness verdict as if a probe had produced it.
+    #[doc(hidden)]
+    pub fn set_ready_for_test(&self, task_id: &TaskId, kind: &str, verified: bool) {
+        self.set_ready(task_id, kind, verified);
+    }
+
+    /// Which app owns a task.
+    fn app_of_task(&self, task_id: &TaskId) -> Option<AppId> {
+        self.with_storage(|storage| {
+            Ok(storage
+                .catalog()
+                .list_apps()?
+                .into_iter()
+                .find(|app| {
+                    storage
+                        .catalog()
+                        .list_tasks(&app.id)
+                        .map(|tasks| tasks.iter().any(|task| &task.id == task_id))
+                        .unwrap_or(false)
+                })
+                .map(|app| app.id))
+        })
+        .ok()
+        .flatten()
     }
 
     /// Sticky app state (used by the snapshot when no task is live).

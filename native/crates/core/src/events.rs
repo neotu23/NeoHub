@@ -21,6 +21,8 @@ pub enum CoreEventKind {
         seq: u64,
         bytes: Vec<u8>,
     },
+    /// A task's readiness probe reported ready for the first time in this run.
+    TaskReady { task_id: TaskId, app_id: AppId },
     /// CPU/memory sample for one running task.
     TaskStats {
         task_id: TaskId,
