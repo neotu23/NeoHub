@@ -6,6 +6,7 @@
 
 use crate::state::session::{AppSort, GroupBy, Session};
 use crate::state::sparkline::Sparkline;
+use crate::state::toast::{ToastKind, Toasts};
 use neohub_core::environment::ImportCandidate;
 use neohub_core::events::{CoreEvent, CoreEventKind};
 use neohub_core::snapshot::CoreSnapshot;
@@ -98,6 +99,8 @@ pub struct UiStore {
     /// Sections the user collapsed, by title. Kept in memory only: a collapsed folder is a
     /// passing convenience, not a preference worth writing to `session.json`.
     collapsed_sections: std::collections::BTreeSet<String>,
+    /// Transient messages shown over the window.
+    toasts: Toasts,
     session: Session,
     /// Tail of each task's raw output for the detail pane.
     logs: BTreeMap<TaskId, Vec<u8>>,
@@ -131,6 +134,7 @@ impl UiStore {
             snapshot: None,
             cpu_history: std::collections::BTreeMap::new(),
             collapsed_sections: std::collections::BTreeSet::new(),
+            toasts: Toasts::default(),
             session,
             logs: BTreeMap::new(),
             filter: String::new(),
@@ -510,6 +514,25 @@ impl UiStore {
 
     pub fn is_section_collapsed(&self, title: &str) -> bool {
         self.collapsed_sections.contains(title)
+    }
+
+    /// Show a transient message.
+    pub fn notify(&mut self, kind: ToastKind, message: impl Into<String>) {
+        self.toasts.push(kind, message);
+    }
+
+    /// Messages currently on screen.
+    pub fn toasts(&self) -> Vec<crate::state::toast::Toast> {
+        self.toasts.messages().into_iter().cloned().collect()
+    }
+
+    /// Drop messages whose time is up.
+    pub fn expire_toasts(&mut self, now: std::time::Instant) -> usize {
+        self.toasts.expire(now)
+    }
+
+    pub fn dismiss_toast(&mut self, id: u64) -> bool {
+        self.toasts.dismiss(id)
     }
 
     /// Nothing to show at all (no apps registered).

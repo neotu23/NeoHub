@@ -10,6 +10,7 @@ pub mod sparkline;
 pub mod store;
 pub mod task_form;
 pub mod text_input;
+pub mod toast;
 
 pub use edit_session::{CloseOutcome, Draft, ExternalOutcome, Revision, SaveBarrier, SaveRequest};
 pub use env_editor::{EffectiveVar, EnvEditor, EnvRow, RowValue, ScopeTab, effective, scope_for};

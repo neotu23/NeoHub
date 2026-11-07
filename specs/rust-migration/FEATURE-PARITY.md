@@ -172,7 +172,7 @@
 | U10 | 运行历史子视图（含 Rerun） | `AppDetail.tsx` History | 部分 | `ui/src/views/run_history.rs`| 部分（运行历史列表已渲染在详情页；Rerun 按钮与独立子视图待做） |
 | U11 | 命令面板 ⌘K（Apps/Start/Stop/Restart/Actions 分组） | `CommandPalette.tsx`（cmdk） | 部分 | `ui/src/components/`| 已验证（⌘K 打开；模型分组（应用打开/启动/停止/重启按状态过滤 + 设置/导入/搜索）、子序列匹配、方向键环绕、Enter 执行、Esc 关闭；每行带动作快捷键提示，点击也可执行） |
 | U12 | 全局日志搜索 ⌘⇧F | `GlobalLogSearch.tsx` | 部分 | `ui/src/views/log_search.rs`| 已验证（全局日志搜索面板 + **⌘⇧F 快捷键绑定**，结果可跳转到项目/任务） |
-| U13 | 通用组件：Toast、ErrorBanner、ErrorBoundary、ContextMenu、PromptModal、StatusDot、PortChip、NodeVersionPicker、OpenInMenu、EmptyState、CrashPin、UpdateBanner | 对应 `components/*.tsx` | 部分（截图） | `ui/src/components/`| 部分（保存失败与错误以行内提示呈现；统一 Toast/ErrorBanner 组件与 ErrorBoundary 待做） |
+| U13 | 通用组件：Toast、ErrorBanner、ErrorBoundary、ContextMenu、PromptModal、StatusDot、PortChip、NodeVersionPicker、OpenInMenu、EmptyState、CrashPin、UpdateBanner | 对应 `components/*.tsx` | 部分（截图） | `ui/src/components/`| 部分（统一 `Toasts` 队列：错误**不自动过期**、确认类 4 秒过期、满队列优先淘汰确认类、点击关闭、数据库结果显示为 toast；ErrorBoundary 仍未做） |
 | U14 | 主题系统（Radix slate 语义变量、light/dark/system、终端浅色主题） | `styles.css`, `useTheme.ts`, `tailwind.config.ts` | 部分（截图 light/dark） | `ui/src/theme.rs`| 已验证（两套调色板 + 间距/圆角/字号常量接入视图，主题跟随设置） |
 | U15 | 国际化 en / zh-CN + `system` 跟随系统（19 组文案命名空间） | `i18n/locales/*`, `useLanguage.ts` | 已验证（`i18n` 4 个测试文件 17 例） | `ui/locales/`| 已验证（中英双语包内嵌，缺 key 回退英文再回退 key；`system` 按 LANG 解析；两语言 key 对齐有测试） |
 | U16 | 无障碍：焦点陷阱 `useDialog`、Esc、键盘可导航菜单、`aria-label`、非颜色状态线索 | `hooks/useDialog.ts` | 部分 | `ui/src/components/`| 部分（Tab/Shift-Tab 焦点与 Esc 清空已接到筛选框；抽屉内焦点陷阱待做） |

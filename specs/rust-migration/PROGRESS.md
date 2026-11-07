@@ -1390,3 +1390,25 @@
   重新打包（30 MB）并启动，日志无 error/panic
 - 未解决问题：⋮ 菜单与拖拽分组（U1 剩余部分）
 
+### U13 Toast 队列（UI 细节第三批）
+- 状态：**部分完成**（统一队列与浮层完成；ErrorBoundary 未做）
+- 最近提交：`feat: show transient messages as toasts`
+- 实际修改文件：新增 `ui/src/state/toast.rs`；更新 `ui/src/state/{mod,store}.rs`、
+  `ui/src/views/shell.rs`（浮层渲染、点击关闭、每帧过期、数据库结果接入）
+- 决定这个模块形状的规则：**错误不过期**。自动消失的错误等于用户没读到，而会报错的恰恰是
+  "保存失败""重置数据库失败"这类必须知道的事。信息/成功类 4 秒后过期，因为它们只是确认
+  刚刚看得见地发生过的事
+- 其它要点：
+  1. 队列满时**优先淘汰会过期的**消息 —— 一串"已导出"不能把一条错误顶出去
+  2. 若屏幕上全是错误且队列满，仍淘汰最旧的一条，否则新消息永远看不见
+  3. 错误用 `danger_bg` 着色，点击任意 toast 关闭
+  4. 数据库操作结果（导出/重置/失败）现在既留在设置面板，也作为 toast 出现 —— 因为操作完成时
+     面板可能已经关了
+- 验证：`cargo test -p neohub-ui --lib toast` → **7 passed**
+  （顺序与类型、错误不过期、确认类爆发不挤掉错误、全错误时淘汰最旧、按 id 关闭、id 唯一、
+  容量 0 仍保留一条）
+  `cargo test --workspace --locked` → **505 passed / 0 failed**；clippy 0；
+  重新打包（30 MB）并启动，日志无 error/panic
+- 未解决问题：`ErrorBoundary`（渲染期 panic 的兜底 UI）未做；其余错误（保存任务、环境变量）
+  目前仍是行内提示，未全部改走 toast
+

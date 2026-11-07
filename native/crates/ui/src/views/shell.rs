@@ -713,10 +713,20 @@ impl HostBridge {
         {
             *guard = Some(update);
         }
-        if let Some(notice) = db_notice_out
-            && let Ok(mut guard) = self.last_db_notice.lock()
-        {
-            *guard = Some(notice);
+        if let Some(notice) = db_notice_out {
+            // Database results also surface as a toast: the panel may be closed by the time the
+            // operation finishes. Errors stay until dismissed.
+            let kind = if notice.contains("失败") {
+                crate::state::toast::ToastKind::Error
+            } else {
+                crate::state::toast::ToastKind::Success
+            };
+            if let Ok(mut store) = self.store.lock() {
+                store.notify(kind, notice.clone());
+            }
+            if let Ok(mut guard) = self.last_db_notice.lock() {
+                *guard = Some(notice);
+            }
         }
         if (app_saved_out.is_some() || app_save_error_out.is_some())
             && let Ok(mut guard) = self.last_app_save.lock()
@@ -1209,6 +1219,11 @@ impl Render for ShellView {
         } else {
             div().id("empty-state-placeholder").w(px(0.0)).h(px(0.0))
         };
+
+        // Expiry runs on the same tick as everything else; errors are exempt (see toast.rs).
+        if let Ok(mut store) = self.bridge.store.lock() {
+            store.expire_toasts(std::time::Instant::now());
+        }
 
         let query = self.search.text().to_string();
         let (sections, cards, totals, tags, filter) = {
@@ -3896,6 +3911,43 @@ impl Render for ShellView {
             main = main.child(grid);
         }
 
+        let toasts = self.bridge.store.lock().expect("store lock").toasts();
+        let mut toast_layer = div().flex().flex_col().gap(px(metrics::GAP_1));
+        for toast in toasts {
+            let entity = cx.entity().downgrade();
+            let id = toast.id;
+            let color = match toast.kind {
+                crate::state::toast::ToastKind::Error => palette.danger_fg,
+                crate::state::toast::ToastKind::Success => palette.accent,
+                crate::state::toast::ToastKind::Info => palette.fg_muted,
+            };
+            toast_layer = toast_layer.child(
+                div()
+                    .id(format!("toast-{id}"))
+                    .px(px(metrics::PAD_3))
+                    .py(px(metrics::GAP_1))
+                    .rounded(px(metrics::RADIUS_MD))
+                    // Errors speak louder: they are the ones that need a decision.
+                    .bg(if toast.kind == crate::state::toast::ToastKind::Error {
+                        palette.danger_bg
+                    } else {
+                        palette.bg_elevated
+                    })
+                    .text_size(px(metrics::TEXT_SM))
+                    .text_color(color)
+                    .cursor_pointer()
+                    .child(format!("[{}] {}", toast.kind.as_str(), toast.message))
+                    .on_click(move |_, _, cx| {
+                        let _ = entity.update(cx, |this, cx| {
+                            if let Ok(mut store) = this.bridge.store.lock() {
+                                store.dismiss_toast(id);
+                            }
+                            cx.notify();
+                        });
+                    }),
+            );
+        }
+
         div()
             .flex()
             .size_full()
@@ -3903,6 +3955,7 @@ impl Render for ShellView {
             .child(sidebar)
             .child(main)
             .child(empty_state_notice)
+            .child(toast_layer)
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
                 this.on_shortcut(Shortcut::Settings, window, cx);
             }))
