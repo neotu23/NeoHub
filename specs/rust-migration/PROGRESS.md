@@ -1704,3 +1704,25 @@
 - 依据你的三个决定保持：**不合入 main**、**真实数据由你按 MIGRATION.md 迁移**、
   **⌘K 优先**（已完成）
 
+### U13 渲染守卫（ErrorBoundary 的可行形态）
+- 状态：**完成**（按"先验证再动手"的方式落地，而不是照抄 WebView 的 ErrorBoundary）
+- 最近提交：`feat: keep one bad render from taking the window down`
+- **先做的判断**：WebView 里的 ErrorBoundary 是在组件树里捕获异常渲染；GPUI 里做到等价物需要
+  包住框架自己的绘制帧，那不是我们能安全 unwind 的地方。所以只包**喂给视图的计算**
+  ——这部分是我们的代码、返回普通数据，`catch_unwind` 在这里是可靠的
+- 实现：`ui/src/state/render_guard.rs` 的 `guard(what, f) -> Option<T>`：捕获 panic、
+  写入 `~/Library/Logs/NeoHub/neohub.log`（`[ui] render guard caught a panic in …`）、
+  返回 `None` 让该区域渲染为空
+- 已套用的两处（最容易因外部数据出问题）：
+  1. 仪表盘卡片（`dashboard_cards`）
+  2. 终端行（`visible`，来自转义序列状态）
+- **明确不做的**：不包裹 GPUI 的绘制帧 —— 那里 unwind 不是我们该管的，硬包可能把框架状态留在
+  半更新状态，比崩溃更难查。这条写进了模块文档
+- 验证：`cargo test -p neohub-ui --lib render_guard` → **4 passed**
+  （正常计算透传、panic 变成 None 且调用方存活、`&str` 与 `String` 两种 payload 都能读、
+  一次被捕获的 panic 不影响下一次调用）
+  `cargo test --workspace --locked` → **557 passed / 0 failed**；clippy 0；打包自检通过；
+  启动日志无 error/panic
+- 未解决问题：真正的 GPUI 绘制期 panic 仍会结束进程（这是有意的选择）；渲染守卫的日志路径
+  需在真出问题时才会被验证
+

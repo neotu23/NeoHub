@@ -1590,9 +1590,14 @@ impl Render for ShellView {
             if store.filter() != query {
                 store.set_filter(query.clone());
             }
+            // The cards are computed from the snapshot; a shape the code did not expect must
+            // blank the grid, not close the window.
+            let cards =
+                crate::state::render_guard::guard("dashboard cards", || store.dashboard_cards())
+                    .unwrap_or_default();
             (
                 store.sidebar_sections(),
-                store.dashboard_cards(),
+                cards,
                 store.totals(),
                 store.all_tags(),
                 store.filter().to_string(),
@@ -4573,11 +4578,15 @@ impl Render for ShellView {
 
                         let height = self.terminal_height;
                         let follow = self.terminal_follow;
-                        let rows = self
-                            .terminal
-                            .as_ref()
-                            .map(|view| view.visible(height, follow))
-                            .unwrap_or_default();
+                        // Terminal rows are derived from escape-sequence state; one odd dump must
+                        // not take the window with it.
+                        let rows = crate::state::render_guard::guard("terminal rows", || {
+                            self.terminal
+                                .as_ref()
+                                .map(|view| view.visible(height, follow))
+                                .unwrap_or_default()
+                        })
+                        .unwrap_or_default();
                         let mut pane = div()
                             .flex()
                             .flex_col()
